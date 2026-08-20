@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Library Spine Finder</title>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+
+  <main class="app-container">
+    <!-- Left Column: Image Upload & Canvas -->
+    <section class="workspace">
+      <header class="workspace-header">
+        <h1>Library Finder</h1>
+        <label for="imageUpload" class="upload-btn">
+          Upload Shelf Photo
+        </label>
+        <input type="file" id="imageUpload" accept="image/*" hidden>
+      </header>
+      
+      <div class="canvas-container">
+        <!-- The canvas where we will draw the image and bounding boxes -->
+        <canvas id="shelfCanvas"></canvas>
+        <p id="placeholderText">No image uploaded yet. Upload a photo of your bookshelf to begin.</p>
+      </div>
+    </section>
+
+    <!-- Right Column: Library List -->
+    <aside class="sidebar">
+      <h2>My Library</h2>
+      
+      <!-- NEW: Search Box -->
+      <input type="text" id="searchInput" class="search-input" placeholder="Search titles or authors...">
+      
+      <!-- NEW: Pending Swipes Area -->
+      <div id="pendingContainer"></div>
+
+      <!-- EXISTING: The Permanent Database -->
+      <ul id="libraryList" class="library-list">
+        <li class="empty-state">Your cataloged books will appear here.</li>
+      </ul>
+    </aside>
+  </main>
+
+  <script src="./js/api.js"></script>
+  <script src="./js/app.js"></script>
+</body>
+</html>
