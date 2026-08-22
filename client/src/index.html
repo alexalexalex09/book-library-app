@@ -5,21 +5,31 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Library Spine Finder</title>
   <link rel="stylesheet" href="./css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
   <main class="app-container">
     <!-- Left Column: Image Upload & Canvas -->
     <section class="workspace">
-      <header class="workspace-header">
-        <h1>Library Finder</h1>
-        <label for="imageUpload" class="upload-btn">
-          Upload Shelf Photo
-        </label>
-        <input type="file" id="imageUpload" accept="image/*" hidden>
+      <header class="workspace-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 15px;">
+        <h1 style="margin: 0;">Library Finder</h1>
+
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <label for="shelfSelect" style="font-weight: bold; font-size: 0.9rem; white-space: nowrap;">Current Shelf:</label>
+          <select id="shelfSelect" style="padding: 6px 10px; border-radius: 6px; border: 1px solid #d4d4d8;">
+            <option value="">-- Select a Saved Shelf --</option>
+          </select>
+
+          <label for="imageUpload" class="upload-btn">
+            Upload Shelf Photo
+          </label>
+          <input type="file" id="imageUpload" accept="image/*" hidden>
+        </div>
       </header>
       
       <div class="canvas-container">
+       
         <!-- The canvas where we will draw the image and bounding boxes -->
         <canvas id="shelfCanvas"></canvas>
         <p id="placeholderText">No image uploaded yet. Upload a photo of your bookshelf to begin.</p>
@@ -28,6 +38,22 @@
 
     <!-- Right Column: Library List -->
     <aside class="sidebar">
+      <div id="authContainer" style="margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #e4e4e7;">
+        <div id="loggedOutView">
+          <h3 style="font-size: 1rem; margin-bottom: 10px;">Account</h3>
+          <input type="email" id="emailInput" class="search-input" placeholder="Email" style="margin-bottom: 5px;">
+          <input type="password" id="passwordInput" class="search-input" placeholder="Password" style="margin-bottom: 10px;">
+          <div style="display: flex; gap: 10px;">
+            <button id="loginBtn" style="flex: 1; padding: 8px; cursor: pointer;">Log In</button>
+            <button id="signupBtn" style="flex: 1; padding: 8px; cursor: pointer;">Sign Up</button>
+          </div>
+        </div>
+
+        <div id="loggedInView" style="display: none;">
+          <p style="font-size: 0.9rem; margin-bottom: 10px;">Logged in as: <br><strong id="userEmailDisplay"></strong></p>
+          <button id="logoutBtn" style="padding: 6px 12px; cursor: pointer;">Log Out</button>
+        </div>
+      </div>
       <h2>My Library</h2>
       
       <!-- NEW: Search Box -->

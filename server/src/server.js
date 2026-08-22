@@ -1,8 +1,8 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 const vision = require("@google-cloud/vision");
-require("dotenv").config();
 
 const app = express();
 app.use(cors());
@@ -15,6 +15,14 @@ const client = new vision.ImageAnnotatorClient();
 
 const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 
+const { createClient } = require("@supabase/supabase-js");
+console.log(process.env);
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY,
+);
+
+// The OCR Endpoint
 // The OCR Endpoint
 app.post("/api/ocr", upload.single("image"), async (req, res) => {
   try {
@@ -22,33 +30,54 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
       return res.status(400).json({ error: "No image uploaded" });
     }
 
-    console.log("Image received, sending to Google Vision...");
+    console.log(
+      "Image received! Uploading to Supabase and sending to Google Vision...",
+    );
 
-    // Send the image buffer directly to the API
-    console.log("Sending image to Google Vision for Objects AND Text...");
+    const fileName = `shelf_${Date.now()}.jpg`;
 
+    // 1. Prepare Google Vision request
     const request = {
       image: { content: req.file.buffer },
       features: [
-        { type: "OBJECT_LOCALIZATION" }, // Finds the books
-        { type: "DOCUMENT_TEXT_DETECTION" }, // Finds the text
+        { type: "OBJECT_LOCALIZATION" },
+        { type: "DOCUMENT_TEXT_DETECTION" },
       ],
     };
 
-    const [result] = await client.annotateImage(request);
+    // 2. Prepare Supabase Upload
+    const supabaseUpload = supabase.storage
+      .from("shelves")
+      .upload(fileName, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: false,
+      });
 
-    console.log(
-      "Raw Objects Found:",
-      (result.localizedObjectAnnotations || []).map((obj) => obj.name),
-    );
+    // 3. Fire both tasks simultaneously
+    const [[result], { data: uploadData, error: uploadError }] =
+      await Promise.all([client.annotateImage(request), supabaseUpload]);
 
-    // Filter out anything that isn't a book (e.g., a shelf, a wall, a plant)
+    if (uploadError) {
+      console.error("Supabase Upload Error:", uploadError);
+      throw uploadError;
+    }
+
+    // 4. Retrieve the public URL for the uploaded photo
+    const { data: publicUrlData } = supabase.storage
+      .from("shelves")
+      .getPublicUrl(fileName);
+
     const books = (result.localizedObjectAnnotations || []).filter(
       (obj) => obj.name.toLowerCase() === "book",
     );
     const words = result.textAnnotations || [];
 
-    res.json({ books, words });
+    // 5. Return books, words, AND the public imageUrl back to the client
+    res.json({
+      books,
+      words,
+      imageUrl: publicUrlData.publicUrl,
+    });
   } catch (error) {
     console.error("OCR Error:", error);
     res.status(500).json({ error: "Failed to process image" });
