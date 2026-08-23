@@ -1,25 +1,26 @@
-async function fetchBookMetadata(rawText) {
-  if (!rawText) return null;
-
+async function fetchBookMetadata(query) {
   try {
-    // Query the Google Books API, asking for only the top 1 result
-    const response = await fetch(
-      `http://localhost:3000/api/books?q=${encodeURIComponent(rawText)}`,
-    );
+    // 🛑 Use relative URL path so it calls your live Render backend
+    const response = await fetch(`/api/books?q=${encodeURIComponent(query)}`);
+
+    if (!response.ok) {
+      throw new Error(`Server returned status ${response.status}`);
+    }
+
     const data = await response.json();
 
     if (data.items && data.items.length > 0) {
-      const info = data.items[0].volumeInfo;
+      const book = data.items[0].volumeInfo;
       return {
-        title: info.title || "Unknown Title",
-        author: info.authors ? info.authors.join(", ") : "Unknown Author",
-        publishedDate: info.publishedDate || "Unknown Year",
-        thumbnail: info.imageLinks ? info.imageLinks.thumbnail : null,
+        title: book.title || query,
+        author: book.authors ? book.authors.join(", ") : "Unknown Author",
+        thumbnail:
+          book.imageLinks?.thumbnail || book.imageLinks?.smallThumbnail || "",
       };
     }
     return null;
   } catch (error) {
-    console.error("Error fetching from Google Books:", error);
+    console.error("Error fetching book metadata:", error);
     return null;
   }
 }
