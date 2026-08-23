@@ -10,7 +10,8 @@ const app = express();
 app.use(cors());
 
 // Serve static frontend files from the "client" directory
-app.use(express.static(path.join(__dirname, "client")));
+const clientPath = path.join(__dirname, "../../client/src");
+app.use(express.static(clientPath));
 
 // Use Multer to keep the uploaded image in memory
 const upload = multer({ storage: multer.memoryStorage() });
@@ -153,7 +154,7 @@ app.get("/api/books", async (req, res) => {
 
 // 5. Fallback Route: Serve index.html for non-API requests
 app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "client", "index.html"));
+  res.sendFile(path.join(clientPath, "index.html"));
 });
 
 // 6. Start Server
