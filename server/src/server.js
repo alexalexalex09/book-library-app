@@ -153,7 +153,7 @@ app.get("/api/books", async (req, res) => {
 });
 
 // 5. Fallback Route: Serve index.html for non-API requests
-app.get("*", (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(clientPath, "index.html"));
 });
 
