@@ -7,6 +7,7 @@ const placeholderText = document.getElementById("placeholderText");
 let detectedSpines = [];
 let currentShelfImageUrl = "";
 let detectedWords = [];
+let myLibrary = [];
 //let isDragging = false;
 //let dragPath = [];
 //let selectedWords = new Set(); // Set prevents duplicate word selection
