@@ -743,7 +743,7 @@ function drawAutoSpines() {
       // Only render percentage text if a valid confidence score exists
       if (typeof spine.score === "number") {
         ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 24px sans-serif";
+        ctx.font = "bold 40px sans-serif";
         ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
         ctx.shadowBlur = 4;
         ctx.fillText(
@@ -1257,17 +1257,28 @@ function sortSpines(spines) {
     const polyA = a.rawPolygon || a.polygon;
     const polyB = b.rawPolygon || b.polygon;
 
+    // 🛑 Calculate true OBB centroids (CX, CY)
+    const cxA = polyA
+      ? polyA.reduce((sum, p) => sum + p.x, 0) / polyA.length
+      : (a.box.minX + a.box.maxX) / 2;
+    const cxB = polyB
+      ? polyB.reduce((sum, p) => sum + p.x, 0) / polyB.length
+      : (b.box.minX + b.box.maxX) / 2;
+
+    const cyA = polyA
+      ? polyA.reduce((sum, p) => sum + p.y, 0) / polyA.length
+      : (a.box.minY + a.box.maxY) / 2;
+    const cyB = polyB
+      ? polyB.reduce((sum, p) => sum + p.y, 0) / polyB.length
+      : (b.box.minY + b.box.maxY) / 2;
+
     const boxA = a.box || { minX: 0, maxX: 0, minY: 0, maxY: 0 };
     const boxB = b.box || { minX: 0, maxX: 0, minY: 0, maxY: 0 };
-
-    // Get the leftmost physical pixel coordinate for each spine
-    const minXa = polyA ? Math.min(...polyA.map((p) => p.x)) : boxA.minX;
-    const minXb = polyB ? Math.min(...polyB.map((p) => p.x)) : boxB.minX;
 
     const heightA = boxA.maxY - boxA.minY;
     const heightB = boxB.maxY - boxB.minY;
 
-    // Detect true horizontal stacks: one book sits distinctly on top of another
+    // Check for horizontal stacks (top-to-bottom)
     const isAAboveB =
       boxA.maxY <= boxB.minY + heightB * 0.35 &&
       boxA.minX < boxB.maxX &&
@@ -1278,11 +1289,51 @@ function sortSpines(spines) {
       boxB.maxX > boxA.minX;
 
     if (isAAboveB || isBAboveA) {
-      // Sort top-to-bottom for horizontal stacks
-      return (boxA.minY + boxA.maxY) / 2 - (boxB.minY + boxB.maxY) / 2;
+      return cyA - cyB;
     }
 
-    // Default to strict physical left-to-right order for standing/tilted books
-    return minXa - minXb;
+    // 🛑 Strict physical left-to-right sorting by OBB centroids
+    return cxA - cxB;
   });
 }
+
+function drawAutoSpines() {
+  if (!detectedSpines || detectedSpines.length === 0) return;
+
+  detectedSpines.forEach((spine) => {
+    const poly = spine.rawPolygon || spine.polygon;
+
+    if (poly && poly.length >= 4) {
+      // Render confidence percentage if score exists
+      if (typeof spine.score === "number") {
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 24px sans-serif";
+        ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
+        ctx.shadowBlur = 4;
+        ctx.fillText(
+          `${(spine.score * 100).toFixed(0)}%`,
+          poly[0].x,
+          poly[0].y - 8,
+        );
+        ctx.shadowBlur = 0;
+      }
+
+      ctx.strokeStyle = "#2563eb";
+      ctx.fillStyle = "rgba(59, 130, 246, 0.22)";
+      ctx.lineWidth = 3;
+
+      ctx.beginPath();
+      ctx.moveTo(poly[0].x, poly[0].y);
+      ctx.lineTo(poly[1].x, poly[1].y);
+      ctx.lineTo(poly[2].x, poly[2].y);
+      ctx.lineTo(poly[3].x, poly[3].y);
+      ctx.closePath();
+
+      ctx.fill();
+      ctx.stroke();
+    }
+  });
+}
+
+// In loadShelfImageOnCanvas inside app.js, ensure saved shelves use sortSpines:
+detectedSpines = sortSpines(processAutoSpines(null, detectedWords));

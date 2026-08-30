@@ -93,9 +93,7 @@ async function detectSpinesONNX(imageBuffer) {
   const numChannels = dims[1];
   const numAnchors = dims[2];
 
-  // 🛑 Lowered threshold to 0.20 to catch lower confidence spines (e.g. 0.28)
   const confThreshold = 0.2;
-
   const boxes = [];
 
   for (let i = 0; i < numAnchors; i++) {
@@ -136,19 +134,16 @@ async function detectSpinesONNX(imageBuffer) {
       const xs = rotatedCornersNormalized.map((c) => c.x);
       const ys = rotatedCornersNormalized.map((c) => c.y);
 
-      // Temporary debug log inside the anchor loop:
-      if (confidence > 0.05) {
-        console.log(
-          `Candidate at cx:${cx.toFixed(2)}, cy:${cy.toFixed(2)} | Confidence: ${confidence.toFixed(2)}`,
-        );
-      }
+      // Un-letterboxed true OBB dimensions
+      const realW = w / scale / imgWidth;
+      const realH = h / scale / imgHeight;
 
       boxes.push({
         confidence,
         cx: (cx - padX) / scale / imgWidth,
         cy: (cy - padY) / scale / imgHeight,
-        w: w / scale / imgWidth,
-        h: h / scale / imgHeight,
+        thickness: Math.min(realW, realH), // 🛑 True spine thickness (~196px)
+        length: Math.max(realW, realH), // 🛑 True spine length (~2200px)
         polygon: rotatedCornersNormalized,
         box: {
           minX: Math.min(...xs),
@@ -160,7 +155,7 @@ async function detectSpinesONNX(imageBuffer) {
     }
   }
 
-  // Center-Distance NMS optimized for tall/narrow book spines
+  // 🛑 NMS using true spine thickness for horizontal checks
   boxes.sort((a, b) => b.confidence - a.confidence);
   const selected = [];
 
@@ -169,11 +164,12 @@ async function detectSpinesONNX(imageBuffer) {
     for (const approved of selected) {
       const dx = Math.abs(candidate.cx - approved.cx);
       const dy = Math.abs(candidate.cy - approved.cy);
-      const maxW = Math.max(candidate.w, approved.w);
-      const maxH = Math.max(candidate.h, approved.h);
 
-      // Suppress duplicate detections targeting the same physical spine
-      if (dx < maxW * 0.3 && dy < maxH * 0.5) {
+      const maxThickness = Math.max(candidate.thickness, approved.thickness);
+      const maxLength = Math.max(candidate.length, approved.length);
+
+      // Only suppress if centers sit on the same physical spine
+      if (dx < maxThickness * 0.75 && dy < maxLength * 0.35) {
         keep = false;
         break;
       }
@@ -188,6 +184,57 @@ async function detectSpinesONNX(imageBuffer) {
       normalizedVertices: item.polygon,
     },
   }));
+}
+
+function assignTextToSpines(spines, words, imgWidth, imgHeight) {
+  const wordList = words && words.length > 1 ? words.slice(1) : [];
+
+  return spines.map((spine) => {
+    const onnxRotatedPolygon = spine.boundingPoly.normalizedVertices.map(
+      (v) => ({
+        x: v.x * imgWidth,
+        y: v.y * imgHeight,
+      }),
+    );
+
+    const matchedWords = wordList.filter((w) => {
+      const v = w.boundingPoly?.vertices || [];
+      if (v.length < 4) return false;
+      const cx =
+        ((v[0].x || 0) + (v[1].x || 0) + (v[2].x || 0) + (v[3].x || 0)) / 4;
+      const cy =
+        ((v[0].y || 0) + (v[1].y || 0) + (v[2].y || 0) + (v[3].y || 0)) / 4;
+
+      return isPointInPolygon({ x: cx, y: cy }, onnxRotatedPolygon);
+    });
+
+    matchedWords.sort(
+      (a, b) =>
+        (a.boundingPoly.vertices[0].y || 0) -
+        (b.boundingPoly.vertices[0].y || 0),
+    );
+
+    const title = matchedWords
+      .map((w) => w.description)
+      .join(" ")
+      .trim();
+
+    const xs = onnxRotatedPolygon.map((p) => p.x);
+    const ys = onnxRotatedPolygon.map((p) => p.y);
+
+    return {
+      score: spine.score, // 🛑 Return confidence score to frontend
+      box: {
+        minX: Math.min(...xs),
+        minY: Math.min(...ys),
+        maxX: Math.max(...xs),
+        maxY: Math.max(...ys),
+      },
+      rawPolygon: onnxRotatedPolygon,
+      polygon: onnxRotatedPolygon,
+      title: title || "Unlabeled Spine",
+    };
+  });
 }
 
 // IoU Helper for NMS
@@ -365,6 +412,7 @@ function assignTextToSpines(spines, words, imgWidth, imgHeight) {
     const ys = onnxRotatedPolygon.map((p) => p.y);
 
     return {
+      score: spine.score,
       box: {
         minX: Math.min(...xs),
         minY: Math.min(...ys),
