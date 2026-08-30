@@ -139,14 +139,15 @@ async function processImageForOCR(file) {
 
     const result = await response.json();
 
-    if (result.words && result.words.length > 1) {
-      console.log("OCR Data Received! Drawing word boxes...");
+    if (result.spines) {
+      console.log("Server Spines Received!", result.spines);
 
-      // Slice(1) skips the giant combined text block (index 0)
-      detectedWords = result.words.slice(1);
-      dismissedSpines.clear(); // Reset skipped list for new upload
+      detectedWords = result.words ? result.words.slice(1) : [];
+      dismissedSpines.clear();
       currentShelfImageUrl = result.imageUrl;
-      detectedSpines = processAutoSpines(result.books || [], detectedWords);
+
+      // Use the ONNX spines constructed by the server directly
+      detectedSpines = result.spines;
 
       populateBatchSpinePrompts(detectedSpines);
 

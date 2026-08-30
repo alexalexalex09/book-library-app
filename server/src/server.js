@@ -159,7 +159,12 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
 
     const fileName = `shelf_${Date.now()}.jpg`;
 
-    // Fire Google Text Detection, Local ONNX Spine Detection, and Supabase Upload concurrently
+    // 1. Fetch image dimensions using sharp
+    const imageMetadata = await sharp(req.file.buffer).metadata();
+    const imgWidth = imageMetadata.width || 1;
+    const imgHeight = imageMetadata.height || 1;
+
+    // 2. Prepare Vision OCR and Supabase upload tasks
     const visionRequest = {
       image: { content: req.file.buffer },
       features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
@@ -172,6 +177,7 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
         upsert: false,
       });
 
+    // 3. Execute detection, OCR, and upload concurrently
     const [[visionResult], localSpines, { error: uploadError }] =
       await Promise.all([
         client.annotateImage(visionRequest),
@@ -187,8 +193,16 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
 
     const words = visionResult.textAnnotations || [];
 
+    // 4. Map OCR text directly into ONNX spine bounding boxes
+    const processedSpines = assignTextToSpines(
+      localSpines,
+      words,
+      imgWidth,
+      imgHeight,
+    );
+
     res.json({
-      books: localSpines, // ONNX-detected spine boxes replace Vision object localization
+      spines: processedSpines, // Server-constructed final spines
       words: words,
       imageUrl: publicUrlData.publicUrl,
     });
@@ -253,3 +267,66 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+function assignTextToSpines(spines, words, imgWidth, imgHeight) {
+  if (!words || words.length <= 1) return [];
+
+  // Skip Vision's combined full-page text block (index 0)
+  const wordList = words.slice(1);
+
+  return spines
+    .map((spine) => {
+      const norm = spine.boundingPoly.normalizedVertices;
+      const minX = Math.min(...norm.map((v) => v.x)) * imgWidth;
+      const maxX = Math.max(...norm.map((v) => v.x)) * imgWidth;
+      const minY = Math.min(...norm.map((v) => v.y)) * imgHeight;
+      const maxY = Math.max(...norm.map((v) => v.y)) * imgHeight;
+
+      // Find words whose center falls inside this ONNX spine bounding box
+      const matchedWords = wordList.filter((w) => {
+        const v = w.boundingPoly?.vertices || [];
+        if (v.length < 4) return false;
+        const cx =
+          ((v[0].x || 0) + (v[1].x || 0) + (v[2].x || 0) + (v[3].x || 0)) / 4;
+        const cy =
+          ((v[0].y || 0) + (v[1].y || 0) + (v[2].y || 0) + (v[3].y || 0)) / 4;
+
+        return cx >= minX && cx <= maxX && cy >= minY && cy <= maxY;
+      });
+
+      // Sort words top-to-bottom for tall spines, left-to-right for wide spines
+      const width = maxX - minX;
+      const height = maxY - minY;
+
+      if (height > width) {
+        matchedWords.sort(
+          (a, b) =>
+            (a.boundingPoly.vertices[0].y || 0) -
+            (b.boundingPoly.vertices[0].y || 0),
+        );
+      } else {
+        matchedWords.sort(
+          (a, b) =>
+            (a.boundingPoly.vertices[0].x || 0) -
+            (b.boundingPoly.vertices[0].x || 0),
+        );
+      }
+
+      const title = matchedWords
+        .map((w) => w.description)
+        .join(" ")
+        .trim();
+
+      return {
+        box: { minX, minY, maxX, maxY },
+        polygon: [
+          { x: minX, y: minY },
+          { x: maxX, y: minY },
+          { x: maxX, y: maxY },
+          { x: minX, y: maxY },
+        ],
+        title: title,
+      };
+    })
+    .filter((spine) => spine.title.length > 0); // Keep spines containing extracted text
+}
