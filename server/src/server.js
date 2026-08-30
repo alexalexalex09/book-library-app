@@ -173,7 +173,7 @@ async function detectSpinesONNX(imageBuffer) {
       const maxH = Math.max(candidate.h, approved.h);
 
       // Suppress duplicate detections targeting the same physical spine
-      if (dx < maxW * 0.65 && dy < maxH * 0.55) {
+      if (dx < maxW * 0.3 && dy < maxH * 0.5) {
         keep = false;
         break;
       }
