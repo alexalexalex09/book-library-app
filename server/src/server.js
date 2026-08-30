@@ -52,9 +52,8 @@ const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 async function detectSpinesONNX(imageBuffer) {
   if (!ortSession) return [];
 
-  // Pre-process image to 640x640 RGB Float32 NCHW Tensor
   const modelSize = 640;
-  const { data, info } = await sharp(imageBuffer)
+  const { data } = await sharp(imageBuffer)
     .removeAlpha()
     .resize(modelSize, modelSize, { fit: "fill" })
     .raw()
@@ -75,29 +74,56 @@ async function detectSpinesONNX(imageBuffer) {
   ]);
   const inputName = ortSession.inputNames[0];
   const results = await ortSession.run({ [inputName]: tensor });
-  const outputName = ortSession.outputNames[0];
-  const output = results[outputName].data; // Tensor Output Shape: [1, 5, 8400]
 
-  // Parse YOLO detections (cx, cy, w, h, conf)
-  const boxes = [];
-  const numAnchors = 8400;
+  const outputTensor = results[ortSession.outputNames[0]];
+  const output = outputTensor.data;
+  const dims = outputTensor.dims; // [1, num_channels, 8400]
+  const numChannels = dims[1];
+  const numAnchors = dims[2];
   const confThreshold = 0.35;
+
+  const boxes = [];
 
   for (let i = 0; i < numAnchors; i++) {
     const confidence = output[4 * numAnchors + i];
+
     if (confidence > confThreshold) {
       const cx = output[0 * numAnchors + i] / modelSize;
       const cy = output[1 * numAnchors + i] / modelSize;
       const w = output[2 * numAnchors + i] / modelSize;
       const h = output[3 * numAnchors + i] / modelSize;
 
+      // Extract rotation angle in radians from the last channel
+      const angle =
+        numChannels >= 6 ? output[(numChannels - 1) * numAnchors + i] : 0;
+
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+
+      // Compute 4 rotated corner points relative to center (cx, cy)
+      const unrotatedCorners = [
+        { dx: -w / 2, dy: -h / 2 },
+        { dx: w / 2, dy: -h / 2 },
+        { dx: w / 2, dy: h / 2 },
+        { dx: -w / 2, dy: h / 2 },
+      ];
+
+      const rotatedCorners = unrotatedCorners.map((p) => ({
+        x: Math.max(0, Math.min(1, cx + (p.dx * cos - p.dy * sin))),
+        y: Math.max(0, Math.min(1, cy + (p.dx * sin + p.dy * cos))),
+      }));
+
+      const xs = rotatedCorners.map((c) => c.x);
+      const ys = rotatedCorners.map((c) => c.y);
+
       boxes.push({
         confidence,
+        polygon: rotatedCorners,
         box: {
-          minX: Math.max(0, cx - w / 2),
-          minY: Math.max(0, cy - h / 2),
-          maxX: Math.min(1, cx + w / 2),
-          maxY: Math.min(1, cy + h / 2),
+          minX: Math.min(...xs),
+          minY: Math.min(...ys),
+          maxX: Math.max(...xs),
+          maxY: Math.max(...ys),
         },
       });
     }
@@ -118,17 +144,12 @@ async function detectSpinesONNX(imageBuffer) {
     if (keep) selected.push(candidate);
   }
 
-  // Format into standard boundingPoly objects for frontend consumption
+  // Pass exact 4-corner rotated OBB polygon back to the pipeline
   return selected.map((item) => ({
-    name: "book",
+    name: "spine",
     score: item.confidence,
     boundingPoly: {
-      normalizedVertices: [
-        { x: item.box.minX, y: item.box.minY },
-        { x: item.box.maxX, y: item.box.minY },
-        { x: item.box.maxX, y: item.box.maxY },
-        { x: item.box.minX, y: item.box.maxY },
-      ],
+      normalizedVertices: item.polygon,
     },
   }));
 }
