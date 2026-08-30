@@ -734,6 +734,7 @@ function drawAllSavedBoxesForActiveShelf() {
 }
 
 function drawAutoSpines() {
+  /*
   if (!detectedSpines || detectedSpines.length === 0) return;
 
   detectedSpines.forEach((spine) => {
@@ -755,7 +756,7 @@ function drawAutoSpines() {
       ctx.fill();
       ctx.stroke();
     }
-  });
+  });*/
 }
 
 function processAutoSpines(rawBooks, words) {

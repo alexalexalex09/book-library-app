@@ -153,21 +153,20 @@ async function detectSpinesONNX(imageBuffer) {
     }
   }
 
-  // 🛑 Center-Distance NMS for Oriented Bounding Boxes
+  // Center-Distance NMS optimized for tall/narrow book spines
   boxes.sort((a, b) => b.confidence - a.confidence);
   const selected = [];
 
   for (const candidate of boxes) {
     let keep = true;
     for (const approved of selected) {
-      const dist = Math.hypot(
-        candidate.cx - approved.cx,
-        candidate.cy - approved.cy,
-      );
-      const minDimension = Math.min(candidate.w, candidate.h);
+      const dx = Math.abs(candidate.cx - approved.cx);
+      const dy = Math.abs(candidate.cy - approved.cy);
+      const maxW = Math.max(candidate.w, approved.w);
+      const maxH = Math.max(candidate.h, approved.h);
 
-      // Suppress only if centers are virtually identical (duplicate detections)
-      if (dist < minDimension * 0.4) {
+      // Suppress duplicate detections targeting the same physical spine
+      if (dx < maxW * 0.65 && dy < maxH * 0.55) {
         keep = false;
         break;
       }
