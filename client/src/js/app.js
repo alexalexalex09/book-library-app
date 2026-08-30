@@ -740,10 +740,10 @@ function drawAutoSpines() {
     const poly = spine.rawPolygon || spine.polygon;
 
     if (poly && poly.length >= 4) {
-      // 🛑 Subtle blue border (1.5px) and 10% opacity blue fill
-      ctx.strokeStyle = "rgba(37, 99, 235, 0.6)";
-      ctx.fillStyle = "rgba(59, 130, 246, 0.10)";
-      ctx.lineWidth = 1.5;
+      // Distinct 3px Solid Blue Outline + 22% Opacity Blue Fill Tint
+      ctx.strokeStyle = "#2563eb";
+      ctx.fillStyle = "rgba(59, 130, 246, 0.22)";
+      ctx.lineWidth = 3;
 
       ctx.beginPath();
       ctx.moveTo(poly[0].x, poly[0].y);
@@ -1241,24 +1241,35 @@ function sortSpines(spines) {
   if (!spines || spines.length === 0) return [];
 
   return spines.sort((a, b) => {
+    const polyA = a.rawPolygon || a.polygon;
+    const polyB = b.rawPolygon || b.polygon;
+
     const boxA = a.box || { minX: 0, maxX: 0, minY: 0, maxY: 0 };
     const boxB = b.box || { minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
-    const cxA = (boxA.minX + boxA.maxX) / 2;
-    const cyA = (boxA.minY + boxA.maxY) / 2;
-    const cxB = (boxB.minX + boxB.maxX) / 2;
-    const cyB = (boxB.minY + boxB.maxY) / 2;
+    // Get the leftmost physical pixel coordinate for each spine
+    const minXa = polyA ? Math.min(...polyA.map((p) => p.x)) : boxA.minX;
+    const minXb = polyB ? Math.min(...polyB.map((p) => p.x)) : boxB.minX;
 
-    const widthA = boxA.maxX - boxA.minX;
-    const widthB = boxB.maxX - boxB.minX;
+    const heightA = boxA.maxY - boxA.minY;
+    const heightB = boxB.maxY - boxB.minY;
 
-    // Threshold: If X-centers are within 70% of the narrower book's width, they are stacked
-    const overlapXThreshold = Math.min(widthA, widthB) * 0.7;
+    // Detect true horizontal stacks: one book sits distinctly on top of another
+    const isAAboveB =
+      boxA.maxY <= boxB.minY + heightB * 0.35 &&
+      boxA.minX < boxB.maxX &&
+      boxA.maxX > boxB.minX;
+    const isBAboveA =
+      boxB.maxY <= boxA.minY + heightA * 0.35 &&
+      boxB.minX < boxA.maxX &&
+      boxB.maxX > boxA.minX;
 
-    if (Math.abs(cxA - cxB) < overlapXThreshold) {
-      return cyA - cyB; // Top-to-bottom
+    if (isAAboveB || isBAboveA) {
+      // Sort top-to-bottom for horizontal stacks
+      return (boxA.minY + boxA.maxY) / 2 - (boxB.minY + boxB.maxY) / 2;
     }
 
-    return cxA - cxB; // Left-to-right
+    // Default to strict physical left-to-right order for standing/tilted books
+    return minXa - minXb;
   });
 }
