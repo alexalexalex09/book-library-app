@@ -293,21 +293,15 @@ function assignTextToSpines(spines, words, imgWidth, imgHeight) {
   const wordList = words && words.length > 1 ? words.slice(1) : [];
 
   return spines.map((spine) => {
-    const norm = spine.boundingPoly.normalizedVertices;
-    const minX = Math.min(...norm.map((v) => v.x)) * imgWidth;
-    const maxX = Math.max(...norm.map((v) => v.x)) * imgWidth;
-    const minY = Math.min(...norm.map((v) => v.y)) * imgHeight;
-    const maxY = Math.max(...norm.map((v) => v.y)) * imgHeight;
+    // 1. Scale the exact 4 rotated OBB corners from ONNX to image pixel space
+    const onnxRotatedPolygon = spine.boundingPoly.normalizedVertices.map(
+      (v) => ({
+        x: v.x * imgWidth,
+        y: v.y * imgHeight,
+      }),
+    );
 
-    // 1. Raw 4-corner box directly predicted by spines.onnx
-    const rawPolygon = [
-      { x: minX, y: minY },
-      { x: maxX, y: minY },
-      { x: maxX, y: maxY },
-      { x: minX, y: maxY },
-    ];
-
-    // Find OCR words falling inside this ONNX bounding box
+    // 2. Filter OCR words whose center point lies inside this ONNX rotated polygon
     const matchedWords = wordList.filter((w) => {
       const v = w.boundingPoly?.vertices || [];
       if (v.length < 4) return false;
@@ -315,83 +309,50 @@ function assignTextToSpines(spines, words, imgWidth, imgHeight) {
         ((v[0].x || 0) + (v[1].x || 0) + (v[2].x || 0) + (v[3].x || 0)) / 4;
       const cy =
         ((v[0].y || 0) + (v[1].y || 0) + (v[2].y || 0) + (v[3].y || 0)) / 4;
-      return cx >= minX && cx <= maxX && cy >= minY && cy <= maxY;
+
+      return isPointInPolygon({ x: cx, y: cy }, onnxRotatedPolygon);
     });
 
-    let rotatedPolygon = rawPolygon;
-    let title = "";
+    // 3. Sort matching words top-to-bottom to preserve reading order
+    matchedWords.sort(
+      (a, b) =>
+        (a.boundingPoly.vertices[0].y || 0) -
+        (b.boundingPoly.vertices[0].y || 0),
+    );
 
-    if (matchedWords.length > 0) {
-      const width = maxX - minX;
-      const height = maxY - minY;
-      if (height > width) {
-        matchedWords.sort(
-          (a, b) =>
-            (a.boundingPoly.vertices[0].y || 0) -
-            (b.boundingPoly.vertices[0].y || 0),
-        );
-      } else {
-        matchedWords.sort(
-          (a, b) =>
-            (a.boundingPoly.vertices[0].x || 0) -
-            (b.boundingPoly.vertices[0].x || 0),
-        );
-      }
+    const title = matchedWords
+      .map((w) => w.description)
+      .join(" ")
+      .trim();
 
-      let mainUx = 0,
-        mainUy = 0;
-      const allVertices = [];
-
-      matchedWords.forEach((w) => {
-        const v = w.boundingPoly?.vertices || [];
-        v.forEach((pt) => allVertices.push({ x: pt.x || 0, y: pt.y || 0 }));
-        const dx = (v[1]?.x || 0) - (v[0]?.x || 0);
-        const dy = (v[1]?.y || 0) - (v[0]?.y || 0);
-        const len = Math.hypot(dx, dy);
-        if (len > 0) {
-          mainUx += dx / len;
-          mainUy += dy / len;
-        }
-      });
-
-      const uLen = Math.hypot(mainUx, mainUy) || 1;
-      const ux = mainUx / uLen;
-      const uy = mainUy / uLen;
-      const nx = -uy;
-      const ny = ux;
-
-      let minU = Infinity,
-        maxU = -Infinity;
-      let minN = Infinity,
-        maxN = -Infinity;
-
-      allVertices.forEach((v) => {
-        const projU = v.x * ux + v.y * uy;
-        const projN = v.x * nx + v.y * ny;
-        if (projU < minU) minU = projU;
-        if (projU > maxU) maxU = projU;
-        if (projN < minN) minN = projN;
-        if (projN > maxN) maxN = projN;
-      });
-
-      rotatedPolygon = [
-        { x: minU * ux + minN * nx, y: minU * uy + minN * ny },
-        { x: maxU * ux + minN * nx, y: maxU * uy + minN * ny },
-        { x: maxU * ux + maxN * nx, y: maxU * uy + maxN * ny },
-        { x: minU * ux + maxN * nx, y: minU * uy + maxN * ny },
-      ];
-
-      title = matchedWords
-        .map((w) => w.description)
-        .join(" ")
-        .trim();
-    }
+    const xs = onnxRotatedPolygon.map((p) => p.x);
+    const ys = onnxRotatedPolygon.map((p) => p.y);
 
     return {
-      box: { minX, minY, maxX, maxY },
-      rawPolygon: rawPolygon, // ONNX model output
-      polygon: rotatedPolygon, // Text-aligned OBB
+      box: {
+        minX: Math.min(...xs),
+        minY: Math.min(...ys),
+        maxX: Math.max(...xs),
+        maxY: Math.max(...ys),
+      },
+      rawPolygon: onnxRotatedPolygon, // Preserves exact rotated ONNX output
+      polygon: onnxRotatedPolygon, // Uses exact rotated ONNX output for highlights
       title: title || "Unlabeled Spine",
     };
   });
+}
+
+function isPointInPolygon(point, polygon) {
+  let isInside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x,
+      yi = polygon[i].y;
+    const xj = polygon[j].x,
+      yj = polygon[j].y;
+    const intersect =
+      yi > point.y !== yj > point.y &&
+      point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi;
+    if (intersect) isInside = !isInside;
+  }
+  return isInside;
 }

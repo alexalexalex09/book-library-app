@@ -737,27 +737,13 @@ function drawAutoSpines() {
   if (!detectedSpines || detectedSpines.length === 0) return;
 
   detectedSpines.forEach((spine) => {
-    // 1. Draw raw ONNX bounding box outline (5px Thick Blue Border)
-    if (spine.rawPolygon && spine.rawPolygon.length >= 4) {
-      ctx.strokeStyle = "#2563eb"; // Vibrant Blue
-      ctx.lineWidth = 5;
-      ctx.setLineDash([]); // Solid line for maximum contrast
+    const poly = spine.rawPolygon || spine.polygon;
 
-      ctx.beginPath();
-      ctx.moveTo(spine.rawPolygon[0].x, spine.rawPolygon[0].y);
-      ctx.lineTo(spine.rawPolygon[1].x, spine.rawPolygon[1].y);
-      ctx.lineTo(spine.rawPolygon[2].x, spine.rawPolygon[2].y);
-      ctx.lineTo(spine.rawPolygon[3].x, spine.rawPolygon[3].y);
-      ctx.closePath();
-      ctx.stroke();
-    }
-
-    // 2. Draw text-aligned inner polygon fill (Light Blue Tint)
-    const poly = spine.polygon || spine.rawPolygon;
     if (poly && poly.length >= 4) {
-      ctx.fillStyle = "rgba(59, 130, 246, 0.25)"; // Blue tint fill
-      ctx.strokeStyle = "#3b82f6";
-      ctx.lineWidth = 2;
+      // Bold 5px Blue Outline + Blue Tint Fill
+      ctx.strokeStyle = "#2563eb";
+      ctx.fillStyle = "rgba(59, 130, 246, 0.25)";
+      ctx.lineWidth = 7;
 
       ctx.beginPath();
       ctx.moveTo(poly[0].x, poly[0].y);
@@ -765,7 +751,9 @@ function drawAutoSpines() {
       ctx.lineTo(poly[2].x, poly[2].y);
       ctx.lineTo(poly[3].x, poly[3].y);
       ctx.closePath();
+
       ctx.fill();
+      ctx.stroke();
     }
   });
 }
