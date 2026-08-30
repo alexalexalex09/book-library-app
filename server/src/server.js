@@ -54,31 +54,28 @@ async function detectSpinesONNX(imageBuffer) {
 
   const modelSize = 640;
 
-  // 1. Get original image dimensions
   const metadata = await sharp(imageBuffer).metadata();
   const imgWidth = metadata.width || 1;
   const imgHeight = metadata.height || 1;
 
-  // 2. Compute letterbox scale and padding offsets
   const scale = Math.min(modelSize / imgWidth, modelSize / imgHeight);
   const padX = (modelSize - imgWidth * scale) / 2;
   const padY = (modelSize - imgHeight * scale) / 2;
 
-  // 3. Resize using letterboxing (fit: "contain") to preserve 1:1 aspect ratio
   const { data } = await sharp(imageBuffer)
     .removeAlpha()
     .resize(modelSize, modelSize, {
       fit: "contain",
-      background: { r: 114, g: 114, b: 114 }, // Standard YOLO letterbox padding
+      background: { r: 114, g: 114, b: 114 },
     })
     .raw()
     .toBuffer({ resolveWithObject: true });
 
   const float32Data = new Float32Array(3 * modelSize * modelSize);
   for (let i = 0; i < modelSize * modelSize; i++) {
-    float32Data[i] = data[i * 3] / 255.0; // R
-    float32Data[modelSize * modelSize + i] = data[i * 3 + 1] / 255.0; // G
-    float32Data[2 * modelSize * modelSize + i] = data[i * 3 + 2] / 255.0; // B
+    float32Data[i] = data[i * 3] / 255.0;
+    float32Data[modelSize * modelSize + i] = data[i * 3 + 1] / 255.0;
+    float32Data[2 * modelSize * modelSize + i] = data[i * 3 + 2] / 255.0;
   }
 
   const tensor = new ort.Tensor("float32", float32Data, [
@@ -92,10 +89,12 @@ async function detectSpinesONNX(imageBuffer) {
 
   const outputTensor = results[ortSession.outputNames[0]];
   const output = outputTensor.data;
-  const dims = outputTensor.dims; // [1, num_channels, 8400]
+  const dims = outputTensor.dims;
   const numChannels = dims[1];
   const numAnchors = dims[2];
-  const confThreshold = 0.35;
+
+  // 🛑 Lowered threshold to 0.20 to catch lower confidence spines (e.g. 0.28)
+  const confThreshold = 0.2;
 
   const boxes = [];
 
@@ -103,13 +102,11 @@ async function detectSpinesONNX(imageBuffer) {
     const confidence = output[4 * numAnchors + i];
 
     if (confidence > confThreshold) {
-      // Coordinates output in 640px letterboxed space
       const cx = output[0 * numAnchors + i];
       const cy = output[1 * numAnchors + i];
       const w = output[2 * numAnchors + i];
       const h = output[3 * numAnchors + i];
 
-      // Angle in radians
       const angle =
         numChannels >= 6 ? output[(numChannels - 1) * numAnchors + i] : 0;
 
@@ -123,7 +120,6 @@ async function detectSpinesONNX(imageBuffer) {
         { dx: -w / 2, dy: h / 2 },
       ];
 
-      // Rotate in 1:1 640px space, then un-letterbox back to original image [0, 1] normalized space
       const rotatedCornersNormalized = unrotatedCorners.map((p) => {
         const x640 = cx + (p.dx * cos - p.dy * sin);
         const y640 = cy + (p.dx * sin + p.dy * cos);
@@ -142,6 +138,10 @@ async function detectSpinesONNX(imageBuffer) {
 
       boxes.push({
         confidence,
+        cx: (cx - padX) / scale / imgWidth,
+        cy: (cy - padY) / scale / imgHeight,
+        w: w / scale / imgWidth,
+        h: h / scale / imgHeight,
         polygon: rotatedCornersNormalized,
         box: {
           minX: Math.min(...xs),
@@ -153,14 +153,21 @@ async function detectSpinesONNX(imageBuffer) {
     }
   }
 
-  // Non-Maximum Suppression (NMS)
+  // 🛑 Center-Distance NMS for Oriented Bounding Boxes
   boxes.sort((a, b) => b.confidence - a.confidence);
   const selected = [];
 
   for (const candidate of boxes) {
     let keep = true;
     for (const approved of selected) {
-      if (calculateIoU(candidate.box, approved.box) > 0.45) {
+      const dist = Math.hypot(
+        candidate.cx - approved.cx,
+        candidate.cy - approved.cy,
+      );
+      const minDimension = Math.min(candidate.w, candidate.h);
+
+      // Suppress only if centers are virtually identical (duplicate detections)
+      if (dist < minDimension * 0.4) {
         keep = false;
         break;
       }
