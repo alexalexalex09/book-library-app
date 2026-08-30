@@ -737,22 +737,38 @@ function drawAutoSpines() {
   if (!detectedSpines || detectedSpines.length === 0) return;
 
   detectedSpines.forEach((spine) => {
-    if (!spine.polygon || spine.polygon.length < 4) return;
+    // 1. Draw raw ONNX bounding box outline (Dashed Purple Border)
+    if (spine.rawPolygon && spine.rawPolygon.length >= 4) {
+      ctx.strokeStyle = "#a855f7"; // Bright Purple
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]); // Dashed line style for ONNX box
 
-    ctx.strokeStyle = "#8b5cf6"; // Purple outline
-    ctx.fillStyle = "rgba(139, 92, 246, 0.22)"; // Purple tint
-    ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(spine.rawPolygon[0].x, spine.rawPolygon[0].y);
+      ctx.lineTo(spine.rawPolygon[1].x, spine.rawPolygon[1].y);
+      ctx.lineTo(spine.rawPolygon[2].x, spine.rawPolygon[2].y);
+      ctx.lineTo(spine.rawPolygon[3].x, spine.rawPolygon[3].y);
+      ctx.closePath();
+      ctx.stroke();
 
-    // Draw along rotated polygon corners
-    ctx.beginPath();
-    ctx.moveTo(spine.polygon[0].x, spine.polygon[0].y);
-    ctx.lineTo(spine.polygon[1].x, spine.polygon[1].y);
-    ctx.lineTo(spine.polygon[2].x, spine.polygon[2].y);
-    ctx.lineTo(spine.polygon[3].x, spine.polygon[3].y);
-    ctx.closePath();
+      ctx.setLineDash([]); // Reset back to solid line
+    }
 
-    ctx.fill();
-    ctx.stroke();
+    // 2. Draw text-aligned oriented polygon fill (Purple Tint)
+    const poly = spine.polygon || spine.rawPolygon;
+    if (poly && poly.length >= 4) {
+      ctx.fillStyle = "rgba(139, 92, 246, 0.20)";
+      ctx.strokeStyle = "#8b5cf6";
+      ctx.lineWidth = 1;
+
+      ctx.beginPath();
+      ctx.moveTo(poly[0].x, poly[0].y);
+      ctx.lineTo(poly[1].x, poly[1].y);
+      ctx.lineTo(poly[2].x, poly[2].y);
+      ctx.lineTo(poly[3].x, poly[3].y);
+      ctx.closePath();
+      ctx.fill();
+    }
   });
 }
 
