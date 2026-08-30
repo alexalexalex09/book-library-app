@@ -53,9 +53,24 @@ async function detectSpinesONNX(imageBuffer) {
   if (!ortSession) return [];
 
   const modelSize = 640;
+
+  // 1. Get original image dimensions
+  const metadata = await sharp(imageBuffer).metadata();
+  const imgWidth = metadata.width || 1;
+  const imgHeight = metadata.height || 1;
+
+  // 2. Compute letterbox scale and padding offsets
+  const scale = Math.min(modelSize / imgWidth, modelSize / imgHeight);
+  const padX = (modelSize - imgWidth * scale) / 2;
+  const padY = (modelSize - imgHeight * scale) / 2;
+
+  // 3. Resize using letterboxing (fit: "contain") to preserve 1:1 aspect ratio
   const { data } = await sharp(imageBuffer)
     .removeAlpha()
-    .resize(modelSize, modelSize, { fit: "fill" })
+    .resize(modelSize, modelSize, {
+      fit: "contain",
+      background: { r: 114, g: 114, b: 114 }, // Standard YOLO letterbox padding
+    })
     .raw()
     .toBuffer({ resolveWithObject: true });
 
@@ -88,19 +103,19 @@ async function detectSpinesONNX(imageBuffer) {
     const confidence = output[4 * numAnchors + i];
 
     if (confidence > confThreshold) {
-      const cx = output[0 * numAnchors + i] / modelSize;
-      const cy = output[1 * numAnchors + i] / modelSize;
-      const w = output[2 * numAnchors + i] / modelSize;
-      const h = output[3 * numAnchors + i] / modelSize;
+      // Coordinates output in 640px letterboxed space
+      const cx = output[0 * numAnchors + i];
+      const cy = output[1 * numAnchors + i];
+      const w = output[2 * numAnchors + i];
+      const h = output[3 * numAnchors + i];
 
-      // Extract rotation angle in radians from the last channel
+      // Angle in radians
       const angle =
         numChannels >= 6 ? output[(numChannels - 1) * numAnchors + i] : 0;
 
       const cos = Math.cos(angle);
       const sin = Math.sin(angle);
 
-      // Compute 4 rotated corner points relative to center (cx, cy)
       const unrotatedCorners = [
         { dx: -w / 2, dy: -h / 2 },
         { dx: w / 2, dy: -h / 2 },
@@ -108,17 +123,26 @@ async function detectSpinesONNX(imageBuffer) {
         { dx: -w / 2, dy: h / 2 },
       ];
 
-      const rotatedCorners = unrotatedCorners.map((p) => ({
-        x: Math.max(0, Math.min(1, cx + (p.dx * cos - p.dy * sin))),
-        y: Math.max(0, Math.min(1, cy + (p.dx * sin + p.dy * cos))),
-      }));
+      // Rotate in 1:1 640px space, then un-letterbox back to original image [0, 1] normalized space
+      const rotatedCornersNormalized = unrotatedCorners.map((p) => {
+        const x640 = cx + (p.dx * cos - p.dy * sin);
+        const y640 = cy + (p.dx * sin + p.dy * cos);
 
-      const xs = rotatedCorners.map((c) => c.x);
-      const ys = rotatedCorners.map((c) => c.y);
+        const xOrigPx = (x640 - padX) / scale;
+        const yOrigPx = (y640 - padY) / scale;
+
+        return {
+          x: Math.max(0, Math.min(1, xOrigPx / imgWidth)),
+          y: Math.max(0, Math.min(1, yOrigPx / imgHeight)),
+        };
+      });
+
+      const xs = rotatedCornersNormalized.map((c) => c.x);
+      const ys = rotatedCornersNormalized.map((c) => c.y);
 
       boxes.push({
         confidence,
-        polygon: rotatedCorners,
+        polygon: rotatedCornersNormalized,
         box: {
           minX: Math.min(...xs),
           minY: Math.min(...ys),
@@ -144,7 +168,6 @@ async function detectSpinesONNX(imageBuffer) {
     if (keep) selected.push(candidate);
   }
 
-  // Pass exact 4-corner rotated OBB polygon back to the pipeline
   return selected.map((item) => ({
     name: "spine",
     score: item.confidence,
