@@ -743,7 +743,7 @@ function drawAutoSpines() {
       // Distinct 3px Solid Blue Outline + 22% Opacity Blue Fill Tint
 
       ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 16px sans-serif";
+      ctx.font = "bold 40px sans-serif";
       ctx.fillText(
         `${(spine.score * 100).toFixed(0)}%`,
         poly[0].x,
