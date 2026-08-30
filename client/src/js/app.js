@@ -146,8 +146,8 @@ async function processImageForOCR(file) {
       dismissedSpines.clear();
       currentShelfImageUrl = result.imageUrl;
 
-      // Use the ONNX spines constructed by the server directly
-      detectedSpines = result.spines;
+      // 🛑 Sort spines using left-to-right & top-to-bottom stack logic
+      detectedSpines = sortSpines(result.spines);
 
       populateBatchSpinePrompts(detectedSpines);
 
@@ -734,17 +734,16 @@ function drawAllSavedBoxesForActiveShelf() {
 }
 
 function drawAutoSpines() {
-  /*
   if (!detectedSpines || detectedSpines.length === 0) return;
 
   detectedSpines.forEach((spine) => {
     const poly = spine.rawPolygon || spine.polygon;
 
     if (poly && poly.length >= 4) {
-      // Bold 5px Blue Outline + Blue Tint Fill
-      ctx.strokeStyle = "#2563eb";
-      ctx.fillStyle = "rgba(59, 130, 246, 0.25)";
-      ctx.lineWidth = 7;
+      // 🛑 Subtle blue border (1.5px) and 10% opacity blue fill
+      ctx.strokeStyle = "rgba(37, 99, 235, 0.6)";
+      ctx.fillStyle = "rgba(59, 130, 246, 0.10)";
+      ctx.lineWidth = 1.5;
 
       ctx.beginPath();
       ctx.moveTo(poly[0].x, poly[0].y);
@@ -756,7 +755,7 @@ function drawAutoSpines() {
       ctx.fill();
       ctx.stroke();
     }
-  });*/
+  });
 }
 
 function processAutoSpines(rawBooks, words) {
@@ -1236,4 +1235,30 @@ async function saveDismissedSpines() {
   );
 
   if (error) console.error("Error saving skipped spines:", error);
+}
+
+function sortSpines(spines) {
+  if (!spines || spines.length === 0) return [];
+
+  return spines.sort((a, b) => {
+    const boxA = a.box || { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+    const boxB = b.box || { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+
+    const cxA = (boxA.minX + boxA.maxX) / 2;
+    const cyA = (boxA.minY + boxA.maxY) / 2;
+    const cxB = (boxB.minX + boxB.maxX) / 2;
+    const cyB = (boxB.minY + boxB.maxY) / 2;
+
+    const widthA = boxA.maxX - boxA.minX;
+    const widthB = boxB.maxX - boxB.minX;
+
+    // Threshold: If X-centers are within 70% of the narrower book's width, they are stacked
+    const overlapXThreshold = Math.min(widthA, widthB) * 0.7;
+
+    if (Math.abs(cxA - cxB) < overlapXThreshold) {
+      return cyA - cyB; // Top-to-bottom
+    }
+
+    return cxA - cxB; // Left-to-right
+  });
 }
