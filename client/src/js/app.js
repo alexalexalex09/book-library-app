@@ -737,11 +737,11 @@ function drawAutoSpines() {
   if (!detectedSpines || detectedSpines.length === 0) return;
 
   detectedSpines.forEach((spine) => {
-    // 1. Draw raw ONNX bounding box outline (Dashed Purple Border)
+    // 1. Draw raw ONNX bounding box outline (5px Thick Blue Border)
     if (spine.rawPolygon && spine.rawPolygon.length >= 4) {
-      ctx.strokeStyle = "#a855f7"; // Bright Purple
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 4]); // Dashed line style for ONNX box
+      ctx.strokeStyle = "#2563eb"; // Vibrant Blue
+      ctx.lineWidth = 5;
+      ctx.setLineDash([]); // Solid line for maximum contrast
 
       ctx.beginPath();
       ctx.moveTo(spine.rawPolygon[0].x, spine.rawPolygon[0].y);
@@ -750,16 +750,14 @@ function drawAutoSpines() {
       ctx.lineTo(spine.rawPolygon[3].x, spine.rawPolygon[3].y);
       ctx.closePath();
       ctx.stroke();
-
-      ctx.setLineDash([]); // Reset back to solid line
     }
 
-    // 2. Draw text-aligned oriented polygon fill (Purple Tint)
+    // 2. Draw text-aligned inner polygon fill (Light Blue Tint)
     const poly = spine.polygon || spine.rawPolygon;
     if (poly && poly.length >= 4) {
-      ctx.fillStyle = "rgba(139, 92, 246, 0.20)";
-      ctx.strokeStyle = "#8b5cf6";
-      ctx.lineWidth = 1;
+      ctx.fillStyle = "rgba(59, 130, 246, 0.25)"; // Blue tint fill
+      ctx.strokeStyle = "#3b82f6";
+      ctx.lineWidth = 2;
 
       ctx.beginPath();
       ctx.moveTo(poly[0].x, poly[0].y);
