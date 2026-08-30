@@ -101,13 +101,6 @@ async function detectSpinesONNX(imageBuffer) {
   for (let i = 0; i < numAnchors; i++) {
     const confidence = output[4 * numAnchors + i];
 
-    // Temporary debug log inside the anchor loop:
-    if (confidence > 0.05) {
-      console.log(
-        `Candidate at cx:${cx.toFixed(2)}, cy:${cy.toFixed(2)} | Confidence: ${confidence.toFixed(2)}`,
-      );
-    }
-
     if (confidence > confThreshold) {
       const cx = output[0 * numAnchors + i];
       const cy = output[1 * numAnchors + i];
@@ -142,6 +135,13 @@ async function detectSpinesONNX(imageBuffer) {
 
       const xs = rotatedCornersNormalized.map((c) => c.x);
       const ys = rotatedCornersNormalized.map((c) => c.y);
+
+      // Temporary debug log inside the anchor loop:
+      if (confidence > 0.05) {
+        console.log(
+          `Candidate at cx:${cx.toFixed(2)}, cy:${cy.toFixed(2)} | Confidence: ${confidence.toFixed(2)}`,
+        );
+      }
 
       boxes.push({
         confidence,
