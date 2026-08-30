@@ -581,7 +581,7 @@ async function loadShelfImageOnCanvas(imageUrl, callback) {
         ),
       );
 
-      detectedSpines = processAutoSpines(null, detectedWords);
+      detectedSpines = sortSpines(processAutoSpines(null, detectedWords));
       populateBatchSpinePrompts(detectedSpines);
     } else {
       console.warn("No OCR words found in database for this shelf URL.");
@@ -740,15 +740,19 @@ function drawAutoSpines() {
     const poly = spine.rawPolygon || spine.polygon;
 
     if (poly && poly.length >= 4) {
-      // Distinct 3px Solid Blue Outline + 22% Opacity Blue Fill Tint
-
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 40px sans-serif";
-      ctx.fillText(
-        `${(spine.score * 100).toFixed(0)}%`,
-        poly[0].x,
-        poly[0].y - 5,
-      );
+      // Only render percentage text if a valid confidence score exists
+      if (typeof spine.score === "number") {
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 24px sans-serif";
+        ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
+        ctx.shadowBlur = 4;
+        ctx.fillText(
+          `${(spine.score * 100).toFixed(0)}%`,
+          poly[0].x,
+          poly[0].y - 8,
+        );
+        ctx.shadowBlur = 0; // Reset text shadow
+      }
 
       ctx.strokeStyle = "#2563eb";
       ctx.fillStyle = "rgba(59, 130, 246, 0.22)";
