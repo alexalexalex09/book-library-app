@@ -88,7 +88,8 @@ async function runONNXTile(tileBuffer, tileW, tileH, cropL, cropT, imgW, imgH) {
   const numChannels = dims[1];
   const numAnchors = dims[2];
 
-  const confThreshold = 0.15;
+  // 🛑 Prunes partial tile fragment clutter (<22% confidence)
+  const confThreshold = 0.22;
   const boxes = [];
 
   for (let i = 0; i < numAnchors; i++) {
@@ -155,7 +156,7 @@ async function runONNXTile(tileBuffer, tileW, tileH, cropL, cropT, imgW, imgH) {
   return boxes;
 }
 
-// 3. Sliding Window 1:1 Scale Tiling Pipeline
+// 3. Sequential 1:1 Sliding Window Tiling Pipeline
 async function detectSpinesONNX(imageBuffer) {
   if (!ortSession) return [];
 
@@ -166,7 +167,6 @@ async function detectSpinesONNX(imageBuffer) {
   const tileSize = 640;
   const stride = 420;
 
-  // Generate X crop positions
   const xPoints = [];
   if (imgW <= tileSize) {
     xPoints.push(0);
@@ -179,7 +179,6 @@ async function detectSpinesONNX(imageBuffer) {
     }
   }
 
-  // Generate Y crop positions
   const yPoints = [];
   if (imgH <= tileSize) {
     yPoints.push(0);
@@ -194,7 +193,6 @@ async function detectSpinesONNX(imageBuffer) {
 
   const allBoxes = [];
 
-  // Sequential processing: process one tile at a time to keep RAM strictly below 512MB
   for (const cropT of yPoints) {
     for (const cropL of xPoints) {
       const cropW = Math.min(tileSize, imgW - cropL);
@@ -217,7 +215,7 @@ async function detectSpinesONNX(imageBuffer) {
     }
   }
 
-  // Rotated Local-Axis NMS across all sequential tiles
+  // Anchor-level NMS across all sliding tiles
   allBoxes.sort((a, b) => b.confidence - a.confidence);
   const selected = [];
 
@@ -236,7 +234,8 @@ async function detectSpinesONNX(imageBuffer) {
       const avgThickness = (candidate.thickness + approved.thickness) / 2;
       const avgLength = (candidate.length + approved.length) / 2;
 
-      if (distThick < avgThickness * 0.45 && distLen < avgLength * 0.35) {
+      // 🛑 Expanded distLen check to suppress multi-box predictions along tall spines
+      if (distThick < avgThickness * 0.7 && distLen < avgLength * 0.8) {
         keep = false;
         break;
       }
@@ -292,7 +291,7 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
       });
 
     console.log(
-      `[${timestamp}] ⚙️ Dispatching ONNX detection, Vision OCR, and Supabase upload...`,
+      `[${timestamp}] ⚙️ Running ONNX detection, Vision OCR, & Supabase upload...`,
     );
 
     const [[visionResult], localSpines, { error: uploadError }] =
@@ -511,16 +510,24 @@ function deduplicateSpines(spines) {
       const avgLength = (lengthA + lengthB) / 2;
       const titleOverlap = getTitleWordOverlap(candidate.title, approved.title);
 
-      if (distThick < avgThickness * 0.45 && distLen < avgLength * 0.35) {
+      // 🛑 Suppress if sitting on the same spine column line within the spine extent
+      if (distThick < avgThickness * 0.7 && distLen < avgLength * 0.8) {
         isDuplicate = true;
         break;
       }
 
+      // 🛑 Suppress if candidate centroid lies inside an approved polygon
+      if (isPointInPolygon({ x: cxA, y: cyA }, polyB)) {
+        isDuplicate = true;
+        break;
+      }
+
+      // 🛑 Suppress if titles share >25% words & sit close
       if (
-        titleOverlap > 0.3 &&
+        titleOverlap > 0.25 &&
         candidate.title !== "Unlabeled Spine" &&
         distThick < avgThickness * 1.5 &&
-        distLen < avgLength * 0.5
+        distLen < avgLength * 0.8
       ) {
         isDuplicate = true;
         break;
