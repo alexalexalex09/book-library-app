@@ -172,7 +172,7 @@ async function detectSpinesONNX(imageBuffer) {
   const tilePromises = [];
 
   for (let r = 0; r < tileRows; r++) {
-    for (let c = 0; r < tileCols; c++) {
+    for (let c = 0; c < tileCols; c++) {
       if (c >= tileCols) break;
 
       const cropL = Math.max(
