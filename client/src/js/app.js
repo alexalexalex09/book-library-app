@@ -733,44 +733,6 @@ function drawAllSavedBoxesForActiveShelf() {
   });
 }
 
-function drawAutoSpines() {
-  if (!detectedSpines || detectedSpines.length === 0) return;
-
-  detectedSpines.forEach((spine) => {
-    const poly = spine.rawPolygon || spine.polygon;
-
-    if (poly && poly.length >= 4) {
-      // Only render percentage text if a valid confidence score exists
-      if (typeof spine.score === "number") {
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 40px sans-serif";
-        ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
-        ctx.shadowBlur = 4;
-        ctx.fillText(
-          `${(spine.score * 100).toFixed(0)}%`,
-          poly[0].x,
-          poly[0].y - 8,
-        );
-        ctx.shadowBlur = 0; // Reset text shadow
-      }
-
-      ctx.strokeStyle = "#2563eb";
-      ctx.fillStyle = "rgba(59, 130, 246, 0.22)";
-      ctx.lineWidth = 3;
-
-      ctx.beginPath();
-      ctx.moveTo(poly[0].x, poly[0].y);
-      ctx.lineTo(poly[1].x, poly[1].y);
-      ctx.lineTo(poly[2].x, poly[2].y);
-      ctx.lineTo(poly[3].x, poly[3].y);
-      ctx.closePath();
-
-      ctx.fill();
-      ctx.stroke();
-    }
-  });
-}
-
 function processAutoSpines(rawBooks, words) {
   if (!words || words.length === 0) return [];
 
@@ -1307,7 +1269,7 @@ function drawAutoSpines() {
       // Render confidence percentage if score exists
       if (typeof spine.score === "number") {
         ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 24px sans-serif";
+        ctx.font = "bold 40px sans-serif";
         ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
         ctx.shadowBlur = 4;
         ctx.fillText(
