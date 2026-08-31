@@ -16,7 +16,7 @@ app.use(express.static(clientPath));
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// 1. Load ONNX Model
+// 1. Load ONNX Spine Detection Model
 let ortSession = null;
 async function initONNX() {
   try {
@@ -29,7 +29,7 @@ async function initONNX() {
 }
 initONNX();
 
-// 2. Vision & Supabase Setup
+// 2. Google Vision & Supabase Setup
 const visionConfig = {};
 if (process.env.GOOGLE_CREDENTIALS) {
   try {
@@ -48,7 +48,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 
-// Helper: Single Tile Inference
+// Helper: Run ONNX Inference on a 1:1 Scale Tile
 async function runONNXTile(tileBuffer, tileW, tileH, cropL, cropT, imgW, imgH) {
   const modelSize = 640;
   const scale = Math.min(modelSize / tileW, modelSize / tileH);
@@ -86,7 +86,7 @@ async function runONNXTile(tileBuffer, tileW, tileH, cropL, cropT, imgW, imgH) {
   const numChannels = dims[1];
   const numAnchors = dims[2];
 
-  const confThreshold = 0.2;
+  const confThreshold = 0.15;
   const boxes = [];
 
   for (let i = 0; i < numAnchors; i++) {
@@ -110,7 +110,6 @@ async function runONNXTile(tileBuffer, tileW, tileH, cropL, cropT, imgW, imgH) {
         { dx: -w / 2, dy: h / 2 },
       ];
 
-      // Convert 640px model space -> tile space -> full image normalized space
       const rotatedCornersNormalized = unrotatedCorners.map((p) => {
         const x640 = cx + (p.dx * cos - p.dy * sin);
         const y640 = cy + (p.dx * sin + p.dy * cos);
@@ -139,6 +138,7 @@ async function runONNXTile(tileBuffer, tileW, tileH, cropL, cropT, imgW, imgH) {
         cy: (cropT + (cy - padY) / scale) / imgH,
         thickness: Math.min(realW, realH),
         length: Math.max(realW, realH),
+        angle: angle,
         polygon: rotatedCornersNormalized,
         box: {
           minX: Math.min(...xs),
@@ -153,7 +153,7 @@ async function runONNXTile(tileBuffer, tileW, tileH, cropL, cropT, imgW, imgH) {
   return boxes;
 }
 
-// 3. Sliced Inference (Tiling Pipeline)
+// 3. Sliding Window 1:1 Scale Tiling Pipeline
 async function detectSpinesONNX(imageBuffer) {
   if (!ortSession) return [];
 
@@ -161,30 +161,41 @@ async function detectSpinesONNX(imageBuffer) {
   const imgW = metadata.width || 1;
   const imgH = metadata.height || 1;
 
-  // Determine grid tiles based on resolution (2x3 for tall photos, 2x2 for medium)
-  const tileCols = imgW > 1800 ? 2 : 1;
-  const tileRows = imgH > 2200 ? 3 : imgH > 1200 ? 2 : 1;
-  const overlap = 0.2; // 20% overlap between adjacent tiles
+  const tileSize = 640;
+  const stride = 420; // 220px overlap ensures no spine is cut off without full coverage in a neighbor tile
 
-  const tileW = Math.ceil(imgW / tileCols);
-  const tileH = Math.ceil(imgH / tileRows);
+  // Generate X crop positions
+  const xPoints = [];
+  if (imgW <= tileSize) {
+    xPoints.push(0);
+  } else {
+    for (let x = 0; x <= imgW - tileSize; x += stride) {
+      xPoints.push(x);
+    }
+    if (xPoints[xPoints.length - 1] < imgW - tileSize) {
+      xPoints.push(imgW - tileSize);
+    }
+  }
+
+  // Generate Y crop positions
+  const yPoints = [];
+  if (imgH <= tileSize) {
+    yPoints.push(0);
+  } else {
+    for (let y = 0; y <= imgH - tileSize; y += stride) {
+      yPoints.push(y);
+    }
+    if (yPoints[yPoints.length - 1] < imgH - tileSize) {
+      yPoints.push(imgH - tileSize);
+    }
+  }
 
   const tilePromises = [];
 
-  for (let r = 0; r < tileRows; r++) {
-    for (let c = 0; c < tileCols; c++) {
-      if (c >= tileCols) break;
-
-      const cropL = Math.max(
-        0,
-        Math.floor(c * tileW - (c > 0 ? tileW * overlap : 0)),
-      );
-      const cropT = Math.max(
-        0,
-        Math.floor(r * tileH - (r > 0 ? tileH * overlap : 0)),
-      );
-      const cropW = Math.min(imgW - cropL, Math.ceil(tileW * (1 + overlap)));
-      const cropH = Math.min(imgH - cropT, Math.ceil(tileH * (1 + overlap)));
+  for (const cropT of yPoints) {
+    for (const cropL of xPoints) {
+      const cropW = Math.min(tileSize, imgW - cropL);
+      const cropH = Math.min(tileSize, imgH - cropT);
 
       const promise = sharp(imageBuffer)
         .extract({ left: cropL, top: cropT, width: cropW, height: cropH })
@@ -200,20 +211,26 @@ async function detectSpinesONNX(imageBuffer) {
   const tileResults = await Promise.all(tilePromises);
   const allBoxes = tileResults.flat();
 
-  // Anchor-level NMS across all slices
+  // Rotated Local-Axis NMS across all sliding window tiles
   allBoxes.sort((a, b) => b.confidence - a.confidence);
   const selected = [];
 
   for (const candidate of allBoxes) {
     let keep = true;
     for (const approved of selected) {
-      const dx = Math.abs(candidate.cx - approved.cx);
-      const dy = Math.abs(candidate.cy - approved.cy);
+      const dcx = candidate.cx - approved.cx;
+      const dcy = candidate.cy - approved.cy;
 
-      const maxThickness = Math.max(candidate.thickness, approved.thickness);
-      const maxLength = Math.max(candidate.length, approved.length);
+      const cos = Math.cos(-approved.angle);
+      const sin = Math.sin(-approved.angle);
 
-      if (dx < maxThickness * 0.5 && dy < maxLength * 0.3) {
+      const distThick = Math.abs(dcx * cos - dcy * sin);
+      const distLen = Math.abs(dcx * sin + dcy * cos);
+
+      const avgThickness = (candidate.thickness + approved.thickness) / 2;
+      const avgLength = (candidate.length + approved.length) / 2;
+
+      if (distThick < avgThickness * 0.45 && distLen < avgLength * 0.35) {
         keep = false;
         break;
       }
@@ -357,12 +374,11 @@ function assignTextToSpines(spines, words, imgWidth, imgHeight) {
       }),
     );
 
-    // Inflate polygon by 25% relative to its centroid for OCR word matching
     const cxPoly = onnxRotatedPolygon.reduce((s, p) => s + p.x, 0) / 4;
     const cyPoly = onnxRotatedPolygon.reduce((s, p) => s + p.y, 0) / 4;
     const inflatedPolygon = onnxRotatedPolygon.map((p) => ({
-      x: cxPoly + (p.x - cxPoly) * 1.25,
-      y: cyPoly + (p.y - cyPoly) * 1.25,
+      x: cxPoly + (p.x - cxPoly) * 1.35,
+      y: cyPoly + (p.y - cyPoly) * 1.35,
     }));
 
     const matchedWords = wordList.filter((w) => {
@@ -420,9 +436,20 @@ function deduplicateSpines(spines) {
     const cxA = polyA.reduce((sum, p) => sum + p.x, 0) / polyA.length;
     const cyA = polyA.reduce((sum, p) => sum + p.y, 0) / polyA.length;
 
-    const d01A = Math.hypot(polyA[1].x - polyA[0].x, polyA[1].y - polyA[0].y);
-    const d12A = Math.hypot(polyA[2].x - polyA[1].x, polyA[2].y - polyA[1].y);
-    const thicknessA = Math.min(d01A, d12A) || 50;
+    const vxA = polyA[1].x - polyA[0].x;
+    const vyA = polyA[1].y - polyA[0].y;
+    const lenA = Math.hypot(vxA, vyA) || 1;
+    const uxA = vxA / lenA;
+    const uyA = vyA / lenA;
+
+    const lxA = polyA[3].x - polyA[0].x;
+    const lyA = polyA[3].y - polyA[0].y;
+    const lenHA = Math.hypot(lxA, lyA) || 1;
+    const uxHA = lxA / lenHA;
+    const uyHA = lyA / lenHA;
+
+    const thicknessA = Math.min(lenA, lenHA);
+    const lengthA = Math.max(lenA, lenHA);
 
     let isDuplicate = false;
 
@@ -431,16 +458,24 @@ function deduplicateSpines(spines) {
       const cxB = polyB.reduce((sum, p) => sum + p.x, 0) / polyB.length;
       const cyB = polyB.reduce((sum, p) => sum + p.y, 0) / polyB.length;
 
-      const d01B = Math.hypot(polyB[1].x - polyB[0].x, polyB[1].y - polyB[0].y);
-      const d12B = Math.hypot(polyB[2].x - polyB[1].x, polyB[2].y - polyB[0].y);
-      const thicknessB = Math.min(d01B, d12B) || 50;
+      const dcx = cxA - cxB;
+      const dcy = cyA - cyB;
 
-      const centerDist = Math.hypot(cxA - cxB, cyA - cyB);
-      const dx = Math.abs(cxA - cxB);
+      const distThick = Math.abs(dcx * uxA + dcy * uyA);
+      const distLen = Math.abs(dcx * uxHA + dcy * uyHA);
+
+      const vxB = polyB[1].x - polyB[0].x;
+      const vyB = polyB[1].y - polyB[0].y;
+      const lxB = polyB[3].x - polyB[0].x;
+      const lyB = polyB[3].y - polyB[0].y;
+      const thicknessB = Math.min(Math.hypot(vxB, vyB), Math.hypot(lxB, lyB));
+      const lengthB = Math.max(Math.hypot(vxB, vyB), Math.hypot(lxB, lyB));
+
       const avgThickness = (thicknessA + thicknessB) / 2;
+      const avgLength = (lengthA + lengthB) / 2;
       const titleOverlap = getTitleWordOverlap(candidate.title, approved.title);
 
-      if (centerDist < avgThickness * 0.45) {
+      if (distThick < avgThickness * 0.45 && distLen < avgLength * 0.35) {
         isDuplicate = true;
         break;
       }
@@ -448,7 +483,8 @@ function deduplicateSpines(spines) {
       if (
         titleOverlap > 0.3 &&
         candidate.title !== "Unlabeled Spine" &&
-        dx < avgThickness * 1.75
+        distThick < avgThickness * 1.5 &&
+        distLen < avgLength * 0.5
       ) {
         isDuplicate = true;
         break;
