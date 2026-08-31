@@ -8,6 +8,8 @@ const path = require("path");
 const sharp = require("sharp");
 const ort = require("onnxruntime-node");
 
+sharp.cache(false);
+
 const app = express();
 app.use(cors());
 
@@ -162,7 +164,7 @@ async function detectSpinesONNX(imageBuffer) {
   const imgH = metadata.height || 1;
 
   const tileSize = 640;
-  const stride = 420; // 220px overlap ensures no spine is cut off without full coverage in a neighbor tile
+  const stride = 420;
 
   // Generate X crop positions
   const xPoints = [];
@@ -190,28 +192,32 @@ async function detectSpinesONNX(imageBuffer) {
     }
   }
 
-  const tilePromises = [];
+  const allBoxes = [];
 
+  // Sequential processing: process one tile at a time to keep RAM strictly below 512MB
   for (const cropT of yPoints) {
     for (const cropL of xPoints) {
       const cropW = Math.min(tileSize, imgW - cropL);
       const cropH = Math.min(tileSize, imgH - cropT);
 
-      const promise = sharp(imageBuffer)
+      const tileBuf = await sharp(imageBuffer)
         .extract({ left: cropL, top: cropT, width: cropW, height: cropH })
-        .toBuffer()
-        .then((tileBuf) =>
-          runONNXTile(tileBuf, cropW, cropH, cropL, cropT, imgW, imgH),
-        );
+        .toBuffer();
 
-      tilePromises.push(promise);
+      const tileBoxes = await runONNXTile(
+        tileBuf,
+        cropW,
+        cropH,
+        cropL,
+        cropT,
+        imgW,
+        imgH,
+      );
+      allBoxes.push(...tileBoxes);
     }
   }
 
-  const tileResults = await Promise.all(tilePromises);
-  const allBoxes = tileResults.flat();
-
-  // Rotated Local-Axis NMS across all sliding window tiles
+  // Rotated Local-Axis NMS across all sequential tiles
   allBoxes.sort((a, b) => b.confidence - a.confidence);
   const selected = [];
 
@@ -249,16 +255,29 @@ async function detectSpinesONNX(imageBuffer) {
 
 // 4. OCR Endpoint
 app.post("/api/ocr", upload.single("image"), async (req, res) => {
+  const reqStart = Date.now();
+  const timestamp = new Date().toLocaleTimeString();
+
+  console.log(`\n==================================================`);
+  console.log(`[${timestamp}] 📸 OCR Request Received`);
+
   try {
     if (!req.file) {
+      console.log(`[${timestamp}] ❌ Rejecting: No image file provided.`);
       return res.status(400).json({ error: "No image uploaded" });
     }
+
+    const fileSizeMB = (req.file.buffer.length / (1024 * 1024)).toFixed(2);
+    console.log(
+      `[${timestamp}] 📥 File Size: ${fileSizeMB} MB (${req.file.mimetype})`,
+    );
 
     const fileName = `shelf_${Date.now()}.jpg`;
 
     const imageMetadata = await sharp(req.file.buffer).metadata();
     const imgWidth = imageMetadata.width || 1;
     const imgHeight = imageMetadata.height || 1;
+    console.log(`[${timestamp}] 📐 Dimensions: ${imgWidth}px x ${imgHeight}px`);
 
     const visionRequest = {
       image: { content: req.file.buffer },
@@ -271,6 +290,10 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
         contentType: req.file.mimetype,
         upsert: false,
       });
+
+    console.log(
+      `[${timestamp}] ⚙️ Dispatching ONNX detection, Vision OCR, and Supabase upload...`,
+    );
 
     const [[visionResult], localSpines, { error: uploadError }] =
       await Promise.all([
@@ -286,6 +309,12 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
       .getPublicUrl(fileName);
 
     const words = visionResult.textAnnotations || [];
+    console.log(
+      `[${timestamp}] 🔤 Google Vision extracted ${words.length} word bounding boxes.`,
+    );
+    console.log(
+      `[${timestamp}] 🎯 ONNX model identified ${localSpines.length} candidate spines.`,
+    );
 
     const processedSpines = assignTextToSpines(
       localSpines,
@@ -294,13 +323,20 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
       imgHeight,
     );
 
+    const elapsed = ((Date.now() - reqStart) / 1000).toFixed(2);
+    console.log(
+      `[${timestamp}] ✅ Request Complete in ${elapsed}s | Returning ${processedSpines.length} deduplicated spines.`,
+    );
+    console.log(`==================================================\n`);
+
     res.json({
       spines: processedSpines,
       words: words,
       imageUrl: publicUrlData.publicUrl,
     });
   } catch (error) {
-    console.error("OCR Error:", error);
+    const elapsed = ((Date.now() - reqStart) / 1000).toFixed(2);
+    console.error(`[${timestamp}] 💥 OCR Error after ${elapsed}s:`, error);
     res.status(500).json({ error: "Failed to process image" });
   }
 });

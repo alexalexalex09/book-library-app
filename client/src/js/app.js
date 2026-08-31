@@ -128,6 +128,7 @@ imageUpload.addEventListener("change", function (event) {
 
 // --- 3. OCR PROCESSING ---
 async function processImageForOCR(file) {
+  showLoadingOverlay("Scanning bookshelf & detecting spines...");
   const formData = new FormData();
   formData.append("image", file);
 
@@ -146,7 +147,6 @@ async function processImageForOCR(file) {
       dismissedSpines.clear();
       currentShelfImageUrl = result.imageUrl;
 
-      // 🛑 Sort spines using left-to-right & top-to-bottom stack logic
       detectedSpines = sortSpines(result.spines);
 
       populateBatchSpinePrompts(detectedSpines);
@@ -173,6 +173,9 @@ async function processImageForOCR(file) {
     }
   } catch (error) {
     console.error("Error communicating with OCR server:", error);
+    alert("Failed to process shelf image. Please try again.");
+  } finally {
+    hideLoadingOverlay(); // 🛑 Guarantees overlay hides on success or error
   }
 }
 
@@ -1295,6 +1298,43 @@ function drawAutoSpines() {
       ctx.stroke();
     }
   });
+}
+
+// --- UI LOADING OVERLAY HELPERS ---
+function showLoadingOverlay(message = "Scanning shelf and reading titles...") {
+  let overlay = document.getElementById("loadingOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "loadingOverlay";
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(4px);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 9999; color: white; font-family: sans-serif;
+    `;
+    overlay.innerHTML = `
+      <div class="spinner" style="
+        width: 48px; height: 48px;
+        border: 5px solid rgba(255, 255, 255, 0.2);
+        border-top-color: #3b82f6; border-radius: 50%;
+        animation: spin 0.8s linear infinite; margin-bottom: 16px;
+      "></div>
+      <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+      <div id="loadingMessage" style="font-weight: 600; font-size: 1.1rem;">${message}</div>
+    `;
+    document.body.appendChild(overlay);
+  } else {
+    document.getElementById("loadingMessage").textContent = message;
+    overlay.style.display = "flex";
+  }
+}
+
+function hideLoadingOverlay() {
+  const overlay = document.getElementById("loadingOverlay");
+  if (overlay) overlay.style.display = "none";
 }
 
 // In loadShelfImageOnCanvas inside app.js, ensure saved shelves use sortSpines:
