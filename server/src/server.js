@@ -16,7 +16,7 @@ app.use(express.static(clientPath));
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// 1. Load ONNX Spine Detection Model
+// 1. Load ONNX Model
 let ortSession = null;
 async function initONNX() {
   try {
@@ -29,7 +29,7 @@ async function initONNX() {
 }
 initONNX();
 
-// 2. Google Vision & Supabase Setup
+// 2. Vision & Supabase Setup
 const visionConfig = {};
 if (process.env.GOOGLE_CREDENTIALS) {
   try {
@@ -48,21 +48,14 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 
-// Helper: Run ONNX Inference & NMS Post-Processing
-async function detectSpinesONNX(imageBuffer) {
-  if (!ortSession) return [];
-
+// Helper: Single Tile Inference
+async function runONNXTile(tileBuffer, tileW, tileH, cropL, cropT, imgW, imgH) {
   const modelSize = 640;
+  const scale = Math.min(modelSize / tileW, modelSize / tileH);
+  const padX = (modelSize - tileW * scale) / 2;
+  const padY = (modelSize - tileH * scale) / 2;
 
-  const metadata = await sharp(imageBuffer).metadata();
-  const imgWidth = metadata.width || 1;
-  const imgHeight = metadata.height || 1;
-
-  const scale = Math.min(modelSize / imgWidth, modelSize / imgHeight);
-  const padX = (modelSize - imgWidth * scale) / 2;
-  const padY = (modelSize - imgHeight * scale) / 2;
-
-  const { data } = await sharp(imageBuffer)
+  const { data } = await sharp(tileBuffer)
     .removeAlpha()
     .resize(modelSize, modelSize, {
       fit: "contain",
@@ -107,7 +100,6 @@ async function detectSpinesONNX(imageBuffer) {
 
       const angle =
         numChannels >= 6 ? output[(numChannels - 1) * numAnchors + i] : 0;
-
       const cos = Math.cos(angle);
       const sin = Math.sin(angle);
 
@@ -118,29 +110,33 @@ async function detectSpinesONNX(imageBuffer) {
         { dx: -w / 2, dy: h / 2 },
       ];
 
+      // Convert 640px model space -> tile space -> full image normalized space
       const rotatedCornersNormalized = unrotatedCorners.map((p) => {
         const x640 = cx + (p.dx * cos - p.dy * sin);
         const y640 = cy + (p.dx * sin + p.dy * cos);
 
-        const xOrigPx = (x640 - padX) / scale;
-        const yOrigPx = (y640 - padY) / scale;
+        const xTilePx = (x640 - padX) / scale;
+        const yTilePx = (y640 - padY) / scale;
+
+        const xFullPx = cropL + xTilePx;
+        const yFullPx = cropT + yTilePx;
 
         return {
-          x: Math.max(0, Math.min(1, xOrigPx / imgWidth)),
-          y: Math.max(0, Math.min(1, yOrigPx / imgHeight)),
+          x: Math.max(0, Math.min(1, xFullPx / imgW)),
+          y: Math.max(0, Math.min(1, yFullPx / imgH)),
         };
       });
 
       const xs = rotatedCornersNormalized.map((c) => c.x);
       const ys = rotatedCornersNormalized.map((c) => c.y);
 
-      const realW = w / scale / imgWidth;
-      const realH = h / scale / imgHeight;
+      const realW = w / scale / imgW;
+      const realH = h / scale / imgH;
 
       boxes.push({
         confidence,
-        cx: (cx - padX) / scale / imgWidth,
-        cy: (cy - padY) / scale / imgHeight,
+        cx: (cropL + (cx - padX) / scale) / imgW,
+        cy: (cropT + (cy - padY) / scale) / imgH,
         thickness: Math.min(realW, realH),
         length: Math.max(realW, realH),
         polygon: rotatedCornersNormalized,
@@ -154,11 +150,61 @@ async function detectSpinesONNX(imageBuffer) {
     }
   }
 
-  // Initial anchor-level NMS
-  boxes.sort((a, b) => b.confidence - a.confidence);
+  return boxes;
+}
+
+// 3. Sliced Inference (Tiling Pipeline)
+async function detectSpinesONNX(imageBuffer) {
+  if (!ortSession) return [];
+
+  const metadata = await sharp(imageBuffer).metadata();
+  const imgW = metadata.width || 1;
+  const imgH = metadata.height || 1;
+
+  // Determine grid tiles based on resolution (2x3 for tall photos, 2x2 for medium)
+  const tileCols = imgW > 1800 ? 2 : 1;
+  const tileRows = imgH > 2200 ? 3 : imgH > 1200 ? 2 : 1;
+  const overlap = 0.2; // 20% overlap between adjacent tiles
+
+  const tileW = Math.ceil(imgW / tileCols);
+  const tileH = Math.ceil(imgH / tileRows);
+
+  const tilePromises = [];
+
+  for (let r = 0; r < tileRows; r++) {
+    for (let c = 0; r < tileCols; c++) {
+      if (c >= tileCols) break;
+
+      const cropL = Math.max(
+        0,
+        Math.floor(c * tileW - (c > 0 ? tileW * overlap : 0)),
+      );
+      const cropT = Math.max(
+        0,
+        Math.floor(r * tileH - (r > 0 ? tileH * overlap : 0)),
+      );
+      const cropW = Math.min(imgW - cropL, Math.ceil(tileW * (1 + overlap)));
+      const cropH = Math.min(imgH - cropT, Math.ceil(tileH * (1 + overlap)));
+
+      const promise = sharp(imageBuffer)
+        .extract({ left: cropL, top: cropT, width: cropW, height: cropH })
+        .toBuffer()
+        .then((tileBuf) =>
+          runONNXTile(tileBuf, cropW, cropH, cropL, cropT, imgW, imgH),
+        );
+
+      tilePromises.push(promise);
+    }
+  }
+
+  const tileResults = await Promise.all(tilePromises);
+  const allBoxes = tileResults.flat();
+
+  // Anchor-level NMS across all slices
+  allBoxes.sort((a, b) => b.confidence - a.confidence);
   const selected = [];
 
-  for (const candidate of boxes) {
+  for (const candidate of allBoxes) {
     let keep = true;
     for (const approved of selected) {
       const dx = Math.abs(candidate.cx - approved.cx);
@@ -184,7 +230,7 @@ async function detectSpinesONNX(imageBuffer) {
   }));
 }
 
-// 3. OCR Endpoint
+// 4. OCR Endpoint
 app.post("/api/ocr", upload.single("image"), async (req, res) => {
   try {
     if (!req.file) {
@@ -242,7 +288,7 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
   }
 });
 
-// 4. Google Books Endpoint
+// 5. Google Books Endpoint
 app.get("/api/books", async (req, res) => {
   const searchQuery = req.query.q;
   if (!searchQuery)
@@ -311,6 +357,14 @@ function assignTextToSpines(spines, words, imgWidth, imgHeight) {
       }),
     );
 
+    // Inflate polygon by 25% relative to its centroid for OCR word matching
+    const cxPoly = onnxRotatedPolygon.reduce((s, p) => s + p.x, 0) / 4;
+    const cyPoly = onnxRotatedPolygon.reduce((s, p) => s + p.y, 0) / 4;
+    const inflatedPolygon = onnxRotatedPolygon.map((p) => ({
+      x: cxPoly + (p.x - cxPoly) * 1.25,
+      y: cyPoly + (p.y - cyPoly) * 1.25,
+    }));
+
     const matchedWords = wordList.filter((w) => {
       const v = w.boundingPoly?.vertices || [];
       if (v.length < 4) return false;
@@ -319,7 +373,7 @@ function assignTextToSpines(spines, words, imgWidth, imgHeight) {
       const cy =
         ((v[0].y || 0) + (v[1].y || 0) + (v[2].y || 0) + (v[3].y || 0)) / 4;
 
-      return isPointInPolygon({ x: cx, y: cy }, onnxRotatedPolygon);
+      return isPointInPolygon({ x: cx, y: cy }, inflatedPolygon);
     });
 
     matchedWords.sort(
@@ -366,7 +420,6 @@ function deduplicateSpines(spines) {
     const cxA = polyA.reduce((sum, p) => sum + p.x, 0) / polyA.length;
     const cyA = polyA.reduce((sum, p) => sum + p.y, 0) / polyA.length;
 
-    // True physical spine thickness (minimum edge length)
     const d01A = Math.hypot(polyA[1].x - polyA[0].x, polyA[1].y - polyA[0].y);
     const d12A = Math.hypot(polyA[2].x - polyA[1].x, polyA[2].y - polyA[1].y);
     const thicknessA = Math.min(d01A, d12A) || 50;
@@ -379,7 +432,7 @@ function deduplicateSpines(spines) {
       const cyB = polyB.reduce((sum, p) => sum + p.y, 0) / polyB.length;
 
       const d01B = Math.hypot(polyB[1].x - polyB[0].x, polyB[1].y - polyB[0].y);
-      const d12B = Math.hypot(polyB[2].x - polyB[1].x, polyB[2].y - polyB[1].y);
+      const d12B = Math.hypot(polyB[2].x - polyB[1].x, polyB[2].y - polyB[0].y);
       const thicknessB = Math.min(d01B, d12B) || 50;
 
       const centerDist = Math.hypot(cxA - cxB, cyA - cyB);
@@ -387,13 +440,11 @@ function deduplicateSpines(spines) {
       const avgThickness = (thicknessA + thicknessB) / 2;
       const titleOverlap = getTitleWordOverlap(candidate.title, approved.title);
 
-      // 1. Centroid Distance: Duplicate if centers sit within 45% of spine thickness
       if (centerDist < avgThickness * 0.45) {
         isDuplicate = true;
         break;
       }
 
-      // 2. Title Match + Proximity: Duplicate if titles share >30% words and sit nearby
       if (
         titleOverlap > 0.3 &&
         candidate.title !== "Unlabeled Spine" &&
