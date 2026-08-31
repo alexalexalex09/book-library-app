@@ -505,3 +505,87 @@ function deduplicateSpines(spines) {
 
   return accepted;
 }
+
+// Helper: Calculates Jaccard word similarity between two titles (0.0 to 1.0)
+function getTitleWordOverlap(titleA, titleB) {
+  if (!titleA || !titleB) return 0;
+  const normalize = (t) =>
+    t
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, "")
+      .split(/\s+/)
+      .filter((w) => w.length > 1);
+
+  const wordsA = new Set(normalize(titleA));
+  const wordsB = new Set(normalize(titleB));
+  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+
+  let intersection = 0;
+  for (const w of wordsA) {
+    if (wordsB.has(w)) intersection++;
+  }
+  const union = new Set([...wordsA, ...wordsB]).size;
+  return intersection / union;
+}
+
+function deduplicateSpines(spines) {
+  if (!spines || spines.length === 0) return [];
+
+  // Sort descending by score so higher confidence predictions take precedence
+  const sorted = [...spines].sort((a, b) => (b.score || 0) - (a.score || 0));
+  const accepted = [];
+
+  for (const candidate of sorted) {
+    const polyA = candidate.rawPolygon || candidate.polygon;
+    if (!polyA || polyA.length < 4) continue;
+
+    // Calculate OBB centroid and true physical thickness
+    const cxA = polyA.reduce((sum, p) => sum + p.x, 0) / polyA.length;
+    const cyA = polyA.reduce((sum, p) => sum + p.y, 0) / polyA.length;
+    const thicknessA =
+      Math.hypot(polyA[0].x - polyA[3].x, polyA[0].y - polyA[3].y) || 50;
+
+    let isDuplicate = false;
+
+    for (const approved of accepted) {
+      const polyB = approved.rawPolygon || approved.polygon;
+      const cxB = polyB.reduce((sum, p) => sum + p.x, 0) / polyB.length;
+      const cyB = polyB.reduce((sum, p) => sum + p.y, 0) / polyB.length;
+      const thicknessB =
+        Math.hypot(polyB[0].x - polyB[3].x, polyB[0].y - polyB[3].y) || 50;
+
+      const dx = Math.abs(cxA - cxB);
+      const avgThickness = (thicknessA + thicknessB) / 2;
+      const iou = calculateIoU(candidate.box, approved.box);
+      const titleOverlap = getTitleWordOverlap(candidate.title, approved.title);
+
+      // 1. Horizontal Centroid Check: Reject if X-centers sit on the same spine column
+      if (dx < avgThickness * 0.75) {
+        isDuplicate = true;
+        break;
+      }
+
+      // 2. Bounding Box IoU Check: Reject if outer bounds overlap > 30%
+      if (iou > 0.3) {
+        isDuplicate = true;
+        break;
+      }
+
+      // 3. Title Word Similarity Check: Reject if titles share >30% words & sit nearby
+      if (
+        titleOverlap > 0.3 &&
+        candidate.title !== "Unlabeled Spine" &&
+        dx < avgThickness * 2.0
+      ) {
+        isDuplicate = true;
+        break;
+      }
+    }
+
+    if (!isDuplicate) {
+      accepted.push(candidate);
+    }
+  }
+
+  return accepted;
+}
