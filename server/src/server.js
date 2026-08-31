@@ -444,68 +444,6 @@ function isPointInPolygon(point, polygon) {
   return isInside;
 }
 
-function deduplicateSpines(spines) {
-  if (!spines || spines.length === 0) return [];
-
-  // Sort by score descending so higher-confidence predictions take priority
-  const sorted = [...spines].sort((a, b) => (b.score || 0) - (a.score || 0));
-  const accepted = [];
-
-  for (const candidate of sorted) {
-    const polyA = candidate.rawPolygon || candidate.polygon;
-    if (!polyA || polyA.length < 4) continue;
-
-    // Calculate OBB centroid and physical thickness (distance between corner 0 and corner 3)
-    const cxA = polyA.reduce((sum, p) => sum + p.x, 0) / polyA.length;
-    const cyA = polyA.reduce((sum, p) => sum + p.y, 0) / polyA.length;
-    const thicknessA = Math.hypot(
-      polyA[0].x - polyA[3].x,
-      polyA[0].y - polyA[3].y,
-    );
-
-    let isDuplicate = false;
-
-    for (const approved of accepted) {
-      const polyB = approved.rawPolygon || approved.polygon;
-      const cxB = polyB.reduce((sum, p) => sum + p.x, 0) / polyB.length;
-      const cyB = polyB.reduce((sum, p) => sum + p.y, 0) / polyB.length;
-
-      const centerDistance = Math.hypot(cxA - cxB, cyA - cyB);
-      const minThickness = Math.max(thicknessA, 25);
-
-      // 1. Centroid Proximity: Reject if centers are within 60% of spine thickness
-      if (centerDistance < minThickness * 0.6) {
-        isDuplicate = true;
-        break;
-      }
-
-      // 2. Bounding Box IoU: Reject if outer bounds overlap by more than 40%
-      if (calculateIoU(candidate.box, approved.box) > 0.4) {
-        isDuplicate = true;
-        break;
-      }
-
-      // 3. Identical Title Duplicate: Reject if titles match and centers sit close
-      if (
-        candidate.title &&
-        approved.title &&
-        candidate.title !== "Unlabeled Spine" &&
-        candidate.title === approved.title &&
-        centerDistance < minThickness * 1.5
-      ) {
-        isDuplicate = true;
-        break;
-      }
-    }
-
-    if (!isDuplicate) {
-      accepted.push(candidate);
-    }
-  }
-
-  return accepted;
-}
-
 // Helper: Calculates Jaccard word similarity between two titles (0.0 to 1.0)
 function getTitleWordOverlap(titleA, titleB) {
   if (!titleA || !titleB) return 0;
