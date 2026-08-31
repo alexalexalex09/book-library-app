@@ -134,7 +134,6 @@ async function detectSpinesONNX(imageBuffer) {
       const xs = rotatedCornersNormalized.map((c) => c.x);
       const ys = rotatedCornersNormalized.map((c) => c.y);
 
-      // Un-letterboxed true OBB dimensions
       const realW = w / scale / imgWidth;
       const realH = h / scale / imgHeight;
 
@@ -142,8 +141,8 @@ async function detectSpinesONNX(imageBuffer) {
         confidence,
         cx: (cx - padX) / scale / imgWidth,
         cy: (cy - padY) / scale / imgHeight,
-        thickness: Math.min(realW, realH), // 🛑 True spine thickness (~196px)
-        length: Math.max(realW, realH), // 🛑 True spine length (~2200px)
+        thickness: Math.min(realW, realH),
+        length: Math.max(realW, realH),
         polygon: rotatedCornersNormalized,
         box: {
           minX: Math.min(...xs),
@@ -155,7 +154,7 @@ async function detectSpinesONNX(imageBuffer) {
     }
   }
 
-  // 🛑 NMS using true spine thickness for horizontal checks
+  // Initial NMS based on ONNX anchor scores
   boxes.sort((a, b) => b.confidence - a.confidence);
   const selected = [];
 
@@ -168,7 +167,6 @@ async function detectSpinesONNX(imageBuffer) {
       const maxThickness = Math.max(candidate.thickness, approved.thickness);
       const maxLength = Math.max(candidate.length, approved.length);
 
-      // Only suppress if centers sit on the same physical spine
       if (dx < maxThickness * 0.75 && dy < maxLength * 0.35) {
         keep = false;
         break;
@@ -186,77 +184,6 @@ async function detectSpinesONNX(imageBuffer) {
   }));
 }
 
-function assignTextToSpines(spines, words, imgWidth, imgHeight) {
-  const wordList = words && words.length > 1 ? words.slice(1) : [];
-
-  const rawMappedSpines = spines.map((spine) => {
-    const onnxRotatedPolygon = spine.boundingPoly.normalizedVertices.map(
-      (v) => ({
-        x: v.x * imgWidth,
-        y: v.y * imgHeight,
-      }),
-    );
-
-    const matchedWords = wordList.filter((w) => {
-      const v = w.boundingPoly?.vertices || [];
-      if (v.length < 4) return false;
-      const cx =
-        ((v[0].x || 0) + (v[1].x || 0) + (v[2].x || 0) + (v[3].x || 0)) / 4;
-      const cy =
-        ((v[0].y || 0) + (v[1].y || 0) + (v[2].y || 0) + (v[3].y || 0)) / 4;
-
-      return isPointInPolygon({ x: cx, y: cy }, onnxRotatedPolygon);
-    });
-
-    matchedWords.sort(
-      (a, b) =>
-        (a.boundingPoly.vertices[0].y || 0) -
-        (b.boundingPoly.vertices[0].y || 0),
-    );
-
-    const title = matchedWords
-      .map((w) => w.description)
-      .join(" ")
-      .trim();
-
-    const xs = onnxRotatedPolygon.map((p) => p.x);
-    const ys = onnxRotatedPolygon.map((p) => p.y);
-
-    return {
-      score: spine.score,
-      box: {
-        minX: Math.min(...xs),
-        minY: Math.min(...ys),
-        maxX: Math.max(...xs),
-        maxY: Math.max(...ys),
-      },
-      rawPolygon: onnxRotatedPolygon,
-      polygon: onnxRotatedPolygon,
-      title: title || "Unlabeled Spine",
-    };
-  });
-
-  // Filter out overlapping lower-confidence duplicates before returning to client
-  return deduplicateSpines(rawMappedSpines);
-}
-
-// IoU Helper for NMS
-function calculateIoU(a, b) {
-  const interMinX = Math.max(a.minX, b.minX);
-  const interMinY = Math.max(a.minY, b.minY);
-  const interMaxX = Math.min(a.maxX, b.maxX);
-  const interMaxY = Math.min(a.maxY, b.maxY);
-
-  const interWidth = Math.max(0, interMaxX - interMinX);
-  const interHeight = Math.max(0, interMaxY - interMinY);
-  const interArea = interWidth * interHeight;
-
-  const areaA = (a.maxX - a.minX) * (a.maxY - a.minY);
-  const areaB = (b.maxX - b.minX) * (b.maxY - b.minY);
-
-  return interArea / (areaA + areaB - interArea);
-}
-
 // 3. OCR Endpoint
 app.post("/api/ocr", upload.single("image"), async (req, res) => {
   try {
@@ -266,12 +193,10 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
 
     const fileName = `shelf_${Date.now()}.jpg`;
 
-    // 1. Fetch image dimensions using sharp
     const imageMetadata = await sharp(req.file.buffer).metadata();
     const imgWidth = imageMetadata.width || 1;
     const imgHeight = imageMetadata.height || 1;
 
-    // 2. Prepare Vision OCR and Supabase upload tasks
     const visionRequest = {
       image: { content: req.file.buffer },
       features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
@@ -284,7 +209,6 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
         upsert: false,
       });
 
-    // 3. Execute detection, OCR, and upload concurrently
     const [[visionResult], localSpines, { error: uploadError }] =
       await Promise.all([
         client.annotateImage(visionRequest),
@@ -300,7 +224,6 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
 
     const words = visionResult.textAnnotations || [];
 
-    // 4. Map OCR text directly into ONNX spine bounding boxes
     const processedSpines = assignTextToSpines(
       localSpines,
       words,
@@ -309,7 +232,7 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
     );
 
     res.json({
-      spines: processedSpines, // Server-constructed final spines
+      spines: processedSpines,
       words: words,
       imageUrl: publicUrlData.publicUrl,
     });
@@ -375,11 +298,12 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
+// --- HELPER FUNCTIONS ---
+
 function assignTextToSpines(spines, words, imgWidth, imgHeight) {
   const wordList = words && words.length > 1 ? words.slice(1) : [];
 
-  return spines.map((spine) => {
-    // 1. Scale the exact 4 rotated OBB corners from ONNX to image pixel space
+  const rawMappedSpines = spines.map((spine) => {
     const onnxRotatedPolygon = spine.boundingPoly.normalizedVertices.map(
       (v) => ({
         x: v.x * imgWidth,
@@ -387,7 +311,6 @@ function assignTextToSpines(spines, words, imgWidth, imgHeight) {
       }),
     );
 
-    // 2. Filter OCR words whose center point lies inside this ONNX rotated polygon
     const matchedWords = wordList.filter((w) => {
       const v = w.boundingPoly?.vertices || [];
       if (v.length < 4) return false;
@@ -399,7 +322,6 @@ function assignTextToSpines(spines, words, imgWidth, imgHeight) {
       return isPointInPolygon({ x: cx, y: cy }, onnxRotatedPolygon);
     });
 
-    // 3. Sort matching words top-to-bottom to preserve reading order
     matchedWords.sort(
       (a, b) =>
         (a.boundingPoly.vertices[0].y || 0) -
@@ -422,54 +344,19 @@ function assignTextToSpines(spines, words, imgWidth, imgHeight) {
         maxX: Math.max(...xs),
         maxY: Math.max(...ys),
       },
-      rawPolygon: onnxRotatedPolygon, // Preserves exact rotated ONNX output
-      polygon: onnxRotatedPolygon, // Uses exact rotated ONNX output for highlights
+      rawPolygon: onnxRotatedPolygon,
+      polygon: onnxRotatedPolygon,
       title: title || "Unlabeled Spine",
     };
   });
-}
 
-function isPointInPolygon(point, polygon) {
-  let isInside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i].x,
-      yi = polygon[i].y;
-    const xj = polygon[j].x,
-      yj = polygon[j].y;
-    const intersect =
-      yi > point.y !== yj > point.y &&
-      point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi;
-    if (intersect) isInside = !isInside;
-  }
-  return isInside;
-}
-
-// Helper: Calculates Jaccard word similarity between two titles (0.0 to 1.0)
-function getTitleWordOverlap(titleA, titleB) {
-  if (!titleA || !titleB) return 0;
-  const normalize = (t) =>
-    t
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, "")
-      .split(/\s+/)
-      .filter((w) => w.length > 1);
-
-  const wordsA = new Set(normalize(titleA));
-  const wordsB = new Set(normalize(titleB));
-  if (wordsA.size === 0 || wordsB.size === 0) return 0;
-
-  let intersection = 0;
-  for (const w of wordsA) {
-    if (wordsB.has(w)) intersection++;
-  }
-  const union = new Set([...wordsA, ...wordsB]).size;
-  return intersection / union;
+  // Filter duplicate candidates before returning JSON payload
+  return deduplicateSpines(rawMappedSpines);
 }
 
 function deduplicateSpines(spines) {
   if (!spines || spines.length === 0) return [];
 
-  // Sort descending by score so higher confidence predictions take precedence
   const sorted = [...spines].sort((a, b) => (b.score || 0) - (a.score || 0));
   const accepted = [];
 
@@ -477,11 +364,12 @@ function deduplicateSpines(spines) {
     const polyA = candidate.rawPolygon || candidate.polygon;
     if (!polyA || polyA.length < 4) continue;
 
-    // Calculate OBB centroid and true physical thickness
     const cxA = polyA.reduce((sum, p) => sum + p.x, 0) / polyA.length;
     const cyA = polyA.reduce((sum, p) => sum + p.y, 0) / polyA.length;
+
+    // 🛑 Corner 0 to Corner 1 measures true horizontal spine THICKNESS
     const thicknessA =
-      Math.hypot(polyA[0].x - polyA[3].x, polyA[0].y - polyA[3].y) || 50;
+      Math.hypot(polyA[1].x - polyA[0].x, polyA[1].y - polyA[0].y) || 50;
 
     let isDuplicate = false;
 
@@ -489,8 +377,9 @@ function deduplicateSpines(spines) {
       const polyB = approved.rawPolygon || approved.polygon;
       const cxB = polyB.reduce((sum, p) => sum + p.x, 0) / polyB.length;
       const cyB = polyB.reduce((sum, p) => sum + p.y, 0) / polyB.length;
+
       const thicknessB =
-        Math.hypot(polyB[0].x - polyB[3].x, polyB[0].y - polyB[3].y) || 50;
+        Math.hypot(polyB[1].x - polyB[0].x, polyB[1].y - polyB[0].y) || 50;
 
       const dx = Math.abs(cxA - cxB);
       const avgThickness = (thicknessA + thicknessB) / 2;
@@ -526,4 +415,56 @@ function deduplicateSpines(spines) {
   }
 
   return accepted;
+}
+
+function getTitleWordOverlap(titleA, titleB) {
+  if (!titleA || !titleB) return 0;
+  const normalize = (t) =>
+    t
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, "")
+      .split(/\s+/)
+      .filter((w) => w.length > 1);
+
+  const wordsA = new Set(normalize(titleA));
+  const wordsB = new Set(normalize(titleB));
+  if (wordsA.size === 0 || wordsB.size === 0) return 0;
+
+  let intersection = 0;
+  for (const w of wordsA) {
+    if (wordsB.has(w)) intersection++;
+  }
+  const union = new Set([...wordsA, ...wordsB]).size;
+  return intersection / union;
+}
+
+function isPointInPolygon(point, polygon) {
+  let isInside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x,
+      yi = polygon[i].y;
+    const xj = polygon[j].x,
+      yj = polygon[j].y;
+    const intersect =
+      yi > point.y !== yj > point.y &&
+      point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi;
+    if (intersect) isInside = !isInside;
+  }
+  return isInside;
+}
+
+function calculateIoU(a, b) {
+  const interMinX = Math.max(a.minX, b.minX);
+  const interMinY = Math.max(a.minY, b.minY);
+  const interMaxX = Math.min(a.maxX, b.maxX);
+  const interMaxY = Math.min(a.maxY, b.maxY);
+
+  const interWidth = Math.max(0, interMaxX - interMinX);
+  const interHeight = Math.max(0, interMaxY - interMinY);
+  const interArea = interWidth * interHeight;
+
+  const areaA = (a.maxX - a.minX) * (a.maxY - a.minY);
+  const areaB = (b.maxX - b.minX) * (b.maxY - b.minY);
+
+  return interArea / (areaA + areaB - interArea);
 }
