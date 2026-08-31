@@ -154,7 +154,7 @@ async function detectSpinesONNX(imageBuffer) {
     }
   }
 
-  // Initial NMS based on ONNX anchor scores
+  // Initial anchor-level NMS
   boxes.sort((a, b) => b.confidence - a.confidence);
   const selected = [];
 
@@ -167,7 +167,7 @@ async function detectSpinesONNX(imageBuffer) {
       const maxThickness = Math.max(candidate.thickness, approved.thickness);
       const maxLength = Math.max(candidate.length, approved.length);
 
-      if (dx < maxThickness * 0.75 && dy < maxLength * 0.35) {
+      if (dx < maxThickness * 0.5 && dy < maxLength * 0.3) {
         keep = false;
         break;
       }
@@ -350,7 +350,6 @@ function assignTextToSpines(spines, words, imgWidth, imgHeight) {
     };
   });
 
-  // Filter duplicate candidates before returning JSON payload
   return deduplicateSpines(rawMappedSpines);
 }
 
@@ -367,9 +366,10 @@ function deduplicateSpines(spines) {
     const cxA = polyA.reduce((sum, p) => sum + p.x, 0) / polyA.length;
     const cyA = polyA.reduce((sum, p) => sum + p.y, 0) / polyA.length;
 
-    // 🛑 Corner 0 to Corner 1 measures true horizontal spine THICKNESS
-    const thicknessA =
-      Math.hypot(polyA[1].x - polyA[0].x, polyA[1].y - polyA[0].y) || 50;
+    // True physical spine thickness (minimum edge length)
+    const d01A = Math.hypot(polyA[1].x - polyA[0].x, polyA[1].y - polyA[0].y);
+    const d12A = Math.hypot(polyA[2].x - polyA[1].x, polyA[2].y - polyA[1].y);
+    const thicknessA = Math.min(d01A, d12A) || 50;
 
     let isDuplicate = false;
 
@@ -378,31 +378,26 @@ function deduplicateSpines(spines) {
       const cxB = polyB.reduce((sum, p) => sum + p.x, 0) / polyB.length;
       const cyB = polyB.reduce((sum, p) => sum + p.y, 0) / polyB.length;
 
-      const thicknessB =
-        Math.hypot(polyB[1].x - polyB[0].x, polyB[1].y - polyB[0].y) || 50;
+      const d01B = Math.hypot(polyB[1].x - polyB[0].x, polyB[1].y - polyB[0].y);
+      const d12B = Math.hypot(polyB[2].x - polyB[1].x, polyB[2].y - polyB[1].y);
+      const thicknessB = Math.min(d01B, d12B) || 50;
 
+      const centerDist = Math.hypot(cxA - cxB, cyA - cyB);
       const dx = Math.abs(cxA - cxB);
       const avgThickness = (thicknessA + thicknessB) / 2;
-      const iou = calculateIoU(candidate.box, approved.box);
       const titleOverlap = getTitleWordOverlap(candidate.title, approved.title);
 
-      // 1. Horizontal Centroid Check: Reject if X-centers sit on the same spine column
-      if (dx < avgThickness * 0.75) {
+      // 1. Centroid Distance: Duplicate if centers sit within 45% of spine thickness
+      if (centerDist < avgThickness * 0.45) {
         isDuplicate = true;
         break;
       }
 
-      // 2. Bounding Box IoU Check: Reject if outer bounds overlap > 30%
-      if (iou > 0.3) {
-        isDuplicate = true;
-        break;
-      }
-
-      // 3. Title Word Similarity Check: Reject if titles share >30% words & sit nearby
+      // 2. Title Match + Proximity: Duplicate if titles share >30% words and sit nearby
       if (
         titleOverlap > 0.3 &&
         candidate.title !== "Unlabeled Spine" &&
-        dx < avgThickness * 2.0
+        dx < avgThickness * 1.75
       ) {
         isDuplicate = true;
         break;
@@ -451,20 +446,4 @@ function isPointInPolygon(point, polygon) {
     if (intersect) isInside = !isInside;
   }
   return isInside;
-}
-
-function calculateIoU(a, b) {
-  const interMinX = Math.max(a.minX, b.minX);
-  const interMinY = Math.max(a.minY, b.minY);
-  const interMaxX = Math.min(a.maxX, b.maxX);
-  const interMaxY = Math.min(a.maxY, b.maxY);
-
-  const interWidth = Math.max(0, interMaxX - interMinX);
-  const interHeight = Math.max(0, interMaxY - interMinY);
-  const interArea = interWidth * interHeight;
-
-  const areaA = (a.maxX - a.minX) * (a.maxY - a.minY);
-  const areaB = (b.maxX - b.minX) * (b.maxY - b.minY);
-
-  return interArea / (areaA + areaB - interArea);
 }
