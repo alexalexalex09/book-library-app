@@ -7,6 +7,7 @@ const { createClient } = require("@supabase/supabase-js");
 const path = require("path");
 const sharp = require("sharp");
 const crypto = require("crypto");
+const axios = require("axios");
 
 sharp.cache(false);
 
@@ -33,7 +34,6 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 // --- COCO RLE DECODER & POLYGON EXTRACTION ---
 
-// Decodes COCO LEB128 Run-Length Encoded (RLE) string into a binary mask
 function decodeCOCORLE(counts, h, w) {
   const mask = new Uint8Array(h * w);
   let i = 0;
@@ -78,13 +78,11 @@ function decodeCOCORLE(counts, h, w) {
   return mask;
 }
 
-// Samples normalized boundary polygon points from decoded COCO bitmask
 function extractPolygonFromRLE(rleMask) {
-  const [h, w] = rleMask.size; // h = size[0], w = size[1]
+  const [h, w] = rleMask.size;
   const mask = decodeCOCORLE(rleMask.counts, h, w);
   const points = [];
 
-  // Sample perimeter points along height (column-major mask: pixel (x,y) = x * h + y)
   const stepY = Math.max(1, Math.floor(h / 80));
 
   for (let y = 0; y < h; y += stepY) {
@@ -107,9 +105,46 @@ function extractPolygonFromRLE(rleMask) {
   return points;
 }
 
+function pointLineDistance(point, start, end) {
+  if (start.x === end.x && start.y === end.y) {
+    return Math.hypot(point.x - start.x, point.y - start.y);
+  }
+  const numerator = Math.abs(
+    (end.y - start.y) * point.x -
+      (end.x - start.x) * point.y +
+      end.x * start.y -
+      end.y * start.x,
+  );
+  const denominator = Math.hypot(end.x - start.x, end.y - start.y);
+  return numerator / denominator;
+}
+
+function simplifyPolygon(points, epsilon = 10) {
+  if (points.length <= 2) return points;
+
+  let maxDist = 0;
+  let index = 0;
+  const end = points.length - 1;
+
+  for (let i = 1; i < end; i++) {
+    const dist = pointLineDistance(points[i], points[0], points[end]);
+    if (dist > maxDist) {
+      maxDist = dist;
+      index = i;
+    }
+  }
+
+  if (maxDist > epsilon) {
+    const left = simplifyPolygon(points.slice(0, index + 1), epsilon);
+    const right = simplifyPolygon(points.slice(index), epsilon);
+    return left.slice(0, left.length - 1).concat(right);
+  } else {
+    return [points[0], points[end]];
+  }
+}
+
 // --- GEOMETRY & OCR MAPPING HELPERS ---
 
-// Ray-Casting algorithm to test if point is inside a polygon
 function isPointInPolygon(point, polygon) {
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -126,7 +161,6 @@ function isPointInPolygon(point, polygon) {
   return inside;
 }
 
-// Maps Cloud Vision OCR words to physical spine masks
 function mapOcrWordsToSpines(spines, ocrWords) {
   const spineBuckets = spines.map((spine) => ({
     ...spine,
@@ -196,49 +230,6 @@ async function extractTextWithCloudVision(imageBuffer, imgWidth, imgHeight) {
   });
 }
 
-// Reduces high-resolution polygon arrays to a target point count using uniform sampling
-// Calculates the perpendicular distance from a point to a line segment
-function pointLineDistance(point, start, end) {
-  if (start.x === end.x && start.y === end.y) {
-    return Math.hypot(point.x - start.x, point.y - start.y);
-  }
-  const numerator = Math.abs(
-    (end.y - start.y) * point.x -
-      (end.x - start.x) * point.y +
-      end.x * start.y -
-      end.y * start.x,
-  );
-  const denominator = Math.hypot(end.x - start.x, end.y - start.y);
-  return numerator / denominator;
-}
-
-// Ramer-Douglas-Peucker algorithm to preserve corners while drastically reducing points
-function simplifyPolygon(points, epsilon = 10) {
-  if (points.length <= 2) return points;
-
-  let maxDist = 0;
-  let index = 0;
-  const end = points.length - 1;
-
-  for (let i = 1; i < end; i++) {
-    const dist = pointLineDistance(points[i], points[0], points[end]);
-    if (dist > maxDist) {
-      maxDist = dist;
-      index = i;
-    }
-  }
-
-  if (maxDist > epsilon) {
-    const left = simplifyPolygon(points.slice(0, index + 1), epsilon);
-    const right = simplifyPolygon(points.slice(index), epsilon);
-    return left.slice(0, left.length - 1).concat(right);
-  } else {
-    return [points[0], points[end]];
-  }
-}
-
-const axios = require("axios");
-
 async function extractSpatialPolygonsRoboflow(
   imageBuffer,
   imgWidth,
@@ -253,7 +244,6 @@ async function extractSpatialPolygonsRoboflow(
   const modelId = "book-spine-3dgvf";
   const modelVersion = "8";
 
-  // Modern Serverless Cloud API direct model URL
   const url = `https://serverless.roboflow.com/${modelId}/${modelVersion}`;
 
   const response = await axios({
@@ -261,7 +251,7 @@ async function extractSpatialPolygonsRoboflow(
     url: url,
     params: {
       api_key: apiKey,
-      confidence: 0.3, // Minimum confidence threshold (0.0 to 1.0)
+      confidence: 0.3,
     },
     data: base64Image,
     headers: {
@@ -275,24 +265,17 @@ async function extractSpatialPolygonsRoboflow(
     .map((pred) => {
       let polygon = [];
 
-      // 1. Extract vector points if returned
       if (pred.points || pred.polygon) {
         let rawPoints = pred.points || pred.polygon || [];
-
-        // RDP naturally reduces straight edges to ~4-10 points total
         rawPoints = simplifyPolygon(rawPoints, 10);
 
         polygon = rawPoints.map((pt) => ({
           x: pt.x > 1 ? pt.x / imgWidth : pt.x,
           y: pt.y > 1 ? pt.y / imgHeight : pt.y,
         }));
-      }
-      // 2. Decode RLE mask if returned
-      else if (pred.rle_mask && pred.rle_mask.counts) {
+      } else if (pred.rle_mask && pred.rle_mask.counts) {
         polygon = extractPolygonFromRLE(pred.rle_mask);
-      }
-      // 3. Fallback to bounding box rectangle
-      else if (pred.width && pred.height) {
+      } else if (pred.width && pred.height) {
         const w = pred.width > 1 ? pred.width / imgWidth : pred.width;
         const h = pred.height > 1 ? pred.height / imgHeight : pred.height;
         const cx = pred.x > 1 ? pred.x / imgWidth : pred.x;
@@ -340,21 +323,16 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
   console.log(`[${timestamp}] 📸 Processing Bookshelf Scanning Request`);
 
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No image uploaded" });
-    }
+    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
 
-    // Process raw upload without .rotate() to preserve unrotated EXIF dimensions
     const rawBuffer = req.file.buffer;
     const metadata = await sharp(rawBuffer).metadata();
     const imgWidth = metadata.width || 1;
     const imgHeight = metadata.height || 1;
-
     const imageHash = crypto
       .createHash("sha256")
       .update(rawBuffer)
       .digest("hex");
-
     const fileName = `shelf_${Date.now()}.jpg`;
 
     let ocrWords = null;
@@ -428,7 +406,6 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
     const { data: publicUrlData } = supabase.storage
       .from("shelves")
       .getPublicUrl(fileName);
-
     const formattedSpines = mapOcrWordsToSpines(spineMasks, ocrWords);
 
     const elapsed = ((Date.now() - reqStart) / 1000).toFixed(2);
@@ -446,23 +423,16 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
 
 app.get("/api/books", async (req, res) => {
   const searchQuery = req.query.q;
-  if (!searchQuery) {
+  if (!searchQuery)
     return res.status(400).json({ error: "Missing search query" });
-  }
 
   const apiKey = (process.env.GOOGLE_BOOKS_API_KEY || "").trim();
-  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(
-    searchQuery,
-  )}&maxResults=1${apiKey ? `&key=${apiKey}` : ""}`;
+  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchQuery)}&maxResults=1${apiKey ? `&key=${apiKey}` : ""}`;
 
   try {
     const response = await fetch(url);
     const data = await response.json();
-
-    if (!response.ok) {
-      return res.status(response.status).json(data);
-    }
-
+    if (!response.ok) return res.status(response.status).json(data);
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch book data" });

@@ -1,6 +1,5 @@
 async function fetchBookMetadata(query) {
   try {
-    // 🛑 Use relative URL path so it calls your live Render backend
     const response = await fetch(`/api/books?q=${encodeURIComponent(query)}`);
 
     if (!response.ok) {

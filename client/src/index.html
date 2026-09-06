@@ -3,73 +3,110 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Library Spine Finder</title>
-  <link rel="stylesheet" href="./css/style.css">
+  <title>ShelfScan</title>
+  
+  <!-- CSS Stylesheet -->
+  <link rel="stylesheet" href="css/style.css">
+  
+  <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
-  <main class="app-container">
-    <!-- Left Column: Image Upload & Canvas -->
-    <section class="workspace">
-      <header class="workspace-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 15px;">
-        <h1 style="margin: 0;">Library Finder</h1>
+  <!-- Logged Out / Auth View -->
+  <div id="loggedOutView" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh;">
+    <h2 style="font-size: 2rem; margin-bottom: 20px; color: #3f3f46;">Welcome to ShelfScan</h2>
+    <div style="display: flex; flex-direction: column; gap: 12px; width: 320px;">
+      <input type="email" id="emailInput" placeholder="Email Address" class="search-input" style="margin-bottom: 0;">
+      <input type="password" id="passwordInput" placeholder="Password" class="search-input" style="margin-bottom: 0;">
+      <button id="loginBtn" style="padding: 10px; background-color: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px;">Log In</button>
+      <button id="signupBtn" style="padding: 10px; background-color: #22c55e; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">Sign Up</button>
+    </div>
+  </div>
 
-        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-          <label for="shelfSelect" style="font-weight: bold; font-size: 0.9rem; white-space: nowrap;">Current Shelf:</label>
-          <select id="shelfSelect" style="padding: 6px 10px; border-radius: 6px; border: 1px solid #d4d4d8;">
-            <option value="">-- Select a Saved Shelf --</option>
-          </select>
-
-          <label for="imageUpload" class="upload-btn">
-            Upload Shelf Photo
-          </label>
-          <input type="file" id="imageUpload" accept="image/*" hidden>
-        </div>
-      </header>
-      
-      <div class="canvas-container">
-       
-        <!-- The canvas where we will draw the image and bounding boxes -->
-        <canvas id="shelfCanvas"></canvas>
-        <p id="placeholderText">No image uploaded yet. Upload a photo of your bookshelf to begin.</p>
+  <!-- Logged In / Main Application View -->
+  <div id="loggedInView" style="display: none; height: 100vh; flex-direction: column;">
+    
+    <!-- Top Navigation -->
+    <nav class="app-nav">
+      <div class="nav-brand" style="font-weight: 800; font-size: 1.25rem; color: #18181b;">📚 ShelfScan</div>
+      <div class="nav-links">
+        <button id="navUploadBtn" class="nav-btn active">Upload & Scan</button>
+        <button id="navLibraryBtn" class="nav-btn">Infinite Library Map</button>
       </div>
-    </section>
+      <div class="nav-user" style="display: flex; align-items: center; gap: 15px;">
+        <span id="userEmailDisplay" style="font-size: 0.9rem; color: #71717a; font-weight: 500;"></span>
+        <button id="logoutBtn" style="padding: 6px 12px; background-color: white; border: 1px solid #d4d4d8; border-radius: 6px; cursor: pointer; font-weight: 600; color: #3f3f46;">Logout</button>
+      </div>
+    </nav>
 
-    <!-- Right Column: Library List -->
-    <aside class="sidebar">
-      <div id="authContainer" style="margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #e4e4e7;">
-        <div id="loggedOutView">
-          <h3 style="font-size: 1rem; margin-bottom: 10px;">Account</h3>
-          <input type="email" id="emailInput" class="search-input" placeholder="Email" style="margin-bottom: 5px;">
-          <input type="password" id="passwordInput" class="search-input" placeholder="Password" style="margin-bottom: 10px;">
-          <div style="display: flex; gap: 10px;">
-            <button id="loginBtn" style="flex: 1; padding: 8px; cursor: pointer;">Log In</button>
-            <button id="signupBtn" style="flex: 1; padding: 8px; cursor: pointer;">Sign Up</button>
+    <main class="main-content">
+      
+     <!-- VIEW 1: UPLOAD & SCAN WORKSPACE -->
+      <div id="uploadView" class="view-section active-view">
+        <div class="workspace">
+          <div class="workspace-header">
+            <h2 style="color: #3f3f46; margin: 0;">Scan New Shelf</h2>
+            <input type="file" id="imageUpload" accept="image/*" style="display: none;">
+            <button class="upload-btn" onclick="document.getElementById('imageUpload').click()">+ Upload Image</button>
+          </div>
+          
+          <div class="canvas-container">
+            <div id="placeholderText" class="dropzone-empty-state">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 12px;">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
+              <h3>Upload a shelf photo</h3>
+              <p>Click the button above to begin mapping spines</p>
+            </div>
+            <canvas id="shelfCanvas"></canvas>
           </div>
         </div>
-
-        <div id="loggedInView" style="display: none;">
-          <p style="font-size: 0.9rem; margin-bottom: 10px;">Logged in as: <br><strong id="userEmailDisplay"></strong></p>
-          <button id="logoutBtn" style="padding: 6px 12px; cursor: pointer;">Log Out</button>
-        </div>
+        
+        <aside class="sidebar">
+          <h2 style="color: #3f3f46; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #e4e4e7;">Detected Spines</h2>
+          <div id="pendingContainer">
+            <div class="empty-state" style="text-align: center; padding-top: 40px;">
+              Waiting for image...
+            </div>
+          </div>
+        </aside>
       </div>
-      <h2>My Library</h2>
-      
-      <!-- NEW: Search Box -->
-      <input type="text" id="searchInput" class="search-input" placeholder="Search titles or authors...">
-      
-      <!-- NEW: Pending Swipes Area -->
-      <div id="pendingContainer"></div>
 
-      <!-- EXISTING: The Permanent Database -->
-      <ul id="libraryList" class="library-list">
-        <li class="empty-state">Your cataloged books will appear here.</li>
-      </ul>
-    </aside>
-  </main>
+      <!-- VIEW 2: INFINITE LIBRARY MAP -->
+      <div id="libraryView" class="view-section hidden-view">
+        <div class="map-container" id="infiniteMap">
+          <div class="map-controls">
+            <button id="manageShelvesBtn" class="nav-btn" style="background: white; border: 1px solid #d4d4d8; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">📑 Manage Shelves</button>
+          </div>
+          <div class="map-viewport" id="mapViewport">
+            <!-- Draggable shelf objects will be dynamically injected here via app.js -->
+          </div>
+        </div>
+        <aside class="sidebar">
+          <h2>My Library</h2>
+          <input type="text" id="searchInput" class="search-input" placeholder="Search books by title or author...">
+          <ul id="libraryList" class="library-list"></ul>
+        </aside>
+      </div>
 
-  <script src="./js/api.js"></script>
-  <script src="./js/app.js"></script>
+    </main>
+  </div>
+
+  <div id="shelfManagerModal" class="modal-overlay hidden-view">
+    <div class="modal-content">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h2 style="margin: 0; color: #3f3f46;">Manage Shelves</h2>
+        <button id="closeManagerBtn" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #71717a;">&times;</button>
+      </div>
+      <ul id="shelfManagerList" style="list-style: none; padding: 0; max-height: 400px; overflow-y: auto;"></ul>
+    </div>
+  </div>
+
+  <!-- Application Scripts -->
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>

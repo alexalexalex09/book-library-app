@@ -7,11 +7,43 @@ const placeholderText = document.getElementById("placeholderText");
 let detectedSpines = [];
 let currentShelfImageUrl = "";
 let myLibrary = [];
-let dismissedSpines = new Set(); // Tracks titles dismissed by the user
+let dismissedSpines = new Set();
+
+// --- VIEW ROUTING ---
+const navUploadBtn = document.getElementById("navUploadBtn");
+const navLibraryBtn = document.getElementById("navLibraryBtn");
+const uploadView = document.getElementById("uploadView");
+const libraryView = document.getElementById("libraryView");
+
+function switchView(view) {
+  if (view === "upload") {
+    uploadView.classList.remove("hidden-view");
+    uploadView.classList.add("active-view");
+    libraryView.classList.remove("active-view");
+    libraryView.classList.add("hidden-view");
+
+    navUploadBtn.classList.add("active");
+    navLibraryBtn.classList.remove("active");
+  } else if (view === "library") {
+    libraryView.classList.remove("hidden-view");
+    libraryView.classList.add("active-view");
+    uploadView.classList.remove("active-view");
+    uploadView.classList.add("hidden-view");
+
+    navLibraryBtn.classList.add("active");
+    navUploadBtn.classList.remove("active");
+
+    // Fetch and draw map elements
+    loadLibraryMap();
+  }
+}
+
+navUploadBtn?.addEventListener("click", () => switchView("upload"));
+navLibraryBtn?.addEventListener("click", () => switchView("library"));
 
 // 1. Initialize Supabase Client
-const SUPABASE_URL = "https://cyrdpxukqtruheigcdps.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_6F6iP44Rw9T-OJSRBwOX5w_e0rMWYdP";
+const SUPABASE_URL = "https://wqxvahmiblqgsjyywxpa.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_Oth3p_I48nLfY8tLkOcSvA_uegZywJY";
 const supabaseClient = window.supabase.createClient(
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
@@ -42,8 +74,7 @@ async function updateAuthUI(user) {
 
     if (!error && data) {
       myLibrary = data;
-      console.log("Fetched library from Supabase:", myLibrary);
-      renderSavedLibrary(searchInput.value);
+      renderSavedLibrary(searchInput?.value);
       populateShelfDropdown();
     }
   } else {
@@ -51,7 +82,6 @@ async function updateAuthUI(user) {
     loggedInView.style.display = "none";
     emailInput.value = "";
     passwordInput.value = "";
-
     myLibrary = [];
     renderSavedLibrary();
   }
@@ -59,7 +89,6 @@ async function updateAuthUI(user) {
 
 // 4. Check for existing session on page load
 async function checkUserSession() {
-  console.log("Checking user session...");
   const {
     data: { session },
   } = await supabaseClient.auth.getSession();
@@ -68,7 +97,7 @@ async function checkUserSession() {
 checkUserSession();
 
 // 5. Auth Event Listeners
-document.getElementById("signupBtn").addEventListener("click", async () => {
+document.getElementById("signupBtn")?.addEventListener("click", async () => {
   const { data, error } = await supabaseClient.auth.signUp({
     email: emailInput.value,
     password: passwordInput.value,
@@ -77,7 +106,7 @@ document.getElementById("signupBtn").addEventListener("click", async () => {
   else updateAuthUI(data.user);
 });
 
-document.getElementById("loginBtn").addEventListener("click", async () => {
+document.getElementById("loginBtn")?.addEventListener("click", async () => {
   const { data, error } = await supabaseClient.auth.signInWithPassword({
     email: emailInput.value,
     password: passwordInput.value,
@@ -86,13 +115,13 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
   else updateAuthUI(data.user);
 });
 
-document.getElementById("logoutBtn").addEventListener("click", async () => {
+document.getElementById("logoutBtn")?.addEventListener("click", async () => {
   await supabaseClient.auth.signOut();
   updateAuthUI(null);
 });
 
 // --- 2. IMAGE UPLOAD HANDLING ---
-imageUpload.addEventListener("change", function (event) {
+imageUpload?.addEventListener("change", function (event) {
   const file = event.target.files[0];
   if (!file) return;
 
@@ -100,7 +129,7 @@ imageUpload.addEventListener("change", function (event) {
   reader.onload = function (e) {
     const img = new Image();
     img.onload = function () {
-      placeholderText.style.display = "none";
+      if (placeholderText) placeholderText.style.display = "none";
       canvas.style.display = "block";
 
       canvas.width = img.width;
@@ -108,8 +137,6 @@ imageUpload.addEventListener("change", function (event) {
       canvas.imgObj = img;
 
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      console.log("Image loaded. Sending to VLM server...");
-
       processImageForOCR(file);
     };
     img.src = e.target.result;
@@ -128,16 +155,12 @@ async function processImageForOCR(file) {
       method: "POST",
       body: formData,
     });
-
     const result = await response.json();
 
     if (result.spines) {
-      console.log("VLM Spines Received!", result.spines);
-
       dismissedSpines.clear();
       currentShelfImageUrl = result.imageUrl;
 
-      // Scale normalized 0.0-1.0 coordinates into canvas pixel dimensions
       detectedSpines = result.spines.map((spine) => ({
         ...spine,
         box: {
@@ -170,7 +193,6 @@ async function processImageForOCR(file) {
           ],
           { onConflict: "image_url" },
         );
-
         if (error) console.error("Error saving shelf VLM data:", error);
       }
     }
@@ -193,11 +215,8 @@ function getMousePos(e) {
 
 canvas.addEventListener("click", async (e) => {
   const pos = getMousePos(e);
-
   const clickedSpine = detectedSpines.find((spine) => {
-    if (spine.polygon) {
-      return isPointInPolygon(pos, spine.polygon);
-    }
+    if (spine.polygon) return isPointInPolygon(pos, spine.polygon);
     const { minX, minY, maxX, maxY } = spine.box;
     return pos.x >= minX && pos.x <= maxX && pos.y >= minY && pos.y <= maxY;
   });
@@ -206,7 +225,6 @@ canvas.addEventListener("click", async (e) => {
     const boxToPass = clickedSpine.polygon
       ? { ...clickedSpine.box, polygon: clickedSpine.polygon }
       : clickedSpine.box;
-
     promptTitleConfirmation(clickedSpine.title, boxToPass);
   }
 });
@@ -229,7 +247,6 @@ function isPointInPolygon(point, polygon) {
 // --- 5. UI CONFIRMATION & DATABASE ---
 function renderConfirmationCard(ocrText, bookData, unifiedBox) {
   const pendingContainer = document.getElementById("pendingContainer");
-
   const div = document.createElement("div");
   div.style.cssText =
     "border: 2px solid #3b82f6; padding: 10px; margin-bottom: 10px; border-radius: 8px; display: flex; gap: 10px; background: #eff6ff;";
@@ -255,12 +272,8 @@ function renderConfirmationCard(ocrText, bookData, unifiedBox) {
   );
   div.addEventListener("mouseleave", () => redrawCanvas());
 
-  const confirmBtn = div.querySelector(".confirm-btn");
-  confirmBtn.addEventListener("click", async () => {
-    if (!currentUser) {
-      alert("Please log in to save books!");
-      return;
-    }
+  div.querySelector(".confirm-btn").addEventListener("click", async () => {
+    if (!currentUser) return alert("Please log in to save books!");
 
     const finalBook = {
       user_id: currentUser.id,
@@ -275,49 +288,29 @@ function renderConfirmationCard(ocrText, bookData, unifiedBox) {
       .from("user_books")
       .insert([finalBook])
       .select();
-
-    if (error) {
-      console.error("Error saving book:", error);
-      alert("Failed to save book.");
-      return;
-    }
+    if (error) return alert("Failed to save book.");
 
     myLibrary.unshift(data[0]);
     populateShelfDropdown();
-    shelfSelect.value = currentShelfImageUrl;
+    if (shelfSelect) shelfSelect.value = currentShelfImageUrl;
     div.remove();
-    renderSavedLibrary(searchInput.value);
+    renderSavedLibrary(searchInput?.value);
     redrawCanvas();
   });
 }
 
 function promptTitleConfirmation(detectedText, boundingBox) {
   const pendingContainer = document.getElementById("pendingContainer");
-
   const card = document.createElement("div");
   card.style.cssText =
     "padding: 12px; border: 1px solid #d4d4d8; border-radius: 8px; margin-bottom: 12px; background: #fafafa;";
 
   card.innerHTML = `
-    <label style="display: block; font-weight: bold; font-size: 0.85rem; margin-bottom: 6px;">
-      Recognized Title:
-    </label>
-    <input 
-      type="text" 
-      id="titleConfirmInput" 
-      class="search-input" 
-      value="${detectedText.replace(/"/g, "&quot;")}" 
-      style="margin-bottom: 10px; width: 100%; font-size: 0.95rem; padding: 6px 8px;"
-    >
+    <label style="display: block; font-weight: bold; font-size: 0.85rem; margin-bottom: 6px;">Recognized Title:</label>
+    <input type="text" id="titleConfirmInput" class="search-input" value="${detectedText.replace(/"/g, "&quot;")}" style="margin-bottom: 10px; width: 100%; font-size: 0.95rem; padding: 6px 8px;">
     <div style="display: flex; gap: 8px;">
-      <button 
-        id="searchBookBtn" 
-        style="flex: 1; padding: 6px; cursor: pointer; background: #2563eb; color: white; border: none; border-radius: 4px; font-weight: 500;"
-      >Search Book</button>
-      <button 
-        id="cancelSearchBtn" 
-        style="padding: 6px 10px; cursor: pointer; background: #e4e4e7; border: none; border-radius: 4px;"
-      >Cancel</button>
+      <button id="searchBookBtn" style="flex: 1; padding: 6px; cursor: pointer; background: #2563eb; color: white; border: none; border-radius: 4px; font-weight: 500;">Search Book</button>
+      <button id="cancelSearchBtn" style="padding: 6px 10px; cursor: pointer; background: #e4e4e7; border: none; border-radius: 4px;">Cancel</button>
     </div>
   `;
 
@@ -335,16 +328,13 @@ function promptTitleConfirmation(detectedText, boundingBox) {
     const bookData = await fetchBookMetadata(editedTitle);
     card.remove();
 
-    if (bookData) {
-      renderConfirmationCard(editedTitle, bookData, boundingBox);
-    } else {
-      alert(`No book details found for "${editedTitle}".`);
-    }
+    if (bookData) renderConfirmationCard(editedTitle, bookData, boundingBox);
+    else alert(`No book details found for "${editedTitle}".`);
   });
 
-  card.querySelector("#cancelSearchBtn").addEventListener("click", () => {
-    card.remove();
-  });
+  card
+    .querySelector("#cancelSearchBtn")
+    .addEventListener("click", () => card.remove());
 }
 
 // --- 6. LIBRARY & SHELF MANAGEMENT ---
@@ -354,25 +344,17 @@ if (libraryList) {
     const deleteBtn = e.target.closest(".delete-btn");
     if (deleteBtn) {
       e.stopPropagation();
-
       const bookId = parseInt(deleteBtn.dataset.bookId);
-      if (!bookId) return;
-
-      if (!confirm("Remove this book from your library?")) return;
+      if (!bookId || !confirm("Remove this book from your library?")) return;
 
       const { error } = await supabaseClient
         .from("user_books")
         .delete()
         .eq("id", bookId);
-
-      if (error) {
-        console.error("Error deleting book:", error);
-        alert("Failed to delete book.");
-        return;
-      }
+      if (error) return alert("Failed to delete book.");
 
       myLibrary = myLibrary.filter((book) => book.id !== bookId);
-      renderSavedLibrary(searchInput ? searchInput.value : "");
+      renderSavedLibrary(searchInput?.value || "");
       populateShelfDropdown();
       return;
     }
@@ -382,8 +364,15 @@ if (libraryList) {
 
     const bookId = parseInt(li.dataset.bookId);
     const book = myLibrary.find((b) => b.id === bookId);
-
     if (!book) return;
+
+    // Check which view is currently active
+    if (
+      document.getElementById("libraryView").classList.contains("active-view")
+    ) {
+      zoomToBookOnMap(book);
+      return;
+    }
 
     const box = book.bounding_box || book.boundingBox;
     const shelfUrl = book.shelf_image_url || book.shelfImageUrl;
@@ -393,16 +382,13 @@ if (libraryList) {
         if (box) highlightBookOnCanvas(box);
         if (shelfSelect) shelfSelect.value = shelfUrl;
       });
-    } else if (box) {
-      highlightBookOnCanvas(box);
-    }
+    } else if (box) highlightBookOnCanvas(box);
   });
 }
 
 const searchInput = document.getElementById("searchInput");
-
 function renderSavedLibrary(searchTerm = "") {
-  const libraryList = document.getElementById("libraryList");
+  if (!libraryList) return;
   libraryList.innerHTML = "";
 
   const lowerSearch = searchTerm.toLowerCase();
@@ -433,15 +419,9 @@ function renderSavedLibrary(searchTerm = "") {
             ${book.author ? `<small style="color: #71717a;">${book.author}</small>` : ""}
           </div>
         </div>
-        <button 
-          class="delete-btn" 
-          data-book-id="${book.id}" 
-          style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1.2rem; padding: 2px 8px; font-weight: bold;" 
-          title="Delete book"
-        >&times;</button>
+        <button class="delete-btn" data-book-id="${book.id}" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1.2rem; padding: 2px 8px; font-weight: bold;" title="Delete book">&times;</button>
       </div>
     `;
-
     libraryList.appendChild(li);
   });
 }
@@ -470,12 +450,10 @@ async function loadShelfImageOnCanvas(imageUrl, callback) {
     if (error) console.error("Error fetching shelf data:", error);
 
     if (data) {
-      const rawSpines = data.detected_spines || [];
-      const rawDismissed = data.dismissed_titles || [];
-
-      dismissedSpines = new Set(rawDismissed.map((t) => t.trim()));
-
-      detectedSpines = sortSpines(rawSpines);
+      dismissedSpines = new Set(
+        (data.dismissed_titles || []).map((t) => t.trim()),
+      );
+      detectedSpines = sortSpines(data.detected_spines || []);
       populateBatchSpinePrompts(detectedSpines);
     } else {
       detectedSpines = [];
@@ -485,15 +463,14 @@ async function loadShelfImageOnCanvas(imageUrl, callback) {
 
     drawAutoSpines();
     drawAllSavedBoxesForActiveShelf();
-
     if (callback) callback();
   };
   img.src = imageUrl;
 }
 
 const shelfSelect = document.getElementById("shelfSelect");
-
 function populateShelfDropdown() {
+  if (!shelfSelect) return;
   const uniqueShelves = [
     ...new Set(myLibrary.map((b) => b.shelf_image_url).filter(Boolean)),
   ];
@@ -510,15 +487,14 @@ function populateShelfDropdown() {
 
 if (shelfSelect) {
   shelfSelect.addEventListener("change", (e) => {
-    const selectedUrl = e.target.value;
-    if (selectedUrl) loadShelfImageOnCanvas(selectedUrl);
+    if (e.target.value) loadShelfImageOnCanvas(e.target.value);
   });
 }
 
 if (searchInput) {
-  searchInput.addEventListener("input", (e) => {
-    renderSavedLibrary(e.target.value);
-  });
+  searchInput.addEventListener("input", (e) =>
+    renderSavedLibrary(e.target.value),
+  );
 }
 
 // --- 7. CANVAS DRAWING HELPERS ---
@@ -529,37 +505,33 @@ function redrawCanvas() {
   drawAllSavedBoxesForActiveShelf();
 }
 
+function drawPolygon(poly) {
+  if (!poly || poly.length < 3) return;
+  ctx.beginPath();
+  ctx.moveTo(poly[0].x, poly[0].y);
+  for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+}
+
 function drawAutoSpines() {
   if (!detectedSpines || detectedSpines.length === 0) return;
-
   detectedSpines.forEach((spine) => {
-    const poly = spine.polygon;
-
-    if (poly && poly.length >= 3) {
+    if (spine.polygon && spine.polygon.length >= 3) {
       ctx.strokeStyle = "#2563eb";
       ctx.fillStyle = "rgba(59, 130, 246, 0.22)";
       ctx.lineWidth = 3;
-
-      ctx.beginPath();
-      ctx.moveTo(poly[0].x, poly[0].y);
-      for (let i = 1; i < poly.length; i++) {
-        ctx.lineTo(poly[i].x, poly[i].y);
-      }
-      ctx.closePath();
-
-      ctx.fill();
-      ctx.stroke();
+      drawPolygon(spine.polygon);
     }
   });
 }
 
 function drawAllSavedBoxesForActiveShelf() {
   if (!currentShelfImageUrl || !canvas.imgObj) return;
-
-  const shelfBooks = myLibrary.filter((b) => {
-    const url = b.shelf_image_url || b.shelfImageUrl;
-    return url === currentShelfImageUrl;
-  });
+  const shelfBooks = myLibrary.filter(
+    (b) => (b.shelf_image_url || b.shelfImageUrl) === currentShelfImageUrl,
+  );
 
   shelfBooks.forEach((book) => {
     const box = book.bounding_box || book.boundingBox;
@@ -569,96 +541,83 @@ function drawAllSavedBoxesForActiveShelf() {
     ctx.strokeStyle = "#22c55e";
     ctx.lineWidth = 2;
 
-    if (box.polygon && box.polygon.length >= 3) {
-      ctx.beginPath();
-      ctx.moveTo(box.polygon[0].x, box.polygon[0].y);
-      for (let i = 1; i < box.polygon.length; i++) {
-        ctx.lineTo(box.polygon[i].x, box.polygon[i].y);
-      }
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    } else {
-      const width = box.maxX - box.minX;
-      const height = box.maxY - box.minY;
-      ctx.fillRect(box.minX, box.minY, width, height);
-      ctx.strokeRect(box.minX, box.minY, width, height);
+    if (box.polygon && box.polygon.length >= 3) drawPolygon(box.polygon);
+    else {
+      ctx.fillRect(
+        box.minX,
+        box.minY,
+        box.maxX - box.minX,
+        box.maxY - box.minY,
+      );
+      ctx.strokeRect(
+        box.minX,
+        box.minY,
+        box.maxX - box.minX,
+        box.maxY - box.minY,
+      );
     }
   });
 }
 
 function highlightBookOnCanvas(box) {
   if (!box || !canvas.imgObj) return;
-
   redrawCanvas();
-
   ctx.fillStyle = "rgba(245, 158, 11, 0.45)";
   ctx.strokeStyle = "#f59e0b";
   ctx.lineWidth = 4;
 
-  if (box.polygon && box.polygon.length >= 3) {
-    ctx.beginPath();
-    ctx.moveTo(box.polygon[0].x, box.polygon[0].y);
-    for (let i = 1; i < box.polygon.length; i++) {
-      ctx.lineTo(box.polygon[i].x, box.polygon[i].y);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  } else {
-    const width = box.maxX - box.minX;
-    const height = box.maxY - box.minY;
-    ctx.fillRect(box.minX, box.minY, width, height);
-    ctx.strokeRect(box.minX, box.minY, width, height);
+  if (box.polygon && box.polygon.length >= 3) drawPolygon(box.polygon);
+  else {
+    ctx.fillRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY);
+    ctx.strokeRect(
+      box.minX,
+      box.minY,
+      box.maxX - box.minX,
+      box.maxY - box.minY,
+    );
   }
 }
 
 function highlightSpineOnCanvas(spine) {
   redrawCanvas();
   if (!spine) return;
-
   ctx.strokeStyle = "#f59e0b";
   ctx.fillStyle = "rgba(245, 158, 11, 0.5)";
   ctx.lineWidth = 4;
 
-  if (spine.polygon && spine.polygon.length >= 3) {
-    ctx.beginPath();
-    ctx.moveTo(spine.polygon[0].x, spine.polygon[0].y);
-    for (let i = 1; i < spine.polygon.length; i++) {
-      ctx.lineTo(spine.polygon[i].x, spine.polygon[i].y);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  } else if (spine.box) {
-    const { minX, minY, maxX, maxY } = spine.box;
-    ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
-    ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+  if (spine.polygon && spine.polygon.length >= 3) drawPolygon(spine.polygon);
+  else if (spine.box) {
+    ctx.fillRect(
+      spine.box.minX,
+      spine.box.minY,
+      spine.box.maxX - spine.box.minX,
+      spine.box.maxY - spine.box.minY,
+    );
+    ctx.strokeRect(
+      spine.box.minX,
+      spine.box.minY,
+      spine.box.maxX - spine.box.minX,
+      spine.box.maxY - spine.box.minY,
+    );
   }
 }
 
 function highlightPendingSpineOnCanvas(box) {
   redrawCanvas();
   if (!box || !canvas.imgObj) return;
-
   ctx.fillStyle = "rgba(59, 130, 246, 0.35)";
   ctx.strokeStyle = "#3b82f6";
   ctx.lineWidth = 3;
 
-  if (box.polygon && box.polygon.length >= 3) {
-    ctx.beginPath();
-    ctx.moveTo(box.polygon[0].x, box.polygon[0].y);
-    for (let i = 1; i < box.polygon.length; i++) {
-      ctx.lineTo(box.polygon[i].x, box.polygon[i].y);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  } else {
-    const width = box.maxX - box.minX;
-    const height = box.maxY - box.minY;
-    ctx.fillRect(box.minX, box.minY, width, height);
-    ctx.strokeRect(box.minX, box.minY, width, height);
+  if (box.polygon && box.polygon.length >= 3) drawPolygon(box.polygon);
+  else {
+    ctx.fillRect(box.minX, box.minY, box.maxX - box.minX, box.maxY - box.minY);
+    ctx.strokeRect(
+      box.minX,
+      box.minY,
+      box.maxX - box.minX,
+      box.maxY - box.minY,
+    );
   }
 }
 
@@ -677,22 +636,16 @@ function populateBatchSpinePrompts(spines) {
   const availableSpines = spines.filter((spine) => {
     const cleanTitle = spine.title.trim();
     if (dismissedSpines.has(cleanTitle)) return false;
+    if (!spine.box) return true;
 
-    const sBox = spine.box;
-    if (!sBox) return true;
-
-    const sCx = (sBox.minX + sBox.maxX) / 2;
-    const sCy = (sBox.minY + sBox.maxY) / 2;
-    const centerPoint = { x: sCx, y: sCy };
+    const sCx = (spine.box.minX + spine.box.maxX) / 2;
+    const sCy = (spine.box.minY + spine.box.maxY) / 2;
 
     return !activeShelfSavedBooks.some((savedBook) => {
       const bBox = savedBook.bounding_box || savedBook.boundingBox;
       if (!bBox) return false;
-
-      if (bBox.polygon && bBox.polygon.length >= 4) {
-        return isPointInPolygon(centerPoint, bBox.polygon);
-      }
-
+      if (bBox.polygon && bBox.polygon.length >= 4)
+        return isPointInPolygon({ x: sCx, y: sCy }, bBox.polygon);
       return (
         sCx >= bBox.minX &&
         sCx <= bBox.maxX &&
@@ -705,16 +658,11 @@ function populateBatchSpinePrompts(spines) {
   if (availableSpines.length === 0) return;
 
   const header = document.createElement("div");
-  header.className = "batch-header";
   header.style.cssText =
     "font-size: 0.9rem; font-weight: bold; margin-bottom: 10px; color: #3f3f46; display: flex; justify-content: space-between; align-items: center;";
-
-  const titleSpan = document.createElement("span");
-  titleSpan.textContent = `Detected Spines (${availableSpines.length})`;
-  header.appendChild(titleSpan);
+  header.innerHTML = `<span>Detected Spines (${availableSpines.length})</span>`;
 
   const cardsWrapper = document.createElement("div");
-  cardsWrapper.className = "spine-cards-scroll-wrapper";
   cardsWrapper.style.cssText =
     "max-height: 420px; overflow-y: auto; padding-right: 4px;";
 
@@ -728,38 +676,35 @@ function populateBatchSpinePrompts(spines) {
       searchAllBtn.disabled = true;
       searchAllBtn.textContent = "Searching...";
 
-      const cards = Array.from(cardsWrapper.querySelectorAll(".spine-card"));
-
-      for (const card of cards) {
+      for (const card of Array.from(
+        cardsWrapper.querySelectorAll(".spine-card"),
+      )) {
         const input = card.querySelector(".spine-input");
-        const spineIndex = parseInt(card.dataset.spineIndex);
-        const spine = availableSpines[spineIndex];
+        const spine = availableSpines[parseInt(card.dataset.spineIndex)];
         const editedTitle = input.value.trim();
 
         if (editedTitle && spine) {
           card.innerHTML = `<p style="font-size: 0.85rem; color: #71717a; margin: 0;">Searching for "<strong>${editedTitle}</strong>"...</p>`;
-
           const bookData = await fetchBookMetadata(editedTitle);
           card.remove();
 
           if (bookData) {
-            const boxToSave = spine.polygon
-              ? { ...spine.box, polygon: spine.polygon }
-              : spine.box;
-            renderConfirmationCard(editedTitle, bookData, boxToSave);
+            renderConfirmationCard(
+              editedTitle,
+              bookData,
+              spine.polygon
+                ? { ...spine.box, polygon: spine.polygon }
+                : spine.box,
+            );
           } else {
             dismissedSpines.add(spine.title.trim());
             await saveDismissedSpines();
           }
-        } else {
-          card.remove();
-        }
+        } else card.remove();
       }
-
-      if (header) header.remove();
+      header.remove();
       redrawCanvas();
     });
-
     header.appendChild(searchAllBtn);
   }
 
@@ -775,47 +720,29 @@ function populateBatchSpinePrompts(spines) {
 
     card.innerHTML = `
       <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
-        <span style="background: #8b5cf6; color: white; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: bold; flex-shrink: 0;">
-          ${index + 1}
-        </span>
-        <input 
-          type="text" 
-          class="spine-input search-input" 
-          value="${spine.title.replace(/"/g, "&quot;")}" 
-          style="margin: 0; width: 100%; font-size: 0.9rem; padding: 5px 8px;"
-        >
+        <span style="background: #8b5cf6; color: white; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: bold; flex-shrink: 0;">${index + 1}</span>
+        <input type="text" class="spine-input search-input" value="${spine.title.replace(/"/g, "&quot;")}" style="margin: 0; width: 100%; font-size: 0.9rem; padding: 5px 8px;">
       </div>
       <div style="display: flex; gap: 6px;">
-        <button class="search-spine-btn" style="flex: 1; padding: 5px; cursor: pointer; background: #2563eb; color: white; border: none; border-radius: 4px; font-weight: 500; font-size: 0.8rem;">
-          Search Book
-        </button>
-        <button class="dismiss-spine-btn" style="padding: 5px 10px; cursor: pointer; background: #e4e4e7; border: none; border-radius: 4px; font-size: 0.8rem;">
-          Skip
-        </button>
+        <button class="search-spine-btn" style="flex: 1; padding: 5px; cursor: pointer; background: #2563eb; color: white; border: none; border-radius: 4px; font-weight: 500; font-size: 0.8rem;">Search Book</button>
+        <button class="dismiss-spine-btn" style="padding: 5px 10px; cursor: pointer; background: #e4e4e7; border: none; border-radius: 4px; font-size: 0.8rem;">Skip</button>
       </div>
     `;
 
     const input = card.querySelector(".spine-input");
-
-    card.addEventListener("mouseenter", () => {
+    const highlight = () => {
       card.style.borderColor = "#f59e0b";
       highlightSpineOnCanvas(spine);
-    });
-
-    card.addEventListener("mouseleave", () => {
+    };
+    const unhighlight = () => {
       card.style.borderColor = "#e4e4e7";
       redrawCanvas();
-    });
+    };
 
-    input.addEventListener("focus", () => {
-      card.style.borderColor = "#f59e0b";
-      highlightSpineOnCanvas(spine);
-    });
-
-    input.addEventListener("blur", () => {
-      card.style.borderColor = "#e4e4e7";
-      redrawCanvas();
-    });
+    card.addEventListener("mouseenter", highlight);
+    card.addEventListener("mouseleave", unhighlight);
+    input.addEventListener("focus", highlight);
+    input.addEventListener("blur", unhighlight);
 
     card
       .querySelector(".search-spine-btn")
@@ -824,19 +751,19 @@ function populateBatchSpinePrompts(spines) {
         if (!editedTitle) return alert("Please enter a title.");
 
         card.innerHTML = `<p style="font-size: 0.85rem; color: #71717a; margin: 0;">Searching for "<strong>${editedTitle}</strong>"...</p>`;
-
         const bookData = await fetchBookMetadata(editedTitle);
         card.remove();
         redrawCanvas();
 
-        if (bookData) {
-          const boxToSave = spine.polygon
-            ? { ...spine.box, polygon: spine.polygon }
-            : spine.box;
-          renderConfirmationCard(editedTitle, bookData, boxToSave);
-        } else {
-          alert(`No book details found for "${editedTitle}".`);
-        }
+        if (bookData)
+          renderConfirmationCard(
+            editedTitle,
+            bookData,
+            spine.polygon
+              ? { ...spine.box, polygon: spine.polygon }
+              : spine.box,
+          );
+        else alert(`No book details found for "${editedTitle}".`);
       });
 
     card
@@ -854,26 +781,22 @@ function populateBatchSpinePrompts(spines) {
 
 async function saveDismissedSpines() {
   if (!currentUser || !currentShelfImageUrl) return;
-
-  const titlesArray = Array.from(dismissedSpines);
   const { error } = await supabaseClient.from("shelves").upsert(
     [
       {
         user_id: currentUser.id,
         image_url: currentShelfImageUrl,
         detected_spines: detectedSpines,
-        dismissed_titles: titlesArray,
+        dismissed_titles: Array.from(dismissedSpines),
       },
     ],
     { onConflict: "image_url" },
   );
-
   if (error) console.error("Error saving skipped spines:", error);
 }
 
 function sortSpines(spines) {
   if (!spines || spines.length === 0) return [];
-
   return spines.sort((a, b) => {
     const polyA = a.rawPolygon || a.polygon;
     const polyB = b.rawPolygon || b.polygon;
@@ -884,7 +807,6 @@ function sortSpines(spines) {
     const cxB = polyB
       ? polyB.reduce((sum, p) => sum + p.x, 0) / polyB.length
       : (b.box.minX + b.box.maxX) / 2;
-
     const cyA = polyA
       ? polyA.reduce((sum, p) => sum + p.y, 0) / polyA.length
       : (a.box.minY + a.box.maxY) / 2;
@@ -898,19 +820,16 @@ function sortSpines(spines) {
     const heightA = boxA.maxY - boxA.minY;
     const heightB = boxB.maxY - boxB.minY;
 
-    const isAAboveB =
-      boxA.maxY <= boxB.minY + heightB * 0.35 &&
-      boxA.minX < boxB.maxX &&
-      boxA.maxX > boxB.minX;
-    const isBAboveA =
-      boxB.maxY <= boxA.minY + heightA * 0.35 &&
-      boxB.minX < boxA.maxX &&
-      boxB.maxX > boxA.minX;
-
-    if (isAAboveB || isBAboveA) {
+    if (
+      (boxA.maxY <= boxB.minY + heightB * 0.35 &&
+        boxA.minX < boxB.maxX &&
+        boxA.maxX > boxB.minX) ||
+      (boxB.maxY <= boxA.minY + heightA * 0.35 &&
+        boxB.minX < boxA.maxX &&
+        boxB.maxX > boxA.minX)
+    ) {
       return cyA - cyB;
     }
-
     return cxA - cxB;
   });
 }
@@ -921,25 +840,8 @@ function showLoadingOverlay(message = "Scanning shelf with Vision AI...") {
   if (!overlay) {
     overlay = document.createElement("div");
     overlay.id = "loadingOverlay";
-    overlay.style.cssText = `
-      position: fixed;
-      top: 0; left: 0; width: 100vw; height: 100vh;
-      background: rgba(15, 23, 42, 0.75);
-      backdrop-filter: blur(4px);
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      z-index: 9999; color: white; font-family: sans-serif;
-    `;
-    overlay.innerHTML = `
-      <div class="spinner" style="
-        width: 48px; height: 48px;
-        border: 5px solid rgba(255, 255, 255, 0.2);
-        border-top-color: #3b82f6; border-radius: 50%;
-        animation: spin 0.8s linear infinite; margin-bottom: 16px;
-      "></div>
-      <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
-      <div id="loadingMessage" style="font-weight: 600; font-size: 1.1rem;">${message}</div>
-    `;
+    overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; color: white; font-family: sans-serif;`;
+    overlay.innerHTML = `<div class="spinner" style="width: 48px; height: 48px; border: 5px solid rgba(255, 255, 255, 0.2); border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px;"></div><style>@keyframes spin { to { transform: rotate(360deg); } }</style><div id="loadingMessage" style="font-weight: 600; font-size: 1.1rem;">${message}</div>`;
     document.body.appendChild(overlay);
   } else {
     document.getElementById("loadingMessage").textContent = message;
@@ -950,4 +852,286 @@ function showLoadingOverlay(message = "Scanning shelf with Vision AI...") {
 function hideLoadingOverlay() {
   const overlay = document.getElementById("loadingOverlay");
   if (overlay) overlay.style.display = "none";
+}
+
+// --- 10. INFINITE 2D LIBRARY MAP ENGINE ---
+const infiniteMap = document.getElementById("infiniteMap");
+const mapViewport = document.getElementById("mapViewport");
+
+let mapState = {
+  x: 0,
+  y: 0,
+  scale: 1,
+  isDragging: false,
+  startX: 0,
+  startY: 0,
+};
+let activeShelfDrag = null;
+
+// Render shelves onto the map
+async function loadLibraryMap() {
+  if (!currentUser) return;
+
+  const { data: shelves, error } = await supabaseClient
+    .from("shelves")
+    .select("*")
+    .eq("user_id", currentUser.id);
+  if (error) return console.error("Error loading map:", error);
+
+  mapViewport.innerHTML = "";
+
+  shelves.forEach((shelf, index) => {
+    const startX = shelf.map_x ?? index * 350 + 50;
+    const startY = shelf.map_y ?? 50;
+
+    const shelfWrapper = document.createElement("div");
+    shelfWrapper.style.cssText = `
+      position: absolute; left: ${startX}px; top: ${startY}px;
+      width: 300px; background: white; padding: 10px; border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid #e4e4e7;
+      cursor: grab; user-select: none; transition: box-shadow 0.2s;
+    `;
+
+    // Added Delete Button next to Edit
+    shelfWrapper.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; pointer-events: none;">
+        <span style="font-weight: 600; font-size: 0.95rem; color: #3f3f46;">${shelf.name || "Untitled Shelf"}</span>
+        <div style="pointer-events: auto; display: flex; gap: 6px;">
+          <button class="edit-name-btn" title="Rename" style="background:none; border:none; cursor:pointer; color:#71717a; font-size:1rem;">✏️</button>
+          <button class="delete-shelf-btn" title="Delete" style="background:none; border:none; cursor:pointer; color:#ef4444; font-size:1rem;">🗑️</button>
+        </div>
+      </div>
+      <img src="${shelf.image_url}" draggable="false" style="width: 100%; border-radius: 4px; pointer-events: none; border: 1px solid #f4f4f5;">
+    `;
+
+    shelfWrapper
+      .querySelector(".edit-name-btn")
+      .addEventListener("click", (e) => {
+        e.stopPropagation();
+        const newName = prompt(
+          "Enter new shelf name:",
+          shelf.name || "Untitled Shelf",
+        );
+        if (newName)
+          updateShelfName(
+            shelf.id,
+            newName,
+            shelfWrapper.querySelector("span"),
+          );
+      });
+
+    shelfWrapper
+      .querySelector(".delete-shelf-btn")
+      .addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm("Delete this shelf?")) return;
+        await supabaseClient.from("shelves").delete().eq("id", shelf.id);
+        shelfWrapper.remove();
+      });
+
+    shelfWrapper.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+      activeShelfDrag = {
+        element: shelfWrapper,
+        id: shelf.id,
+        startX: e.clientX,
+        startY: e.clientY,
+        initialLeft: parseFloat(shelfWrapper.style.left),
+        initialTop: parseFloat(shelfWrapper.style.top),
+      };
+      shelfWrapper.style.cursor = "grabbing";
+      shelfWrapper.style.zIndex = 1000;
+      shelfWrapper.style.boxShadow = "0 8px 24px rgba(0,0,0,0.25)";
+    });
+
+    mapViewport.appendChild(shelfWrapper);
+  });
+}
+
+async function updateShelfName(shelfId, newName, textNode) {
+  const { error } = await supabaseClient
+    .from("shelves")
+    .update({ name: newName })
+    .eq("id", shelfId);
+  if (!error && textNode) textNode.textContent = newName;
+}
+
+// 1. Shelf Manager Modal Logic
+const manageShelvesBtn = document.getElementById("manageShelvesBtn");
+const shelfManagerModal = document.getElementById("shelfManagerModal");
+const closeManagerBtn = document.getElementById("closeManagerBtn");
+const shelfManagerList = document.getElementById("shelfManagerList");
+
+manageShelvesBtn?.addEventListener("click", async () => {
+  shelfManagerModal.classList.remove("hidden-view");
+  shelfManagerList.innerHTML = "<p style='text-align:center;'>Loading...</p>";
+
+  const { data: shelves } = await supabaseClient
+    .from("shelves")
+    .select("*")
+    .eq("user_id", currentUser.id);
+  shelfManagerList.innerHTML = "";
+
+  (shelves || []).forEach((shelf) => {
+    const li = document.createElement("li");
+    li.className = "manager-list-item";
+    li.innerHTML = `
+      <span style="font-weight: 500;">${shelf.name || "Untitled Shelf"}</span>
+      <div>
+        <button class="modal-edit-btn" style="background:#f4f4f5; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; margin-right:4px;">Rename</button>
+        <button class="modal-del-btn" style="background:#fee2e2; color:#ef4444; border:none; padding:4px 8px; border-radius:4px; cursor:pointer;">Delete</button>
+      </div>
+    `;
+
+    li.querySelector(".modal-edit-btn").addEventListener("click", async () => {
+      const newName = prompt("Rename shelf:", shelf.name || "Untitled");
+      if (newName) {
+        await updateShelfName(shelf.id, newName, li.querySelector("span"));
+        loadLibraryMap(); // Refresh map wrappers
+      }
+    });
+
+    li.querySelector(".modal-del-btn").addEventListener("click", async () => {
+      if (!confirm("Delete this shelf?")) return;
+      await supabaseClient.from("shelves").delete().eq("id", shelf.id);
+      li.remove();
+      loadLibraryMap(); // Refresh map wrappers
+    });
+
+    shelfManagerList.appendChild(li);
+  });
+});
+
+closeManagerBtn?.addEventListener("click", () =>
+  shelfManagerModal.classList.add("hidden-view"),
+);
+
+// 2. Map Panning & Dragging
+infiniteMap.addEventListener("mousedown", (e) => {
+  if (
+    e.target.closest(".map-viewport > div") ||
+    e.target.closest(".map-controls")
+  )
+    return;
+  mapState.isDragging = true;
+  mapState.startX = e.clientX - mapState.x;
+  mapState.startY = e.clientY - mapState.y;
+  infiniteMap.style.cursor = "grabbing";
+});
+
+window.addEventListener("mousemove", (e) => {
+  if (activeShelfDrag) {
+    const dx = (e.clientX - activeShelfDrag.startX) / mapState.scale;
+    const dy = (e.clientY - activeShelfDrag.startY) / mapState.scale;
+    activeShelfDrag.element.style.left = `${activeShelfDrag.initialLeft + dx}px`;
+    activeShelfDrag.element.style.top = `${activeShelfDrag.initialTop + dy}px`;
+    return;
+  }
+  if (mapState.isDragging) {
+    mapState.x = e.clientX - mapState.startX;
+    mapState.y = e.clientY - mapState.startY;
+    mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
+  }
+});
+
+window.addEventListener("mouseup", () => {
+  if (activeShelfDrag) {
+    activeShelfDrag.element.style.cursor = "grab";
+    activeShelfDrag.element.style.zIndex = "";
+    activeShelfDrag.element.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
+
+    const finalX = parseFloat(activeShelfDrag.element.style.left);
+    const finalY = parseFloat(activeShelfDrag.element.style.top);
+    supabaseClient
+      .from("shelves")
+      .update({ map_x: finalX, map_y: finalY })
+      .eq("id", activeShelfDrag.id)
+      .then();
+    activeShelfDrag = null;
+  }
+  if (mapState.isDragging) {
+    mapState.isDragging = false;
+    infiniteMap.style.cursor = "grab";
+  }
+});
+
+infiniteMap.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    const delta = -e.deltaY * 0.0015;
+    const newScale = Math.min(Math.max(0.1, mapState.scale + delta), 5);
+
+    const rect = infiniteMap.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    mapState.x = mouseX - (mouseX - mapState.x) * (newScale / mapState.scale);
+    mapState.y = mouseY - (mouseY - mapState.y) * (newScale / mapState.scale);
+    mapState.scale = newScale;
+
+    mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
+  },
+  { passive: false },
+);
+
+// 3. Zoom & Highlight Target Book
+function zoomToBookOnMap(book) {
+  const shelfUrl = book.shelf_image_url || book.shelfImageUrl;
+  const box = book.bounding_box || book.boundingBox;
+  if (!shelfUrl || !box) return;
+
+  const imgElement = Array.from(mapViewport.querySelectorAll("img")).find(
+    (img) => img.src === shelfUrl,
+  );
+  if (!imgElement) return;
+
+  const shelfWrapper = imgElement.parentElement;
+
+  // Calculate relative position based on the 300px DOM image width vs original coordinates
+  const scaleX = 300 / (imgElement.naturalWidth || 1);
+  const scaleY = scaleX; // Preserve aspect ratio
+
+  const bookCx = ((box.minX + box.maxX) / 2) * scaleX;
+  const bookCy = ((box.minY + box.maxY) / 2) * scaleY;
+
+  const shelfLeft = parseFloat(shelfWrapper.style.left);
+  const shelfTop = parseFloat(shelfWrapper.style.top);
+
+  // Absolute point on the map where the book center lies
+  const targetX = shelfLeft + bookCx;
+  const targetY = shelfTop + bookCy;
+
+  // Animate map transformation
+  const rect = infiniteMap.getBoundingClientRect();
+  const targetScale = 1.2; // Reduced from 3 to keep the whole 300px shelf card visible
+  mapState.scale = targetScale;
+
+  mapState.x = rect.width / 2 - targetX * targetScale;
+  mapState.y = rect.height / 2 - targetY * targetScale;
+
+  mapViewport.style.transition = "transform 0.4s ease-in-out";
+  mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
+
+  setTimeout(() => {
+    mapViewport.style.transition = "none";
+  }, 400);
+
+  // Apply Highlight Box over the image wrapper
+  document.querySelectorAll(".map-book-highlight").forEach((el) => el.remove());
+  const hl = document.createElement("div");
+  hl.className = "map-book-highlight";
+  hl.style.cssText = `
+    position: absolute;
+    left: ${box.minX * scaleX + 10}px; /* Account for 10px wrapper padding */
+    top: ${box.minY * scaleY + 36}px; /* Account for 10px padding + 26px header */
+    width: ${(box.maxX - box.minX) * scaleX}px;
+    height: ${(box.maxY - box.minY) * scaleY}px;
+    background: rgba(245, 158, 11, 0.4);
+    border: 3px solid #f59e0b;
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.8);
+    pointer-events: none;
+    z-index: 10;
+  `;
+  shelfWrapper.appendChild(hl);
 }
