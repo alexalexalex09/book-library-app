@@ -20,7 +20,17 @@ app.use(express.static(clientPath));
 const upload = multer({ storage: multer.memoryStorage() });
 
 // --- INITIALIZATION ---
-const visionClient = new vision.ImageAnnotatorClient();
+let visionClient;
+
+if (process.env.GOOGLE_CREDENTIALS) {
+  // Production (Render): Parse the JSON string from your existing environment variable
+  visionClient = new vision.ImageAnnotatorClient({
+    credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
+  });
+} else {
+  // Local Dev: Fallback to the default file path behavior
+  visionClient = new vision.ImageAnnotatorClient();
+}
 
 const rawUrl = process.env.SUPABASE_URL || "";
 const rawKey =
