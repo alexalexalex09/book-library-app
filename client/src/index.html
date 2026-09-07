@@ -22,32 +22,44 @@
         <p>Your physical library, digitally enhanced.</p>
       </div>
       
-      <div class="auth-form">
-        <input type="email" id="emailInput" placeholder="Email Address" class="auth-input">
-        <input type="password" id="passwordInput" placeholder="Password" class="auth-input">
+      <form id="authForm" class="auth-form">
+        <input type="email" id="emailInput" placeholder="Email Address" class="auth-input" required autocomplete="username">
+        <input type="password" id="passwordInput" placeholder="Password" class="auth-input" required autocomplete="current-password">
+        <input type="password" id="confirmPasswordInput" placeholder="Confirm Password" class="auth-input hidden-element" autocomplete="new-password">
+        <span id="passwordError" class="auth-error hidden-element">Passwords do not match</span>
         
-        <button id="loginBtn" class="auth-btn primary-btn">Log In</button>
+        <button type="submit" id="authActionBtn" class="auth-btn primary-btn">Log In</button>
         
-        <div class="auth-divider"><span>or</span></div>
-        
-        <button id="signupBtn" class="auth-btn secondary-btn">Create an Account</button>
-      </div>
+        <div class="auth-footer">
+          <span id="authToggleText">Don't have an account?</span> 
+          <button type="button" id="authToggleBtn" class="toggle-btn">Sign up here</button>
+        </div>
+      </form>
     </div>
   </div>
 
   <!-- Logged In / Main Application View -->
-  <div id="loggedInView" style="display: none; height: 100vh; flex-direction: column;">
+  <div id="loggedInView" class="app-container hidden-element">
     
     <!-- Top Navigation -->
     <nav class="app-nav">
       <div class="nav-brand" style="font-weight: 800; font-size: 1.25rem; color: #18181b;">📚 HiLibrary</div>
       <div class="nav-links">
-        <button id="navUploadBtn" class="nav-btn active">Upload & Scan</button>
-        <button id="navLibraryBtn" class="nav-btn">Infinite Library Map</button>
+        <button id="navUploadBtn" class="nav-btn active" data-target="uploadView">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+          <span class="nav-text">Upload & Scan</span>
+        </button>
+        <button id="navLibraryBtn" class="nav-btn" data-target="libraryView">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 20l-5-5V4l5 5 6-5 5 5v11l-5-5-6 5z"/></svg>
+          <span class="nav-text">Infinite Library Map</span>
+        </button>
       </div>
       <div class="nav-user" style="display: flex; align-items: center; gap: 15px;">
-        <span id="userEmailDisplay" style="font-size: 0.9rem; color: #71717a; font-weight: 500;"></span>
-        <button id="logoutBtn" style="padding: 6px 12px; background-color: white; border: 1px solid #d4d4d8; border-radius: 6px; cursor: pointer; font-weight: 600; color: #3f3f46;">Logout</button>
+        <span id="userEmailDisplay" class="nav-text" style="font-size: 0.9rem; color: #71717a; font-weight: 500;"></span>
+        <button id="logoutBtn" class="logout-btn" style="padding: 6px 12px; background-color: white; border: 1px solid #d4d4d8; border-radius: 6px; cursor: pointer; font-weight: 600; color: #3f3f46;">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+          <span class="nav-text">Logout</span>
+        </button>
       </div>
     </nav>
 
@@ -63,6 +75,11 @@
           </div>
           
           <div class="canvas-container">
+            <div id="canvasControls" class="canvas-controls hidden-element">
+              <label for="zoomSlider" style="font-size: 0.85rem; font-weight: 600; color: #475569;">Zoom</label>
+              <input type="range" id="zoomSlider" min="1" max="4" step="0.1" value="1" style="cursor: pointer;">
+              <button id="resetZoomBtn" style="padding: 2px 8px; font-size: 0.8rem; background: white; border: 1px solid #cbd5e1; border-radius: 4px; cursor: pointer; font-weight: 500;">Reset</button>
+            </div>
             <div id="placeholderText" class="dropzone-empty-state">
               <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 12px;">
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -90,16 +107,24 @@
       <div id="libraryView" class="view-section hidden-view">
         <div class="map-container" id="infiniteMap">
           <div class="map-controls">
-            <button id="manageShelvesBtn" class="nav-btn" style="background: white; border: 1px solid #d4d4d8; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">📑 Manage Shelves</button>
+            <button id="manageShelvesBtn" class="nav-btn manage-shelves-btn" style="background: white; border: 1px solid #d4d4d8; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+              <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              <span class="nav-text">📑 Manage Shelves</span>
+            </button>
           </div>
           <div class="map-viewport" id="mapViewport">
             <!-- Draggable shelf objects will be dynamically injected here via app.js -->
           </div>
         </div>
         <aside class="sidebar">
-          <h2>My Library</h2>
-          <input type="text" id="searchInput" class="search-input" placeholder="Search books by title or author...">
-          <ul id="libraryList" class="library-list"></ul>
+          <div class="sidebar-header" id="mobileLibraryToggle">
+            <h2 style="margin: 0;">My Library</h2>
+            <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+          </div>
+          <div class="sidebar-content" id="mobileLibraryContent">
+            <input type="text" id="searchInput" class="search-input" placeholder="Search books by title or author..." style="margin-top: 12px;">
+            <ul id="libraryList" class="library-list"></ul>
+          </div>
         </aside>
       </div>
 

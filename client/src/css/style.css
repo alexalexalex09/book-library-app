@@ -14,6 +14,7 @@ body {
 
 .app-container {
   display: flex;
+  flex-direction: column; /* This forces the nav bar to the top */
   height: 100vh;
 }
 
@@ -291,7 +292,7 @@ body {
 }
 
 .auth-card {
-  position: absolute; /* Changed from relative */
+  position: absolute; 
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
@@ -382,3 +383,180 @@ body {
 }
 
 .auth-divider span { padding: 0 10px; }
+
+.hidden-element {
+  display: none !important;
+}
+
+.auth-footer {
+  margin-top: 16px;
+  font-size: 0.9rem;
+  color: #71717a;
+}
+
+.toggle-btn {
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 0.9rem;
+}
+
+.toggle-btn:hover {
+  text-decoration: underline;
+}
+
+.auth-error {
+  color: #ef4444;
+  font-size: 0.85rem;
+  text-align: left;
+  margin-top: -8px;
+  padding-left: 4px;
+}
+
+/* --- ICON STYLES (Global) --- */
+.nav-icon, .toggle-icon { 
+  display: none; 
+  width: 24px; 
+  height: 24px; 
+}
+.sidebar-header { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+}
+
+/* Floating Canvas Zoom Bar */
+.canvas-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(4px);
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+#shelfCanvas {
+  cursor: grab;
+}
+
+#shelfCanvas:active {
+  cursor: grabbing;
+}
+
+/* --- MOBILE RESPONSIVENESS --- */
+@media (max-width: 768px) {
+  /* 1. App Container Ordering (FIX) */
+  .app-container {
+    flex-direction: column;
+  }
+  
+  .main-content {
+    order: 1; /* Forces the main workspace/map to stay on top */
+  }
+
+  /* Hide text, show icons */
+  .nav-text { display: none !important; }
+  .nav-icon { display: block; margin: 0 auto; }
+  
+  /* Bottom Icon Navigation Bar (FIX: order: 2 added back) */
+  .app-nav {
+    order: 2; /* Pushes the entire menu to the bottom of the screen */
+    border-top: 1px solid #e4e4e7;
+    border-bottom: none;
+    flex-direction: row;
+    justify-content: space-around;
+    align-items: center;
+    padding: 10px 20px;
+    background: white;
+    z-index: 1000;
+    box-shadow: 0 -4px 12px rgba(0,0,0,0.05);
+  }
+  
+  .nav-brand { display: none; }
+  
+  .nav-links, .nav-user {
+    width: auto;
+    border: none;
+    margin: 0;
+    padding: 0;
+    gap: 12px;
+  }
+  
+  .nav-btn, .logout-btn {
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    border-radius: 50% !important; /* Forces circular touch targets */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none !important;
+  }
+  
+  .nav-btn.active {
+    background: #eff6ff;
+    color: #2563eb;
+  }
+
+  /* Round Manage Shelves Button (FAB) */
+  .manage-shelves-btn {
+    background: white;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25) !important;
+  }
+
+  /* Collapsible My Library Sidebar */
+  .toggle-icon { 
+    display: block; 
+    transition: transform 0.3s ease; 
+  }
+  .sidebar-content { 
+    display: block; 
+    margin-top: 10px;
+  }
+  .sidebar-content.collapsed { 
+    display: none; 
+  }
+  .sidebar-header.collapsed .toggle-icon {
+    transform: rotate(-180deg);
+  }
+
+  /* 1. Force views to stack vertically instead of side-by-side */
+  .active-view {
+    flex-direction: column;
+  }
+
+  /* 2. Prevent header text and upload button from colliding */
+  .workspace-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  
+  .upload-btn {
+    width: 100%;
+  }
+
+  /* 3. Scale canvas area to fit smaller phone screens */
+  .canvas-container {
+    min-height: 250px; 
+  }
+
+  /* 4. Allow sidebar to span full width while leaving room for the map */
+  .sidebar {
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid #e4e4e7;
+    max-height: 40vh; 
+  }
+}

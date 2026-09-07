@@ -91,7 +91,8 @@ function decodeCOCORLE(counts, h, w) {
 function extractPolygonFromRLE(rleMask) {
   const [h, w] = rleMask.size;
   const mask = decodeCOCORLE(rleMask.counts, h, w);
-  const points = [];
+  const leftPoints = [];
+  const rightPoints = [];
 
   const stepY = Math.max(1, Math.floor(h / 80));
 
@@ -107,12 +108,18 @@ function extractPolygonFromRLE(rleMask) {
     }
 
     if (minX !== -1) {
-      points.push({ x: minX / w, y: y / h });
-      if (maxX !== minX) points.push({ x: maxX / w, y: y / h });
+      leftPoints.push({ x: minX / w, y: y / h });
+      rightPoints.push({ x: maxX / w, y: y / h });
     }
   }
 
-  return points;
+  if (leftPoints.length === 0) return [];
+
+  // Construct a continuous outer loop: down the right side, up the left side
+  const perimeter = [...rightPoints, ...leftPoints.reverse()];
+
+  // Run RDP simplification using normalized epsilon (0.008 = ~0.8% threshold)
+  return simplifyPolygon(perimeter, 0.002);
 }
 
 function pointLineDistance(point, start, end) {
@@ -253,20 +260,14 @@ async function extractSpatialPolygonsRoboflow(
   const base64Image = imageBuffer.toString("base64");
   const modelId = "book-spine-3dgvf";
   const modelVersion = "8";
-
   const url = `https://serverless.roboflow.com/${modelId}/${modelVersion}`;
 
   const response = await axios({
     method: "POST",
     url: url,
-    params: {
-      api_key: apiKey,
-      confidence: 0.3,
-    },
+    params: { api_key: apiKey, confidence: 0.3 },
     data: base64Image,
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
 
   const predictions = response.data?.predictions || [];
@@ -275,16 +276,16 @@ async function extractSpatialPolygonsRoboflow(
     .map((pred) => {
       let polygon = [];
 
-      if (pred.points || pred.polygon) {
+      if (pred.rle_mask && pred.rle_mask.counts) {
+        polygon = extractPolygonFromRLE(pred.rle_mask);
+      } else if (pred.points || pred.polygon) {
         let rawPoints = pred.points || pred.polygon || [];
-        rawPoints = simplifyPolygon(rawPoints, 10);
-
-        polygon = rawPoints.map((pt) => ({
+        const normalizedPoints = rawPoints.map((pt) => ({
           x: pt.x > 1 ? pt.x / imgWidth : pt.x,
           y: pt.y > 1 ? pt.y / imgHeight : pt.y,
         }));
-      } else if (pred.rle_mask && pred.rle_mask.counts) {
-        polygon = extractPolygonFromRLE(pred.rle_mask);
+        // Downsample raw points with normalized epsilon
+        polygon = simplifyPolygon(normalizedPoints, 0.002);
       } else if (pred.width && pred.height) {
         const w = pred.width > 1 ? pred.width / imgWidth : pred.width;
         const h = pred.height > 1 ? pred.height / imgHeight : pred.height;
