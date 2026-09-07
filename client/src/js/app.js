@@ -592,8 +592,6 @@ function renderDetectedSpines() {
     height: 32px;
     min-width: 32px;
     padding: 0;
-    align-items: center;
-    justify-content: center;
     font-size: 0.75rem;
     border-radius: 6px;
     line-height: 1;
@@ -844,7 +842,7 @@ function renderDetectedSpines() {
 
   const saveBtn = document.createElement("button");
   saveBtn.textContent = "Save Shelf to Library";
-  saveBtn.className = "auth-btn primary-btn";
+  saveBtn.className = "auth-btn primary-btn save-shelf-btn";
   saveBtn.style.marginTop = "16px";
   saveBtn.onclick = saveShelfToDatabase;
   container.appendChild(saveBtn);
