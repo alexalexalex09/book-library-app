@@ -41,6 +41,27 @@ function switchView(view) {
 navUploadBtn?.addEventListener("click", () => switchView("upload"));
 navLibraryBtn?.addEventListener("click", () => switchView("library"));
 
+// --- PROGRESSIVE BACKGROUND LOADING ---
+function loadHighResBackground() {
+  const bgElement = document.querySelector(".auth-background");
+  if (!bgElement) return;
+
+  const highResUrl = "../img/anna-hunko-ajE5goOGzZc-unsplash.jpg";
+
+  // Create an invisible image in memory to trigger the network download
+  const imgLoader = new Image();
+
+  imgLoader.onload = () => {
+    // Once fully downloaded, swap the CSS background to the high-res version
+    bgElement.style.backgroundImage = `url('${highResUrl}')`;
+  };
+
+  imgLoader.src = highResUrl;
+}
+
+// Trigger the progressive load immediately
+loadHighResBackground();
+
 // 1. Initialize Supabase Client
 const SUPABASE_URL = "https://wqxvahmiblqgsjyywxpa.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_Oth3p_I48nLfY8tLkOcSvA_uegZywJY";

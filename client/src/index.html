@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ShelfScan</title>
+  <title>HiLibrary</title>
   
   <!-- CSS Stylesheet -->
   <link rel="stylesheet" href="css/style.css">
@@ -14,13 +14,24 @@
 <body>
 
   <!-- Logged Out / Auth View -->
-  <div id="loggedOutView" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh;">
-    <h2 style="font-size: 2rem; margin-bottom: 20px; color: #3f3f46;">Welcome to ShelfScan</h2>
-    <div style="display: flex; flex-direction: column; gap: 12px; width: 320px;">
-      <input type="email" id="emailInput" placeholder="Email Address" class="search-input" style="margin-bottom: 0;">
-      <input type="password" id="passwordInput" placeholder="Password" class="search-input" style="margin-bottom: 0;">
-      <button id="loginBtn" style="padding: 10px; background-color: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px;">Log In</button>
-      <button id="signupBtn" style="padding: 10px; background-color: #22c55e; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">Sign Up</button>
+<div id="loggedOutView" class="auth-wrapper">
+    <div class="auth-background"></div>
+    <div class="auth-card">
+      <div class="auth-header">
+        <h2>📚 HiLibrary</h2>
+        <p>Your physical library, digitally enhanced.</p>
+      </div>
+      
+      <div class="auth-form">
+        <input type="email" id="emailInput" placeholder="Email Address" class="auth-input">
+        <input type="password" id="passwordInput" placeholder="Password" class="auth-input">
+        
+        <button id="loginBtn" class="auth-btn primary-btn">Log In</button>
+        
+        <div class="auth-divider"><span>or</span></div>
+        
+        <button id="signupBtn" class="auth-btn secondary-btn">Create an Account</button>
+      </div>
     </div>
   </div>
 
@@ -29,7 +40,7 @@
     
     <!-- Top Navigation -->
     <nav class="app-nav">
-      <div class="nav-brand" style="font-weight: 800; font-size: 1.25rem; color: #18181b;">📚 ShelfScan</div>
+      <div class="nav-brand" style="font-weight: 800; font-size: 1.25rem; color: #18181b;">📚 HiLibrary</div>
       <div class="nav-links">
         <button id="navUploadBtn" class="nav-btn active">Upload & Scan</button>
         <button id="navLibraryBtn" class="nav-btn">Infinite Library Map</button>
