@@ -10,6 +10,13 @@
   
   <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- App Icons & Favicon Links -->
+  <link rel="icon" type="image/svg+xml" href="/img/logo.svg" />
+  <link rel="icon" type="image/png" sizes="72x72" href="/img/logo72.png" />
+  <link rel="icon" type="image/png" sizes="128x128" href="/img/logo128.png" />
+  <link rel="icon" type="image/png" sizes="256x256" href="/img/logo256.png" />
+  <link rel="apple-touch-icon" sizes="512x512" href="/img/logo512.png" />
 </head>
 <body>
 
@@ -18,7 +25,12 @@
     <div class="auth-background"></div>
     <div class="auth-card">
       <div class="auth-header">
-        <h2>📚 HiLibrary</h2>
+        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 12px;">
+          <img src="/img/logo.svg" alt="HiLibrary Icon" style="height: 42px; width: auto;" />
+          <span style="font-family: system-ui, -apple-system, sans-serif; font-size: 2.25rem; color: #0f172a; line-height: 1;">
+            <strong style="font-weight: 800;">Hi</strong><span style="font-weight: 300; color: #64748b;">Library</span>
+          </span>
+        </div>
         <p>Your physical library, digitally enhanced.</p>
       </div>
       
@@ -43,7 +55,12 @@
     
     <!-- Top Navigation -->
     <nav class="app-nav">
-      <div class="nav-brand" style="font-weight: 800; font-size: 1.25rem; color: #18181b;">📚 HiLibrary</div>
+      <div class="nav-brand" style="display: flex; align-items: center; gap: 8px;">
+        <img src="/img/logo.svg" alt="HiLibrary Icon" class="brand-logo" style="height: 32px; width: auto;" />
+        <span style="font-family: system-ui, -apple-system, sans-serif; font-size: 1.25rem; color: #0f172a; line-height: 1;">
+          <strong style="font-weight: 800;">Hi</strong><span style="font-weight: 300; color: #64748b;">Library</span>
+        </span>
+      </div>
       <div class="nav-links">
         <button id="navUploadBtn" class="nav-btn active" data-target="uploadView">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
@@ -89,6 +106,9 @@
               <h3>Upload a shelf photo</h3>
               <p>Click the button above to begin mapping spines</p>
             </div>
+            <button id="cropCanvasBtn" class="crop-canvas-btn" title="Crop Image" aria-label="Crop Image">
+              <img src="img/noun_Crop_1935400.svg" alt="Crop" class="crop-icon" />
+            </button>
             <canvas id="shelfCanvas"></canvas>
           </div>
         </div>
@@ -138,6 +158,25 @@
         <button id="closeManagerBtn" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #71717a;">&times;</button>
       </div>
       <ul id="shelfManagerList" style="list-style: none; padding: 0; max-height: 400px; overflow-y: auto;"></ul>
+    </div>
+  </div>
+
+  <div id="cropModal" class="hidden-view" style="position: fixed; inset: 0; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(4px); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px;">
+    <div style="background: white; padding: 20px; border-radius: 12px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; gap: 14px; align-items: center; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);">
+      <div style="width: 100%; display: flex; justify-content: space-between; align-items: center;">
+        <h3 style="margin: 0; font-size: 1.1rem; color: #0f172a; font-weight: 700;">Crop Image Area</h3>
+        <span style="font-size: 0.8rem; color: #64748b;">Click and drag to select area</span>
+      </div>
+      
+      <!-- Fitted Image Container -->
+      <div style="position: relative; display: flex; justify-content: center; align-items: center; max-height: 65vh; max-width: 100%; border: 1px solid #e2e8f0; border-radius: 6px; background: #0f172a; overflow: hidden;">
+        <canvas id="cropCanvas" style="cursor: crosshair; display: block; max-width: 100%; max-height: 65vh; width: auto; height: auto; object-fit: contain;"></canvas>
+      </div>
+      
+      <div style="display: flex; gap: 10px; width: 100%; justify-content: flex-end;">
+        <button id="cancelCropBtn" class="auth-btn secondary-btn" style="width: auto; padding: 8px 16px; background: #f1f5f9; border-color: #cbd5e1; color: #475569;">Cancel</button>
+        <button id="applyCropBtn" class="auth-btn primary-btn" style="width: auto; padding: 8px 16px;">Crop & Re-scan</button>
+      </div>
     </div>
   </div>
 

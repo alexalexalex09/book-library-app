@@ -344,6 +344,30 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
       .createHash("sha256")
       .update(rawBuffer)
       .digest("hex");
+    const userId = req.body.user_id;
+    const forceRescan = req.body.force_rescan === "true";
+
+    // 1. Check if shelf already exists in user's library (unless forcing a re-scan)
+    if (userId && !forceRescan) {
+      const { data: existingShelf } = await supabase
+        .from("shelves")
+        .select("*, user_books(*)")
+        .eq("user_id", userId)
+        .eq("image_hash", imageHash)
+        .maybeSingle();
+
+      if (existingShelf) {
+        console.log(
+          `[${timestamp}] 🔁 Found duplicate shelf photo for user. Redirecting.`,
+        );
+        return res.json({
+          duplicate: true,
+          shelf: existingShelf,
+          imageHash,
+        });
+      }
+    }
+
     const fileName = `shelf_${Date.now()}.jpg`;
 
     let ocrWords = null;
@@ -419,13 +443,19 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
       .getPublicUrl(fileName);
     const formattedSpines = mapOcrWordsToSpines(spineMasks, ocrWords);
 
+    // AI Refinement Pass
+    const refinedSpines = await refineSpinesWithAI(formattedSpines);
+
     const elapsed = ((Date.now() - reqStart) / 1000).toFixed(2);
     console.log(
-      `[${timestamp}] ✅ Complete in ${elapsed}s | Fused ${formattedSpines.length} books.`,
+      `[${timestamp}] ✅ Complete in ${elapsed}s | Fused & Refined ${refinedSpines.length} books.`,
     );
-    console.log(`==================================================\n`);
 
-    res.json({ spines: formattedSpines, imageUrl: publicUrlData.publicUrl });
+    res.json({
+      spines: refinedSpines,
+      imageUrl: publicUrlData.publicUrl,
+      imageHash,
+    });
   } catch (error) {
     console.error(`[${timestamp}] 💥 Pipeline Error:`, error);
     res.status(500).json({ error: "Failed to process image" });
@@ -449,6 +479,85 @@ app.get("/api/books", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch book data" });
   }
 });
+
+// Uses Gemini API to structure messy OCR fragments into clean metadata
+async function refineSpinesWithAI(spines) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn("⚠️ GEMINI_API_KEY missing. Skipping AI spine refinement.");
+    return spines;
+  }
+
+  // Build a lightweight batch prompt of raw OCR text for all detected spines
+  const spinePayload = spines.map((s, idx) => ({
+    id: idx,
+    rawText: s.matchedWords?.map((w) => w.text).join(" ") || s.title,
+  }));
+
+  const prompt = `You are an expert librarian AI parsing messy OCR text from book spines.
+For each item, infer the correct book title, author, and publisher (if visible).
+Fix typos, handle vertical text misordering, ignore price tags/logos, and return ONLY a JSON array.
+
+Input:
+${JSON.stringify(spinePayload, null, 2)}
+
+Output format JSON array:
+[
+  { "id": 0, "title": "Clean Title", "author": "Author Name", "publisher": "Publisher Name" }
+]`;
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [{ text: prompt }],
+          },
+        ],
+        generationConfig: {
+          responseMimeType: "application/json",
+          temperature: 0.1,
+        },
+      }),
+    });
+
+    const data = await response.json();
+    console.dir(data);
+    const rawTextResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!rawTextResponse) {
+      throw new Error("No text content returned from Gemini API");
+    }
+
+    const content = JSON.parse(rawTextResponse);
+    const parsedList = Array.isArray(content)
+      ? content
+      : content.spines || content.items || [];
+
+    // Merge AI-cleaned results back into the spine objects
+    return spines.map((spine, idx) => {
+      const aiMatch = Array.isArray(parsedList)
+        ? parsedList.find((item) => item.id === idx)
+        : null;
+
+      return {
+        ...spine,
+        title: aiMatch?.title || spine.title,
+        author: aiMatch?.author || "",
+        publisher: aiMatch?.publisher || "",
+      };
+    });
+  } catch (err) {
+    console.error("AI spine refinement error (Gemini):", err);
+    return spines; // Fallback to raw OCR titles on error
+  }
+}
 
 app.use((req, res) => res.sendFile(path.join(clientPath, "index.html")));
 

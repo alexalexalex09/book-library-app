@@ -57,8 +57,8 @@ function checkPasswordMatch() {
   }
 }
 
-passwordInput.addEventListener("input", checkPasswordMatch);
-confirmPasswordInput.addEventListener("input", checkPasswordMatch);
+passwordInput?.addEventListener("input", checkPasswordMatch);
+confirmPasswordInput?.addEventListener("input", checkPasswordMatch);
 
 authToggleBtn?.addEventListener("click", () => {
   isSignUpMode = !isSignUpMode;
@@ -146,7 +146,6 @@ document.getElementById("logoutBtn")?.addEventListener("click", () => {
 // View Toggling
 document.querySelectorAll(".nav-btn[data-target]").forEach((btn) => {
   btn.addEventListener("click", (e) => {
-    // FIX: Use currentTarget to ensure we target the button, not the SVG path inside it
     const targetBtn = e.currentTarget;
 
     document
@@ -168,6 +167,27 @@ document.querySelectorAll(".nav-btn[data-target]").forEach((btn) => {
   });
 });
 
+function showLoadingOverlay(message = "Analyzing bookshelf image with AI...") {
+  let overlay = document.getElementById("loadingOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "loadingOverlay";
+    overlay.className = "loading-overlay";
+    overlay.innerHTML = `
+      <div class="loading-spinner"></div>
+      <p id="loadingMessage" style="font-weight: 600; font-size: 1.1rem; margin: 0; color: #f8fafc;"></p>
+    `;
+    document.body.appendChild(overlay);
+  }
+  document.getElementById("loadingMessage").textContent = message;
+  overlay.style.display = "flex";
+}
+
+function hideLoadingOverlay() {
+  const overlay = document.getElementById("loadingOverlay");
+  if (overlay) overlay.style.display = "none";
+}
+
 // ==========================================
 // 5. UPLOAD & SCANNING LOGIC (CANVAS)
 // ==========================================
@@ -182,6 +202,7 @@ const resetZoomBtn = document.getElementById("resetZoomBtn");
 let currentUploadedFile = null;
 let currentLoadedImage = null;
 let currentDetectedSpines = [];
+let currentUploadedImageHash = null;
 
 // Canvas Viewport & Editing State
 let canvasState = {
@@ -196,7 +217,12 @@ let canvasState = {
 let activeEditingSpineIndex = null;
 let activeControlPoint = null; // { spineIndex, pointIndex }
 
-// Helper to convert screen clicks to normalized (0-1) canvas image coordinates
+function getCanvasScaleFactor() {
+  if (!shelfCanvas) return 1;
+  const rect = shelfCanvas.getBoundingClientRect();
+  return rect.width > 0 ? shelfCanvas.width / rect.width : 1;
+}
+
 function getNormalizedCanvasCoords(e) {
   if (!shelfCanvas) return { x: 0, y: 0, imgPxX: 0, imgPxY: 0 };
   const rect = shelfCanvas.getBoundingClientRect();
@@ -225,7 +251,6 @@ function getNormalizedCanvasCoords(e) {
   };
 }
 
-// Ray-casting point-in-polygon algorithm for hit detection
 function isPointInNormalizedPolygon(pt, polygon) {
   if (!polygon || polygon.length < 3) return false;
   let inside = false;
@@ -242,7 +267,6 @@ function isPointInNormalizedPolygon(pt, polygon) {
   return inside;
 }
 
-// Re-computes spine bounding box after vertex dragging
 function updateSpineBox(spine) {
   if (!spine.polygon || spine.polygon.length === 0) return;
   const xs = spine.polygon.map((p) => p.x);
@@ -255,7 +279,6 @@ function updateSpineBox(spine) {
   };
 }
 
-// Base canvas redraw helper with polygon editing handles
 function redrawCanvasOverlays(highlightedIndex = null) {
   if (!currentLoadedImage || !ctx) return;
 
@@ -277,7 +300,7 @@ function redrawCanvasOverlays(highlightedIndex = null) {
       ? "#10b981"
       : isHighlighted
         ? "#f59e0b"
-        : "#3b82f6"; // Green for active editing, Gold for focus, Blue for default
+        : "#3b82f6";
     const fillColor = isHighlighted
       ? isSelected
         ? "rgba(16, 185, 129, 0.25)"
@@ -286,7 +309,6 @@ function redrawCanvasOverlays(highlightedIndex = null) {
     const lineWidth =
       (isHighlighted ? baseThickness * 2 : baseThickness) / canvasState.scale;
 
-    // Draw polygon boundary
     if (spine.polygon && spine.polygon.length >= 3) {
       ctx.beginPath();
       spine.polygon.forEach((pt, i) => {
@@ -305,7 +327,6 @@ function redrawCanvasOverlays(highlightedIndex = null) {
       ctx.lineWidth = lineWidth;
       ctx.stroke();
 
-      // Render draggable control circles for the active spine
       if (isSelected) {
         const handleRadius = Math.max(10, 16 / canvasState.scale);
         spine.polygon.forEach((pt) => {
@@ -340,7 +361,6 @@ function redrawCanvasOverlays(highlightedIndex = null) {
   ctx.restore();
 }
 
-// Zoom Controls
 zoomSlider?.addEventListener("input", (e) => {
   canvasState.scale = parseFloat(e.target.value);
   redrawCanvasOverlays(null);
@@ -354,11 +374,9 @@ resetZoomBtn?.addEventListener("click", () => {
   redrawCanvasOverlays(null);
 });
 
-// Canvas Interaction: Point Editing & Panning Handlers
 const startCanvasDrag = (e) => {
   const norm = getNormalizedCanvasCoords(e);
 
-  // 1. Check if user clicked a control handle on the currently active spine
   if (activeEditingSpineIndex !== null) {
     const spine = currentDetectedSpines[activeEditingSpineIndex];
     if (spine && spine.polygon) {
@@ -375,14 +393,12 @@ const startCanvasDrag = (e) => {
           spineIndex: activeEditingSpineIndex,
           pointIndex: pointIdx,
         };
-        return; // Lock drag to control point
+        return;
       }
     }
   }
 
-  // 2. Check if user clicked inside any spine polygon to select it
   const clickedSpineIdx = currentDetectedSpines.findIndex((spine) => {
-    // Auto-convert box to polygon if needed
     if ((!spine.polygon || spine.polygon.length < 3) && spine.box) {
       spine.polygon = [
         { x: spine.box.minX, y: spine.box.minY },
@@ -398,7 +414,6 @@ const startCanvasDrag = (e) => {
     activeEditingSpineIndex = clickedSpineIdx;
     redrawCanvasOverlays(null);
 
-    // Scroll sidebar item into view
     const sidebarCards = document.querySelectorAll("#pendingContainer > div");
     sidebarCards[clickedSpineIdx + 1]?.scrollIntoView({
       behavior: "smooth",
@@ -407,21 +422,19 @@ const startCanvasDrag = (e) => {
     return;
   }
 
-  // 3. Clicked background space -> Deselect & initiate image panning
   activeEditingSpineIndex = null;
   redrawCanvasOverlays(null);
 
   const pos = e.touches
     ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
     : { x: e.clientX, y: e.clientY };
-  const factor = shelfCanvas.width / shelfCanvas.getBoundingClientRect().width;
+  const factor = getCanvasScaleFactor();
   canvasState.isDragging = true;
   canvasState.startX = pos.x - canvasState.offsetX / factor;
   canvasState.startY = pos.y - canvasState.offsetY / factor;
 };
 
 const moveCanvasDrag = (e) => {
-  // A. Dragging a Polygon Vertex Control Point
   if (activeControlPoint) {
     if (e.touches) e.preventDefault();
     const norm = getNormalizedCanvasCoords(e);
@@ -437,14 +450,12 @@ const moveCanvasDrag = (e) => {
     return;
   }
 
-  // B. Panning Canvas Viewport
   if (canvasState.isDragging) {
     if (e.touches) e.preventDefault();
     const pos = e.touches
       ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
       : { x: e.clientX, y: e.clientY };
-    const factor =
-      shelfCanvas.width / shelfCanvas.getBoundingClientRect().width;
+    const factor = getCanvasScaleFactor();
 
     canvasState.offsetX = (pos.x - canvasState.startX) * factor;
     canvasState.offsetY = (pos.y - canvasState.startY) * factor;
@@ -466,7 +477,6 @@ window.addEventListener("touchmove", moveCanvasDrag, { passive: false });
 window.addEventListener("mouseup", stopCanvasDrag);
 window.addEventListener("touchend", stopCanvasDrag);
 
-// File Upload Handler
 imageUpload?.addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -498,9 +508,12 @@ imageUpload?.addEventListener("change", async (e) => {
 
   const formData = new FormData();
   formData.append("image", file);
+  if (currentUser) formData.append("user_id", currentUser.id);
 
   document.getElementById("pendingContainer").innerHTML =
     "<p style='text-align:center;'>Scanning shelf...</p>";
+
+  showLoadingOverlay("Scanning shelf image & detecting spines...");
 
   try {
     const response = await fetch("/api/ocr", {
@@ -508,12 +521,40 @@ imageUpload?.addEventListener("change", async (e) => {
       body: formData,
     });
     const data = await response.json();
+
+    if (data.duplicate) {
+      alert(
+        "This image is already in your library! Navigating to its location on the map.",
+      );
+
+      if (ctx && shelfCanvas)
+        ctx.clearRect(0, 0, shelfCanvas.width, shelfCanvas.height);
+      shelfCanvas.style.display = "none";
+      if (placeholderText) placeholderText.style.display = "flex";
+      if (canvasControls) canvasControls.classList.add("hidden-element");
+      document.getElementById("pendingContainer").innerHTML =
+        "<p class='empty-state'>Upload a new image to continue.</p>";
+
+      const mapNavBtn = document.querySelector(
+        '.nav-btn[data-target="libraryView"]',
+      );
+      if (mapNavBtn) mapNavBtn.click();
+
+      setTimeout(() => {
+        zoomToShelfOnMap(data.shelf.id);
+      }, 350);
+      return;
+    }
+
     currentDetectedSpines = data.spines || [];
+    currentUploadedImageHash = data.imageHash || null;
     renderDetectedSpines();
   } catch (err) {
     console.error("Scan failed:", err);
     document.getElementById("pendingContainer").innerHTML =
       "<p style='color:red;'>Scan failed. Check console.</p>";
+  } finally {
+    hideLoadingOverlay();
   }
 });
 
@@ -528,10 +569,81 @@ function renderDetectedSpines() {
 
   redrawCanvasOverlays(null);
 
+  // Toolbar
   const header = document.createElement("div");
-  header.innerHTML = `<strong>Detected Spines (${currentDetectedSpines.length})</strong>`;
+  header.style.display = "flex";
+  header.style.justifyContent = "space-between";
+  header.style.alignItems = "center";
   header.style.marginBottom = "12px";
-  header.style.color = "#3f3f46";
+
+  const titleEl = document.createElement("strong");
+  titleEl.textContent = `Detected Spines (${currentDetectedSpines.length})`;
+  titleEl.style.color = "#3f3f46";
+
+  const batchActions = document.createElement("div");
+  batchActions.style.display = "flex";
+  batchActions.style.gap = "6px";
+
+  // Mobile Maximize / Minimize Toggle Button (Styled as 32x32px icon button)
+  const maximizeBtn = document.createElement("button");
+  maximizeBtn.className = "auth-btn secondary-btn maximize-spines-btn";
+  maximizeBtn.style.cssText = `
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    padding: 0;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    border-radius: 6px;
+    line-height: 1;
+  `;
+
+  const updateMaximizeBtn = () => {
+    const isMax = container.classList.contains("maximized");
+    maximizeBtn.textContent = isMax ? "▼" : "▲";
+    maximizeBtn.title = isMax ? "Minimize" : "Maximize";
+  };
+
+  updateMaximizeBtn();
+
+  maximizeBtn.onclick = () => {
+    container.classList.toggle("maximized");
+    updateMaximizeBtn();
+  };
+
+  const searchAllBtn = document.createElement("button");
+  searchAllBtn.textContent = "Search All";
+  searchAllBtn.className = "auth-btn primary-btn";
+  searchAllBtn.style.padding = "4px 8px";
+  searchAllBtn.style.fontSize = "0.75rem";
+
+  const skipUnlabeledBtn = document.createElement("button");
+  skipUnlabeledBtn.textContent = "Skip Unlabeled";
+  skipUnlabeledBtn.className = "auth-btn secondary-btn";
+  skipUnlabeledBtn.style.padding = "4px 8px";
+  skipUnlabeledBtn.style.fontSize = "0.75rem";
+
+  searchAllBtn.onclick = () => {
+    const searchBtns = container.querySelectorAll(".spine-search-btn");
+    searchBtns.forEach((btn) => btn.click());
+  };
+
+  skipUnlabeledBtn.onclick = () => {
+    currentDetectedSpines = currentDetectedSpines.filter((spine) => {
+      const title = (spine.title || "").trim().toLowerCase();
+      return title !== "" && title !== "unlabeled spine";
+    });
+    activeEditingSpineIndex = null;
+    renderDetectedSpines();
+  };
+
+  batchActions.appendChild(searchAllBtn);
+  batchActions.appendChild(skipUnlabeledBtn);
+  batchActions.appendChild(maximizeBtn);
+
+  header.appendChild(titleEl);
+  header.appendChild(batchActions);
   container.appendChild(header);
 
   currentDetectedSpines.forEach((spine, index) => {
@@ -602,7 +714,7 @@ function renderDetectedSpines() {
 
     const searchBtn = document.createElement("button");
     searchBtn.textContent = "Search Book";
-    searchBtn.className = "auth-btn primary-btn";
+    searchBtn.className = "auth-btn primary-btn spine-search-btn";
     searchBtn.style.padding = "6px 12px";
     searchBtn.style.fontSize = "0.85rem";
     searchBtn.style.flex = "1";
@@ -739,6 +851,223 @@ function renderDetectedSpines() {
 }
 
 // ==========================================
+// CROP DIALOG ENGINE
+// ==========================================
+const cropCanvasBtn = document.getElementById("cropCanvasBtn");
+const cropModal = document.getElementById("cropModal");
+const cropCanvas = document.getElementById("cropCanvas");
+const cropCtx = cropCanvas?.getContext("2d");
+const cancelCropBtn = document.getElementById("cancelCropBtn");
+const applyCropBtn = document.getElementById("applyCropBtn");
+
+let cropSelection = null; // { x, y, w, h } in image pixels
+let isCropping = false;
+let cropStart = { x: 0, y: 0 };
+
+function drawCropOverlay() {
+  if (!currentLoadedImage || !cropCtx) return;
+
+  cropCtx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
+  cropCtx.drawImage(currentLoadedImage, 0, 0);
+
+  if (cropSelection && cropSelection.w > 0 && cropSelection.h > 0) {
+    // Darken background
+    cropCtx.fillStyle = "rgba(0, 0, 0, 0.5)";
+    cropCtx.fillRect(0, 0, cropCanvas.width, cropCanvas.height);
+
+    // Clear active crop selection region
+    cropCtx.clearRect(
+      cropSelection.x,
+      cropSelection.y,
+      cropSelection.w,
+      cropSelection.h,
+    );
+    cropCtx.drawImage(
+      currentLoadedImage,
+      cropSelection.x,
+      cropSelection.y,
+      cropSelection.w,
+      cropSelection.h,
+      cropSelection.x,
+      cropSelection.y,
+      cropSelection.w,
+      cropSelection.h,
+    );
+
+    // Draw selection stroke border
+    cropCtx.strokeStyle = "#3b82f6";
+    cropCtx.lineWidth = 3;
+    cropCtx.setLineDash([6, 6]);
+    cropCtx.strokeRect(
+      cropSelection.x,
+      cropSelection.y,
+      cropSelection.w,
+      cropSelection.h,
+    );
+    cropCtx.setLineDash([]);
+  }
+}
+
+cropCanvasBtn?.addEventListener("click", () => {
+  if (!currentLoadedImage) return alert("Please upload an image first.");
+
+  cropCanvas.width =
+    currentLoadedImage.naturalWidth || currentLoadedImage.width;
+  cropCanvas.height =
+    currentLoadedImage.naturalHeight || currentLoadedImage.height;
+
+  // Default crop selection box (center 80%)
+  cropSelection = {
+    x: Math.round(cropCanvas.width * 0.1),
+    y: Math.round(cropCanvas.height * 0.1),
+    w: Math.round(cropCanvas.width * 0.8),
+    h: Math.round(cropCanvas.height * 0.8),
+  };
+
+  drawCropOverlay();
+  cropModal.classList.remove("hidden-view");
+});
+
+const getCropMousePos = (e) => {
+  const rect = cropCanvas.getBoundingClientRect();
+  const scaleX = cropCanvas.width / rect.width;
+  const scaleY = cropCanvas.height / rect.height;
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+  return {
+    x: Math.max(0, Math.min(cropCanvas.width, (clientX - rect.left) * scaleX)),
+    y: Math.max(0, Math.min(cropCanvas.height, (clientY - rect.top) * scaleY)),
+  };
+};
+
+cropCanvas?.addEventListener("mousedown", (e) => {
+  isCropping = true;
+  cropStart = getCropMousePos(e);
+  cropSelection = { x: cropStart.x, y: cropStart.y, w: 0, h: 0 };
+});
+
+cropCanvas?.addEventListener(
+  "touchstart",
+  (e) => {
+    isCropping = true;
+    cropStart = getCropMousePos(e);
+    cropSelection = { x: cropStart.x, y: cropStart.y, w: 0, h: 0 };
+  },
+  { passive: true },
+);
+
+window.addEventListener("mousemove", (e) => {
+  if (!isCropping) return;
+  const currentPos = getCropMousePos(e);
+  cropSelection = {
+    x: Math.min(cropStart.x, currentPos.x),
+    y: Math.min(cropStart.y, currentPos.y),
+    w: Math.abs(currentPos.x - cropStart.x),
+    h: Math.abs(currentPos.y - cropStart.y),
+  };
+  drawCropOverlay();
+});
+
+window.addEventListener(
+  "touchmove",
+  (e) => {
+    if (!isCropping) return;
+    const currentPos = getCropMousePos(e);
+    cropSelection = {
+      x: Math.min(cropStart.x, currentPos.x),
+      y: Math.min(cropStart.y, currentPos.y),
+      w: Math.abs(currentPos.x - cropStart.x),
+      h: Math.abs(currentPos.y - cropStart.y),
+    };
+    drawCropOverlay();
+  },
+  { passive: true },
+);
+
+const stopCrop = () => {
+  isCropping = false;
+};
+window.addEventListener("mouseup", stopCrop);
+window.addEventListener("touchend", stopCrop);
+
+cancelCropBtn?.addEventListener("click", () => {
+  cropModal.classList.add("hidden-view");
+});
+
+applyCropBtn?.addEventListener("click", async () => {
+  if (!cropSelection || cropSelection.w < 20 || cropSelection.h < 20) {
+    return alert("Please select a valid crop region.");
+  }
+
+  // Draw cropped image region to offscreen canvas
+  const offCanvas = document.createElement("canvas");
+  offCanvas.width = cropSelection.w;
+  offCanvas.height = cropSelection.h;
+  const offCtx = offCanvas.getContext("2d");
+
+  offCtx.drawImage(
+    currentLoadedImage,
+    cropSelection.x,
+    cropSelection.y,
+    cropSelection.w,
+    cropSelection.h,
+    0,
+    0,
+    cropSelection.w,
+    cropSelection.h,
+  );
+
+  cropModal.classList.add("hidden-view");
+  showLoadingOverlay("Cropping image & re-running AI scan...");
+
+  offCanvas.toBlob(
+    async (blob) => {
+      if (!blob) return hideLoadingOverlay();
+
+      const croppedFile = new File([blob], "cropped_shelf.jpg", {
+        type: "image/jpeg",
+      });
+      currentUploadedFile = croppedFile;
+
+      // Load cropped preview onto workspace canvas
+      const img = new Image();
+      img.onload = () => {
+        shelfCanvas.width = img.width;
+        shelfCanvas.height = img.height;
+        currentLoadedImage = img;
+        redrawCanvasOverlays(null);
+      };
+      img.src = URL.createObjectURL(croppedFile);
+
+      // Trigger API OCR on cropped image
+      const formData = new FormData();
+      formData.append("image", croppedFile);
+      if (currentUser) formData.append("user_id", currentUser.id);
+      formData.append("force_rescan", "true");
+
+      try {
+        const response = await fetch("/api/ocr", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await response.json();
+        currentDetectedSpines = data.spines || [];
+        currentUploadedImageHash = data.imageHash || null;
+        renderDetectedSpines();
+      } catch (err) {
+        console.error("Cropped scan failed:", err);
+        alert("Scan failed on cropped image.");
+      } finally {
+        hideLoadingOverlay();
+      }
+    },
+    "image/jpeg",
+    0.95,
+  );
+});
+
+// ==========================================
 // 6. DATABASE SAVING & LOADING
 // ==========================================
 async function saveShelfToDatabase() {
@@ -756,7 +1085,6 @@ async function saveShelfToDatabase() {
   try {
     const fileName = `${currentUser.id}/${Date.now()}.jpg`;
 
-    // 1. Upload Image to Storage Bucket
     const { data: uploadData, error: uploadError } =
       await supabaseClient.storage
         .from("shelves")
@@ -772,10 +1100,13 @@ async function saveShelfToDatabase() {
       .getPublicUrl(fileName);
     const imageUrl = publicUrlData.publicUrl;
 
-    // 2. Create Shelf Record
     const { data: shelfData, error: shelfError } = await supabaseClient
       .from("shelves")
-      .insert({ user_id: currentUser.id, image_url: imageUrl })
+      .insert({
+        user_id: currentUser.id,
+        image_url: imageUrl,
+        image_hash: currentUploadedImageHash,
+      })
       .select()
       .single();
 
@@ -784,7 +1115,6 @@ async function saveShelfToDatabase() {
       return;
     }
 
-    // 3. Format Books Payload
     const booksToInsert = currentDetectedSpines.map((spine) => ({
       user_id: currentUser.id,
       shelf_id: shelfData.id,
@@ -794,12 +1124,10 @@ async function saveShelfToDatabase() {
       shelf_image_url: imageUrl,
     }));
 
-    // 4. Insert Books to Database
     let { error: booksError } = await supabaseClient
       .from("user_books")
       .insert(booksToInsert);
 
-    // Fallback: If 'polygon' column is missing in DB, retry without polygon data
     if (booksError && booksError.message.includes("polygon")) {
       const fallbackBooks = booksToInsert.map(({ polygon, ...rest }) => rest);
       const fallbackResult = await supabaseClient
@@ -818,10 +1146,10 @@ async function saveShelfToDatabase() {
       `Successfully saved shelf and ${booksToInsert.length} book(s) to your library!`,
     );
 
-    // Reset Workspace State
     currentDetectedSpines = [];
     currentUploadedFile = null;
     currentLoadedImage = null;
+    currentUploadedImageHash = null;
 
     document.getElementById("pendingContainer").innerHTML =
       "<p class='empty-state'>Upload a new image to continue.</p>";
@@ -862,11 +1190,9 @@ async function deleteBookFromLibrary(bookId) {
 
   if (error) return alert("Failed to delete book: " + error.message);
 
-  // Update local state and refresh sidebar/map
   myLibrary = myLibrary.filter((b) => b.id !== bookId);
   renderLibraryList(myLibrary);
 
-  // Re-render map if active
   if (
     document.getElementById("libraryView")?.classList.contains("active-view")
   ) {
@@ -916,7 +1242,6 @@ function renderLibraryList(books) {
   });
 }
 
-// Add filter listener for search input
 document.getElementById("searchInput")?.addEventListener("input", (e) => {
   const query = e.target.value.toLowerCase();
   const filteredBooks = myLibrary.filter((book) =>
@@ -948,12 +1273,43 @@ const getPos = (e) => ({
   y: e.touches ? e.touches[0].clientY : e.clientY,
 });
 
-// Refresh all shelf SVG overlays to ensure only the selected book shows handles
-function refreshAllShelfOverlays() {
-  document.querySelectorAll("[data-shelf-id]").forEach((shelfWrapper) => {
-    const books = shelfWrapper._books || [];
-    renderShelfSvgOverlays(shelfWrapper, books, activeSelectedBookId);
+// Deselects active selection and restores default overlays without removing polygon paths
+function deselectAllMapBooks() {
+  activeSelectedBookId = null;
+  document.querySelectorAll(".book-popover").forEach((el) => el.remove());
+
+  document.querySelectorAll(".shelf-svg-overlay").forEach((svg) => {
+    svg.querySelectorAll("circle").forEach((c) => c.remove());
+    svg.querySelectorAll("polygon").forEach((poly) => {
+      poly.setAttribute("fill", "rgba(59, 130, 246, 0.2)");
+      poly.setAttribute("stroke", "#3b82f6");
+      poly.setAttribute("stroke-width", "2");
+    });
   });
+}
+
+function zoomToShelfOnMap(shelfId) {
+  const shelfWrapper = document.querySelector(`[data-shelf-id="${shelfId}"]`);
+  if (!shelfWrapper) return;
+
+  const shelfLeft = parseFloat(shelfWrapper.style.left);
+  const shelfTop = parseFloat(shelfWrapper.style.top);
+
+  const rect = infiniteMap.getBoundingClientRect();
+  const targetScale = 1.2;
+  mapState.scale = targetScale;
+
+  mapState.x = rect.width / 2 - (shelfLeft + 150) * targetScale;
+  mapState.y = rect.height / 2 - (shelfTop + 100) * targetScale;
+
+  mapViewport.style.transition = "transform 0.4s ease-in-out";
+  mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
+
+  shelfWrapper.style.border = "2px solid #10b981";
+  setTimeout(() => {
+    mapViewport.style.transition = "none";
+    shelfWrapper.style.border = "1px solid #e4e4e7";
+  }, 1200);
 }
 
 async function loadLibraryMap() {
@@ -973,7 +1329,6 @@ async function loadLibraryMap() {
 
     const shelfWrapper = document.createElement("div");
     shelfWrapper.dataset.shelfId = shelf.id;
-    shelfWrapper._books = shelf.user_books || []; // Attach books array to shelf DOM node
     shelfWrapper.style.cssText = `
       position: absolute; left: ${startX}px; top: ${startY}px;
       width: 300px; background: white; padding: 10px; border-radius: 8px;
@@ -985,6 +1340,7 @@ async function loadLibraryMap() {
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; pointer-events: none;">
         <span style="font-weight: 600; font-size: 0.95rem; color: #3f3f46;">${shelf.name || "Untitled Shelf"}</span>
         <div style="pointer-events: auto; display: flex; gap: 6px;">
+          <button class="rescan-shelf-btn" title="Re-run OCR Scan" style="background:none; border:none; cursor:pointer; color:#3b82f6; font-size:1rem;">🔄</button>
           <button class="edit-name-btn" title="Rename" style="background:none; border:none; cursor:pointer; color:#71717a; font-size:1rem;">✏️</button>
           <button class="delete-shelf-btn" title="Delete Shelf" style="background:none; border:none; cursor:pointer; color:#ef4444; font-size:1rem;">🗑️</button>
         </div>
@@ -994,6 +1350,61 @@ async function loadLibraryMap() {
         <svg class="shelf-svg-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none;"></svg>
       </div>
     `;
+
+    shelfWrapper
+      .querySelector(".rescan-shelf-btn")
+      .addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (
+          !confirm(
+            "Re-run scan on this shelf? This will open the scan workspace with fresh spine detections.",
+          )
+        )
+          return;
+
+        const scanNavBtn = document.querySelector(
+          '.nav-btn[data-target="scanView"]',
+        );
+        if (scanNavBtn) scanNavBtn.click();
+
+        document.getElementById("pendingContainer").innerHTML =
+          "<p style='text-align:center;'>Fetching shelf image for re-scan...</p>";
+
+        const response = await fetch(shelf.image_url);
+        const blob = await response.blob();
+        const file = new File([blob], "rescan_shelf.jpg", {
+          type: "image/jpeg",
+        });
+
+        currentUploadedFile = file;
+        placeholderText.style.display = "none";
+        shelfCanvas.style.display = "block";
+        canvasControls.classList.remove("hidden-element");
+
+        const img = new Image();
+        img.onload = () => {
+          shelfCanvas.width = img.width;
+          shelfCanvas.height = img.height;
+          currentLoadedImage = img;
+          redrawCanvasOverlays(null);
+        };
+        img.src = URL.createObjectURL(file);
+
+        const formData = new FormData();
+        formData.append("image", file);
+        formData.append("user_id", currentUser.id);
+        formData.append("force_rescan", "true");
+
+        const scanRes = await fetch("/api/ocr", {
+          method: "POST",
+          body: formData,
+        });
+        const scanData = await scanRes.json();
+
+        currentDetectedSpines = scanData.spines || [];
+        currentUploadedImageHash = scanData.imageHash || null;
+        renderDetectedSpines();
+      });
 
     shelfWrapper
       .querySelector(".edit-name-btn")
@@ -1029,15 +1440,17 @@ async function loadLibraryMap() {
     imgElement.onload = () => {
       renderShelfSvgOverlays(
         shelfWrapper,
-        shelfWrapper._books,
+        shelf.user_books || [],
         activeSelectedBookId,
+        false,
       );
     };
     if (imgElement.complete) {
       renderShelfSvgOverlays(
         shelfWrapper,
-        shelfWrapper._books,
+        shelf.user_books || [],
         activeSelectedBookId,
+        false,
       );
     }
 
@@ -1071,9 +1484,8 @@ async function loadLibraryMap() {
   });
 }
 
-// Floating Action Popover for Book Operations
 function showBookActionPopover(shelfWrapper, book, books) {
-  document.querySelectorAll(".book-popover").forEach((el) => el.remove());
+  shelfWrapper.querySelectorAll(".book-popover").forEach((el) => el.remove());
 
   const popover = document.createElement("div");
   popover.className = "book-popover";
@@ -1113,9 +1525,7 @@ function showBookActionPopover(shelfWrapper, book, books) {
 
   popover.querySelector(".popover-close-btn").addEventListener("click", (e) => {
     e.stopPropagation();
-    popover.remove();
-    activeSelectedBookId = null;
-    refreshAllShelfOverlays();
+    deselectAllMapBooks();
   });
 
   const imgContainer = shelfWrapper.querySelector(
@@ -1124,7 +1534,6 @@ function showBookActionPopover(shelfWrapper, book, books) {
   if (imgContainer) imgContainer.appendChild(popover);
 }
 
-// Render SVG overlays & control handles for map shelf books
 function renderShelfSvgOverlays(
   shelfWrapper,
   books,
@@ -1178,8 +1587,8 @@ function renderShelfSvgOverlays(
 
     const selectBook = (e) => {
       e.stopPropagation();
+      deselectAllMapBooks();
       activeSelectedBookId = book.id;
-      // Direct click on book image -> show handles (true)
       renderShelfSvgOverlays(shelfWrapper, books, book.id, true);
       showBookActionPopover(shelfWrapper, book, books);
     };
@@ -1189,7 +1598,6 @@ function renderShelfSvgOverlays(
 
     svg.appendChild(polyEl);
 
-    // Draggable handles render ONLY if selected AND showHandles is explicitly true
     if (isSelected && showHandles) {
       polygonPts.forEach((pt, ptIdx) => {
         const circle = document.createElementNS(
@@ -1235,17 +1643,14 @@ async function updateShelfName(shelfId, newName, textNode) {
   if (!error && textNode) textNode.textContent = newName;
 }
 
-// Map Panning & Background Click Handling
 const initMapDrag = (e) => {
-  if (e.target.closest(".map-controls") || e.target.closest(".book-popover"))
+  if (
+    e.target.closest(".map-viewport > div") ||
+    e.target.closest(".map-controls")
+  )
     return;
 
-  // Clicking empty space or a shelf background deselects any active book handles
-  activeSelectedBookId = null;
-  document.querySelectorAll(".book-popover").forEach((el) => el.remove());
-  refreshAllShelfOverlays();
-
-  if (e.target.closest(".map-viewport > div")) return;
+  deselectAllMapBooks();
 
   const pos = getPos(e);
   mapState.isDragging = true;
@@ -1256,7 +1661,6 @@ const initMapDrag = (e) => {
 infiniteMap?.addEventListener("mousedown", initMapDrag);
 infiniteMap?.addEventListener("touchstart", initMapDrag, { passive: false });
 
-// Global Move Handler
 const handleMove = (e) => {
   if (activeMapEditPoint) {
     if (e.touches) e.preventDefault();
@@ -1289,7 +1693,7 @@ const handleMove = (e) => {
       activeMapEditPoint.shelfWrapper,
       activeMapEditPoint.books,
       book.id,
-      true, // Keep handles visible during active drag
+      true,
     );
     return;
   }
@@ -1315,7 +1719,6 @@ const handleMove = (e) => {
 window.addEventListener("mousemove", handleMove);
 window.addEventListener("touchmove", handleMove, { passive: false });
 
-// Global End Handler
 const handleEnd = async () => {
   if (activeMapEditPoint) {
     const book = activeMapEditPoint.book;
@@ -1350,7 +1753,27 @@ const handleEnd = async () => {
 window.addEventListener("mouseup", handleEnd);
 window.addEventListener("touchend", handleEnd);
 
-// Zoom & Highlight Target Book from Sidebar Click
+// Re-enabled Desktop Scroll Wheel Zooming
+infiniteMap?.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    const delta = -e.deltaY * 0.0015;
+    const newScale = Math.min(Math.max(0.1, mapState.scale + delta), 5);
+
+    const rect = infiniteMap.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    mapState.x = mouseX - (mouseX - mapState.x) * (newScale / mapState.scale);
+    mapState.y = mouseY - (mouseY - mapState.y) * (newScale / mapState.scale);
+    mapState.scale = newScale;
+
+    mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
+  },
+  { passive: false },
+);
+
 function zoomToBookOnMap(book) {
   const box = book.bounding_box || book.boundingBox;
   if (!box) return;
@@ -1399,7 +1822,6 @@ function zoomToBookOnMap(book) {
     .eq("shelf_id", book.shelf_id)
     .then(({ data: shelfBooks }) => {
       const books = shelfBooks || [];
-      // Pass false so handles stay hidden when zoomed from title click
       renderShelfSvgOverlays(shelfWrapper, books, book.id, false);
       const selectedBook = books.find((b) => b.id === book.id) || book;
       showBookActionPopover(shelfWrapper, selectedBook, books);
@@ -1458,9 +1880,7 @@ closeManagerBtn?.addEventListener("click", () =>
   shelfManagerModal.classList.add("hidden-view"),
 );
 
-// Close modal when clicking/tapping outside the modal content
 shelfManagerModal?.addEventListener("click", (e) => {
-  // Check if the click was directly on the dark overlay, not inside the white card
   if (e.target === shelfManagerModal) {
     shelfManagerModal.classList.add("hidden-view");
   }
