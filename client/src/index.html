@@ -22,31 +22,32 @@
 
   <!-- Logged Out / Auth View -->
   <div id="loggedOutView" class="auth-wrapper">
-    <div class="auth-background"></div>
-    <div class="auth-card">
-      <div class="auth-header">
-        <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 12px;">
-          <img src="/img/logo.svg" alt="HiLibrary Icon" style="height: 42px; width: auto;" />
-          <span style="font-family: system-ui, -apple-system, sans-serif; font-size: 2.25rem; color: #0f172a; line-height: 1;">
-            <strong style="font-weight: 800;">Hi</strong><span style="font-weight: 300; color: #64748b;">Library</span>
-          </span>
+    <div class="auth-background">
+      <div class="auth-card">
+        <div class="auth-header">
+          <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 12px;">
+            <img src="/img/logo.svg" alt="HiLibrary Icon" style="height: 42px; width: auto;" />
+            <span style="font-family: system-ui, -apple-system, sans-serif; font-size: 2.25rem; color: #0f172a; line-height: 1;">
+              <strong style="font-weight: 800;">Hi</strong><span style="font-weight: 300; color: #64748b;">Library</span>
+            </span>
+          </div>
+          <p>Your physical library, digitally enhanced.</p>
         </div>
-        <p>Your physical library, digitally enhanced.</p>
+        
+        <form id="authForm" class="auth-form">
+          <input type="email" id="emailInput" placeholder="Email Address" class="auth-input" required autocomplete="username">
+          <input type="password" id="passwordInput" placeholder="Password" class="auth-input" required autocomplete="current-password">
+          <input type="password" id="confirmPasswordInput" placeholder="Confirm Password" class="auth-input hidden-element" autocomplete="new-password">
+          <span id="passwordError" class="auth-error hidden-element">Passwords do not match</span>
+          
+          <button type="submit" id="authActionBtn" class="auth-btn primary-btn">Log In</button>
+          
+          <div class="auth-footer">
+            <span id="authToggleText">Don't have an account?</span> 
+            <button type="button" id="authToggleBtn" class="toggle-btn">Sign up here</button>
+          </div>
+        </form>
       </div>
-      
-      <form id="authForm" class="auth-form">
-        <input type="email" id="emailInput" placeholder="Email Address" class="auth-input" required autocomplete="username">
-        <input type="password" id="passwordInput" placeholder="Password" class="auth-input" required autocomplete="current-password">
-        <input type="password" id="confirmPasswordInput" placeholder="Confirm Password" class="auth-input hidden-element" autocomplete="new-password">
-        <span id="passwordError" class="auth-error hidden-element">Passwords do not match</span>
-        
-        <button type="submit" id="authActionBtn" class="auth-btn primary-btn">Log In</button>
-        
-        <div class="auth-footer">
-          <span id="authToggleText">Don't have an account?</span> 
-          <button type="button" id="authToggleBtn" class="toggle-btn">Sign up here</button>
-        </div>
-      </form>
     </div>
   </div>
 
