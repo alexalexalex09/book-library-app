@@ -644,6 +644,13 @@ function renderDetectedSpines() {
   header.appendChild(batchActions);
   container.appendChild(header);
 
+  const topSaveBtn = document.createElement("button");
+  topSaveBtn.textContent = "Save Shelf to Library";
+  topSaveBtn.className = "auth-btn primary-btn save-shelf-btn";
+  topSaveBtn.style.marginBottom = "16px";
+  topSaveBtn.onclick = saveShelfToDatabase;
+  container.appendChild(topSaveBtn);
+
   currentDetectedSpines.forEach((spine, index) => {
     const div = document.createElement("div");
     div.style.padding = "12px";
@@ -840,12 +847,12 @@ function renderDetectedSpines() {
     container.appendChild(div);
   });
 
-  const saveBtn = document.createElement("button");
-  saveBtn.textContent = "Save Shelf to Library";
-  saveBtn.className = "auth-btn primary-btn save-shelf-btn";
-  saveBtn.style.marginTop = "16px";
-  saveBtn.onclick = saveShelfToDatabase;
-  container.appendChild(saveBtn);
+  const bottomSaveBtn = document.createElement("button");
+  bottomSaveBtn.textContent = "Save Shelf to Library";
+  bottomSaveBtn.className = "auth-btn primary-btn save-shelf-btn";
+  bottomSaveBtn.style.marginTop = "8px";
+  bottomSaveBtn.onclick = saveShelfToDatabase;
+  container.appendChild(bottomSaveBtn);
 }
 
 // ==========================================
@@ -1074,11 +1081,12 @@ async function saveShelfToDatabase() {
     return;
   }
 
-  const saveBtn = document.querySelector("#pendingContainer > .primary-btn");
-  if (saveBtn) {
-    saveBtn.disabled = true;
-    saveBtn.textContent = "Saving Shelf & Books...";
-  }
+  // Update all save buttons to loading state
+  const saveBtns = document.querySelectorAll(".save-shelf-btn");
+  saveBtns.forEach(btn => {
+    btn.disabled = true;
+    btn.textContent = "Saving Shelf & Books...";
+  });
 
   try {
     const fileName = `${currentUser.id}/${Date.now()}.jpg`;
@@ -1160,14 +1168,16 @@ async function saveShelfToDatabase() {
     if (canvasControls) canvasControls.classList.add("hidden-element");
 
     loadLibraryData();
-  } catch (err) {
+ } catch (err) {
     console.error("Save failed:", err);
     alert("An unexpected error occurred while saving.");
   } finally {
-    if (saveBtn) {
-      saveBtn.disabled = false;
-      saveBtn.textContent = "Save Shelf to Library";
-    }
+    // Restore all save buttons
+    const saveBtns = document.querySelectorAll(".save-shelf-btn");
+    saveBtns.forEach(btn => {
+      btn.disabled = false;
+      btn.textContent = "Save Shelf to Library";
+    });
   }
 }
 
@@ -1261,6 +1271,11 @@ let mapState = {
   isDragging: false,
   startX: 0,
   startY: 0,
+  isPinching: false,
+  pinchStartDist: 0,
+  pinchStartScale: 1,
+  pinchCenterX: 0,
+  pinchCenterY: 0,
 };
 let activeShelfDrag = null;
 let activeMapEditPoint = null;
@@ -1650,16 +1665,36 @@ const initMapDrag = (e) => {
 
   deselectAllMapBooks();
 
+  // Pinch-to-zoom start
+  if (e.touches && e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    mapState.pinchStartDist = Math.hypot(dx, dy);
+    mapState.pinchStartScale = mapState.scale;
+
+    const rect = infiniteMap.getBoundingClientRect();
+    mapState.pinchCenterX =
+      (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+    mapState.pinchCenterY =
+      (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+
+    mapState.isPinching = true;
+    mapState.isDragging = false;
+    return;
+  }
+
+  // Standard pan start
   const pos = getPos(e);
   mapState.isDragging = true;
+  mapState.isPinching = false;
   mapState.startX = pos.x - mapState.x;
   mapState.startY = pos.y - mapState.y;
   infiniteMap.style.cursor = "grabbing";
 };
 infiniteMap?.addEventListener("mousedown", initMapDrag);
 infiniteMap?.addEventListener("touchstart", initMapDrag, { passive: false });
-
 const handleMove = (e) => {
+  // Existing active point edit block
   if (activeMapEditPoint) {
     if (e.touches) e.preventDefault();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -1696,8 +1731,39 @@ const handleMove = (e) => {
     return;
   }
 
+  // Pinch-to-zoom move calculation
+  if (mapState.isPinching && e.touches && e.touches.length === 2) {
+    e.preventDefault();
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.hypot(dx, dy);
+
+    const newScale = Math.min(
+      Math.max(
+        0.1,
+        mapState.pinchStartScale * (dist / mapState.pinchStartDist),
+      ),
+      5,
+    );
+
+    mapState.x =
+      mapState.pinchCenterX -
+      (mapState.pinchCenterX - mapState.x) * (newScale / mapState.scale);
+    mapState.y =
+      mapState.pinchCenterY -
+      (mapState.pinchCenterY - mapState.y) * (newScale / mapState.scale);
+    mapState.scale = newScale;
+
+    mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
+    return;
+  }
+
   if (!activeShelfDrag && !mapState.isDragging) return;
   if (e.touches) e.preventDefault();
+
+  // Ignore single-finger dragging if two fingers are on the screen
+  if (mapState.isDragging && e.touches && e.touches.length > 1) return;
+
   const pos = getPos(e);
 
   if (activeShelfDrag) {
@@ -1741,6 +1807,10 @@ const handleEnd = async () => {
       .eq("id", activeShelfDrag.id)
       .then();
     activeShelfDrag = null;
+  }
+
+  if (mapState.isPinching) {
+    mapState.isPinching = false;
   }
 
   if (mapState.isDragging) {
