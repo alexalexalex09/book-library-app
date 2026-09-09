@@ -1,7 +1,6 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const multer = require("multer");
 const vision = require("@google-cloud/vision");
 const { createClient } = require("@supabase/supabase-js");
 const path = require("path");
@@ -9,16 +8,31 @@ const fs = require("fs");
 const sharp = require("sharp");
 const crypto = require("crypto");
 const axios = require("axios");
+const {
+  createImageUpload,
+  createRequireAuth,
+  handleUploadError,
+  setSecurityHeaders,
+} = require("./http-security");
 
 sharp.cache(false);
 
 const app = express();
-app.use(cors());
+app.disable("x-powered-by");
+app.use(setSecurityHeaders);
+
+const allowedOrigin = process.env.CORS_ORIGIN?.trim();
+app.use(
+  cors({
+    origin: allowedOrigin || false,
+    methods: ["GET", "POST"],
+  }),
+);
 
 const clientPath = path.join(__dirname, "../../client/src");
 app.use(express.static(clientPath));
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = createImageUpload();
 
 // --- INITIALIZATION ---
 // Resolve Google Vision credentials from whatever form the current platform can
@@ -71,6 +85,7 @@ const rawKey =
 const supabaseUrl = rawUrl.trim().replace(/^["']|["']$/g, "");
 const supabaseKey = rawKey.trim().replace(/^["']|["']$/g, "");
 const supabase = createClient(supabaseUrl, supabaseKey);
+const requireAuth = createRequireAuth(supabase);
 
 // --- COCO RLE DECODER & POLYGON EXTRACTION ---
 
@@ -356,7 +371,7 @@ async function extractSpatialPolygonsRoboflow(
 
 // --- ROUTE HANDLERS ---
 
-app.post("/api/ocr", upload.single("image"), async (req, res) => {
+app.post("/api/ocr", requireAuth, upload.single("image"), async (req, res) => {
   const reqStart = Date.now();
   const timestamp = new Date().toLocaleTimeString();
 
@@ -374,7 +389,7 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
       .createHash("sha256")
       .update(rawBuffer)
       .digest("hex");
-    const userId = req.body.user_id;
+    const userId = req.user.id;
     const forceRescan = req.body.force_rescan === "true";
 
     // 1. Check if shelf already exists in user's library (unless forcing a re-scan)
@@ -492,10 +507,13 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
   }
 });
 
-app.get("/api/books", async (req, res) => {
-  const searchQuery = req.query.q;
+app.get("/api/books", requireAuth, async (req, res) => {
+  const searchQuery =
+    typeof req.query.q === "string" ? req.query.q.trim() : "";
   if (!searchQuery)
     return res.status(400).json({ error: "Missing search query" });
+  if (searchQuery.length > 200)
+    return res.status(400).json({ error: "Search query is too long" });
 
   const apiKey = (process.env.GOOGLE_BOOKS_API_KEY || "").trim();
   const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchQuery)}&maxResults=1${apiKey ? `&key=${apiKey}` : ""}`;
@@ -590,6 +608,13 @@ Output format JSON array:
 }
 
 app.use((req, res) => res.sendFile(path.join(clientPath, "index.html")));
+app.use(handleUploadError);
+app.use((error, req, res, next) => {
+  console.error("Unhandled request error:", error);
+  res.status(500).json({ error: "Internal server error" });
+});
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, "0.0.0.0", () =>
+  console.log(`Server running on 0.0.0.0:${PORT}`),
+);

@@ -508,7 +508,6 @@ imageUpload?.addEventListener("change", async (e) => {
 
   const formData = new FormData();
   formData.append("image", file);
-  if (currentUser) formData.append("user_id", currentUser.id);
 
   document.getElementById("pendingContainer").innerHTML =
     "<p style='text-align:center;'>Scanning shelf...</p>";
@@ -516,7 +515,7 @@ imageUpload?.addEventListener("change", async (e) => {
   showLoadingOverlay("Scanning shelf image & detecting spines...");
 
   try {
-    const response = await fetch("/api/ocr", {
+    const response = await authenticatedFetch("/api/ocr", {
       method: "POST",
       body: formData,
     });
@@ -754,7 +753,7 @@ function renderDetectedSpines() {
         "<span style='font-size:0.85rem; color:#71717a;'>Searching Google Books...</span>";
       try {
         const query = encodeURIComponent(titleInput.value);
-        const res = await fetch(`/api/books?q=${query}`);
+        const res = await authenticatedFetch(`/api/books?q=${query}`);
         const data = await res.json();
 
         searchResults.innerHTML = "";
@@ -1048,11 +1047,10 @@ applyCropBtn?.addEventListener("click", async () => {
       // Trigger API OCR on cropped image
       const formData = new FormData();
       formData.append("image", croppedFile);
-      if (currentUser) formData.append("user_id", currentUser.id);
       formData.append("force_rescan", "true");
 
       try {
-        const response = await fetch("/api/ocr", {
+        const response = await authenticatedFetch("/api/ocr", {
           method: "POST",
           body: formData,
         });
@@ -1351,7 +1349,7 @@ async function loadLibraryMap() {
 
     shelfWrapper.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; pointer-events: none;">
-        <span style="font-weight: 600; font-size: 0.95rem; color: #3f3f46;">${shelf.name || "Untitled Shelf"}</span>
+        <span class="shelf-name" style="font-weight: 600; font-size: 0.95rem; color: #3f3f46;"></span>
         <div style="pointer-events: auto; display: flex; gap: 6px;">
           <button class="rescan-shelf-btn" title="Re-run OCR Scan" style="background:none; border:none; cursor:pointer; color:#3b82f6; font-size:1rem;">🔄</button>
           <button class="edit-name-btn" title="Rename" style="background:none; border:none; cursor:pointer; color:#71717a; font-size:1rem;">✏️</button>
@@ -1359,10 +1357,13 @@ async function loadLibraryMap() {
         </div>
       </div>
       <div style="position: relative; width: 100%;">
-        <img src="${shelf.image_url}" draggable="false" style="width: 100%; display: block; border-radius: 4px; pointer-events: none; border: 1px solid #f4f4f5;">
+        <img draggable="false" alt="" style="width: 100%; display: block; border-radius: 4px; pointer-events: none; border: 1px solid #f4f4f5;">
         <svg class="shelf-svg-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none;"></svg>
       </div>
     `;
+    shelfWrapper.querySelector(".shelf-name").textContent =
+      shelf.name || "Untitled Shelf";
+    shelfWrapper.querySelector("img").src = shelf.image_url;
 
     shelfWrapper
       .querySelector(".rescan-shelf-btn")
@@ -1405,10 +1406,9 @@ async function loadLibraryMap() {
 
         const formData = new FormData();
         formData.append("image", file);
-        formData.append("user_id", currentUser.id);
         formData.append("force_rescan", "true");
 
-        const scanRes = await fetch("/api/ocr", {
+        const scanRes = await authenticatedFetch("/api/ocr", {
           method: "POST",
           body: formData,
         });
@@ -1431,7 +1431,7 @@ async function loadLibraryMap() {
           updateShelfName(
             shelf.id,
             newName,
-            shelfWrapper.querySelector("span"),
+            shelfWrapper.querySelector(".shelf-name"),
           );
       });
 
@@ -1522,10 +1522,11 @@ function showBookActionPopover(shelfWrapper, book, books) {
   `;
 
   popover.innerHTML = `
-    <span style="font-weight: 600; max-width: 140px; overflow: hidden; text-overflow: ellipsis;">${book.title}</span>
+    <span class="popover-title" style="font-weight: 600; max-width: 140px; overflow: hidden; text-overflow: ellipsis;"></span>
     <button class="popover-del-btn" style="background: #ef4444; color: white; border: none; border-radius: 4px; padding: 2px 6px; cursor: pointer; font-weight: bold; font-size: 0.75rem;">Delete</button>
     <button class="popover-close-btn" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 0.9rem;">✕</button>
   `;
+  popover.querySelector(".popover-title").textContent = book.title;
 
   popover
     .querySelector(".popover-del-btn")
@@ -1918,17 +1919,23 @@ manageShelvesBtn?.addEventListener("click", async () => {
     const li = document.createElement("li");
     li.className = "manager-list-item";
     li.innerHTML = `
-      <span style="font-weight: 500;">${shelf.name || "Untitled Shelf"}</span>
+      <span class="manager-shelf-name" style="font-weight: 500;"></span>
       <div>
         <button class="modal-edit-btn" style="background:#f4f4f5; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; margin-right:4px;">Rename</button>
         <button class="modal-del-btn" style="background:#fee2e2; color:#ef4444; border:none; padding:4px 8px; border-radius:4px; cursor:pointer;">Delete</button>
       </div>
     `;
+    li.querySelector(".manager-shelf-name").textContent =
+      shelf.name || "Untitled Shelf";
 
     li.querySelector(".modal-edit-btn").addEventListener("click", async () => {
       const newName = prompt("Rename shelf:", shelf.name || "Untitled");
       if (newName) {
-        await updateShelfName(shelf.id, newName, li.querySelector("span"));
+        await updateShelfName(
+          shelf.id,
+          newName,
+          li.querySelector(".manager-shelf-name"),
+        );
         loadLibraryMap();
       }
     });
