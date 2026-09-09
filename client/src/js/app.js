@@ -133,6 +133,7 @@ supabaseClient.auth.onAuthStateChange((event, session) => {
     document.getElementById("userEmailDisplay").textContent = currentUser.email;
     loadLibraryData();
     loadLibraryMap();
+    updateScanSteps();
   } else {
     loggedOutView.classList.remove("hidden-element");
     loggedInView.classList.add("hidden-element");
@@ -166,6 +167,27 @@ document.querySelectorAll(".nav-btn[data-target]").forEach((btn) => {
     if (targetId === "libraryView") loadLibraryMap();
   });
 });
+
+// Scan progress: 1 Upload -> 2 Review spines -> 3 Save shelf
+function updateScanSteps() {
+  const stepsEl = document.getElementById("scanSteps");
+  if (!stepsEl) return;
+  const hasImage = Boolean(currentLoadedImage || currentUploadedFile);
+  const hasSpines = hasImage && currentDetectedSpines.length > 0;
+  const states = {
+    upload: hasImage ? "done" : "active",
+    review: !hasImage ? "todo" : hasSpines ? "done" : "active",
+    save: hasSpines ? "active" : "todo",
+  };
+  stepsEl.querySelectorAll(".scan-step").forEach((step) => {
+    const key = step.getAttribute("data-step");
+    step.classList.remove("is-active", "is-done");
+    if (states[key] === "active") step.classList.add("is-active");
+    if (states[key] === "done") step.classList.add("is-done");
+    if (states[key] === "active") step.setAttribute("aria-current", "step");
+    else step.removeAttribute("aria-current");
+  });
+}
 
 function showLoadingOverlay(message = "Analyzing bookshelf image with AI...") {
   let overlay = document.getElementById("loadingOverlay");
@@ -485,6 +507,7 @@ imageUpload?.addEventListener("change", async (e) => {
   placeholderText.style.display = "none";
   shelfCanvas.style.display = "block";
   canvasControls.classList.remove("hidden-element");
+  updateScanSteps();
 
   canvasState = {
     scale: 1,
@@ -503,6 +526,7 @@ imageUpload?.addEventListener("change", async (e) => {
     shelfCanvas.height = img.height;
     currentLoadedImage = img;
     redrawCanvasOverlays(null);
+    updateScanSteps();
   };
   img.src = URL.createObjectURL(file);
 
@@ -533,6 +557,7 @@ imageUpload?.addEventListener("change", async (e) => {
       if (canvasControls) canvasControls.classList.add("hidden-element");
       document.getElementById("pendingContainer").innerHTML =
         "<p class='empty-state'>Upload a new image to continue.</p>";
+      updateScanSteps();
 
       const mapNavBtn = document.querySelector(
         '.nav-btn[data-target="libraryView"]',
@@ -552,14 +577,64 @@ imageUpload?.addEventListener("change", async (e) => {
     console.error("Scan failed:", err);
     document.getElementById("pendingContainer").innerHTML =
       "<p style='color:red;'>Scan failed. Check console.</p>";
+    updateScanSteps();
   } finally {
     hideLoadingOverlay();
   }
 });
 
+// Empty canvas is the upload target: click, keyboard, and drag & drop.
+function forwardFileToImageUpload(file) {
+  if (!file || !imageUpload) return;
+  if (file.type && !file.type.startsWith("image/")) return;
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  imageUpload.files = transfer.files;
+  imageUpload.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function setupCanvasDropzone() {
+  const dropzone = document.getElementById("canvasDropzone");
+  if (!dropzone || !placeholderText || !imageUpload) return;
+
+  const activateUpload = () => imageUpload.click();
+
+  placeholderText.addEventListener("click", (e) => {
+    if (e.target.closest("#cropCanvasBtn")) return;
+    activateUpload();
+  });
+  placeholderText.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      activateUpload();
+    }
+  });
+
+  ["dragenter", "dragover"].forEach((evt) =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.add("drag-over");
+    }),
+  );
+  ["dragleave", "drop"].forEach((evt) =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      if (evt !== "drop" || e.relatedTarget) dropzone.classList.remove("drag-over");
+    }),
+  );
+  dropzone.addEventListener("drop", (e) => {
+    dropzone.classList.remove("drag-over");
+    const file = e.dataTransfer?.files?.[0];
+    if (file) forwardFileToImageUpload(file);
+  });
+}
+setupCanvasDropzone();
+updateScanSteps();
+
 function renderDetectedSpines() {
   const container = document.getElementById("pendingContainer");
   container.innerHTML = "";
+  updateScanSteps();
 
   if (currentDetectedSpines.length === 0) {
     container.innerHTML = "<p class='empty-state'>No spines detected.</p>";
@@ -567,6 +642,12 @@ function renderDetectedSpines() {
   }
 
   redrawCanvasOverlays(null);
+
+  // Step 2 header: review progress within the 1-2-3 flow
+  const stepHint = document.createElement("p");
+  stepHint.textContent = "Step 2 of 3 — review each spine, then save the shelf once.";
+  stepHint.style.cssText = "margin: 0 0 10px; font-size: 0.82rem; color: #64748b;";
+  container.appendChild(stepHint);
 
   // Toolbar
   const header = document.createElement("div");
@@ -643,12 +724,9 @@ function renderDetectedSpines() {
   header.appendChild(batchActions);
   container.appendChild(header);
 
-  const topSaveBtn = document.createElement("button");
-  topSaveBtn.textContent = "Save Shelf to Library";
-  topSaveBtn.className = "auth-btn primary-btn save-shelf-btn";
-  topSaveBtn.style.marginBottom = "16px";
-  topSaveBtn.onclick = saveShelfToDatabase;
-  container.appendChild(topSaveBtn);
+  const spinesScroll = document.createElement("div");
+  spinesScroll.className = "spines-scroll";
+  container.appendChild(spinesScroll);
 
   currentDetectedSpines.forEach((spine, index) => {
     const div = document.createElement("div");
@@ -843,15 +921,22 @@ function renderDetectedSpines() {
     div.appendChild(inputRow);
     div.appendChild(actionRow);
     div.appendChild(searchResults);
-    container.appendChild(div);
+    spinesScroll.appendChild(div);
   });
 
-  const bottomSaveBtn = document.createElement("button");
-  bottomSaveBtn.textContent = "Save Shelf to Library";
-  bottomSaveBtn.className = "auth-btn primary-btn save-shelf-btn";
-  bottomSaveBtn.style.marginTop = "8px";
-  bottomSaveBtn.onclick = saveShelfToDatabase;
-  container.appendChild(bottomSaveBtn);
+  // Step 3: one sticky save action for the whole shelf.
+  const stickySave = document.createElement("div");
+  stickySave.className = "spines-sticky-save";
+  const saveBtn = document.createElement("button");
+  saveBtn.textContent = `Save Shelf to Library (${currentDetectedSpines.length})`;
+  saveBtn.className = "auth-btn primary-btn save-shelf-btn";
+  saveBtn.onclick = saveShelfToDatabase;
+  const saveCount = document.createElement("span");
+  saveCount.className = "spines-save-count";
+  saveCount.textContent = "Step 3 of 3 — all spines above will be saved together.";
+  stickySave.appendChild(saveBtn);
+  stickySave.appendChild(saveCount);
+  container.appendChild(stickySave);
 }
 
 // ==========================================
@@ -1041,6 +1126,7 @@ applyCropBtn?.addEventListener("click", async () => {
         shelfCanvas.height = img.height;
         currentLoadedImage = img;
         redrawCanvasOverlays(null);
+        updateScanSteps();
       };
       img.src = URL.createObjectURL(croppedFile);
 
@@ -1170,12 +1256,15 @@ async function saveShelfToDatabase() {
     console.error("Save failed:", err);
     alert("An unexpected error occurred while saving.");
   } finally {
-    // Restore all save buttons
+    // Restore the single sticky save button
     const saveBtns = document.querySelectorAll(".save-shelf-btn");
     saveBtns.forEach(btn => {
       btn.disabled = false;
-      btn.textContent = "Save Shelf to Library";
+      btn.textContent = currentDetectedSpines.length > 0
+        ? `Save Shelf to Library (${currentDetectedSpines.length})`
+        : "Save Shelf to Library";
     });
+    updateScanSteps();
   }
 }
 
@@ -1377,12 +1466,13 @@ async function loadLibraryMap() {
           return;
 
         const scanNavBtn = document.querySelector(
-          '.nav-btn[data-target="scanView"]',
+          '.nav-btn[data-target="uploadView"]',
         );
         if (scanNavBtn) scanNavBtn.click();
 
         document.getElementById("pendingContainer").innerHTML =
           "<p style='text-align:center;'>Fetching shelf image for re-scan...</p>";
+        updateScanSteps();
 
         const response = await fetch(shelf.image_url);
         const blob = await response.blob();
@@ -1394,6 +1484,7 @@ async function loadLibraryMap() {
         placeholderText.style.display = "none";
         shelfCanvas.style.display = "block";
         canvasControls.classList.remove("hidden-element");
+        updateScanSteps();
 
         const img = new Image();
         img.onload = () => {
@@ -1401,6 +1492,7 @@ async function loadLibraryMap() {
           shelfCanvas.height = img.height;
           currentLoadedImage = img;
           redrawCanvasOverlays(null);
+          updateScanSteps();
         };
         img.src = URL.createObjectURL(file);
 
@@ -1495,7 +1587,104 @@ async function loadLibraryMap() {
 
     mapViewport.appendChild(shelfWrapper);
   });
+
+  updateMapEmptyState((shelves || []).length);
 }
+
+function updateMapEmptyState(shelfCount) {
+  const emptyState = document.getElementById("mapEmptyState");
+  if (!emptyState) return;
+  const isEmpty = !shelfCount || shelfCount === 0;
+  emptyState.classList.toggle("hidden-element", !isEmpty);
+  const fitBtn = document.getElementById("mapFitBtn");
+  if (fitBtn) fitBtn.disabled = isEmpty;
+}
+
+function applyMapTransform() {
+  if (!mapViewport) return;
+  mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
+}
+
+function zoomMapByFactor(factor) {
+  if (!infiniteMap) return;
+  const rect = infiniteMap.getBoundingClientRect();
+  const centerX = rect.width / 2;
+  const centerY = rect.height / 2;
+  const newScale = Math.min(Math.max(0.1, mapState.scale * factor), 5);
+  mapState.x = centerX - (centerX - mapState.x) * (newScale / mapState.scale);
+  mapState.y = centerY - (centerY - mapState.y) * (newScale / mapState.scale);
+  mapState.scale = newScale;
+  applyMapTransform();
+}
+
+function fitMapToShelves() {
+  if (!infiniteMap) return;
+  const shelves = Array.from(mapViewport?.querySelectorAll("[data-shelf-id]") || []);
+  if (shelves.length === 0) return;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  shelves.forEach((el) => {
+    const left = parseFloat(el.style.left || "0");
+    const top = parseFloat(el.style.top || "0");
+    const width = el.offsetWidth || 320;
+    const height = el.offsetHeight || 260;
+    minX = Math.min(minX, left);
+    minY = Math.min(minY, top);
+    maxX = Math.max(maxX, left + width);
+    maxY = Math.max(maxY, top + height);
+  });
+  const rect = infiniteMap.getBoundingClientRect();
+  const padding = 48;
+  const contentWidth = Math.max(1, maxX - minX + padding * 2);
+  const contentHeight = Math.max(1, maxY - minY + padding * 2);
+  const fitScale = Math.min(Math.max(0.1, Math.min(rect.width / contentWidth, rect.height / contentHeight)), 2);
+  mapState.scale = fitScale;
+  mapState.x = rect.width / 2 - (minX + (maxX - minX) / 2) * fitScale;
+  mapState.y = rect.height / 2 - (minY + (maxY - minY) / 2) * fitScale;
+  applyMapTransform();
+}
+
+function setupMapDiscoverability() {
+  const hint = document.getElementById("mapHint");
+  const hintClose = document.getElementById("mapHintClose");
+  try {
+    if (window.localStorage?.getItem("hilibrary-map-hint-dismissed") === "1" && hint) {
+      hint.style.display = "none";
+    }
+  } catch (err) {
+    /* storage unavailable */
+  }
+  hintClose?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (hint) hint.style.display = "none";
+    try {
+      window.localStorage?.setItem("hilibrary-map-hint-dismissed", "1");
+    } catch (err) {
+      /* storage unavailable */
+    }
+  });
+
+  document.getElementById("mapZoomIn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    zoomMapByFactor(1.25);
+  });
+  document.getElementById("mapZoomOut")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    zoomMapByFactor(1 / 1.25);
+  });
+  document.getElementById("mapFitBtn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    fitMapToShelves();
+  });
+  document.getElementById("emptyScanBtn")?.addEventListener("click", () => {
+    const scanNavBtn = document.querySelector('.nav-btn[data-target="uploadView"]');
+    if (scanNavBtn) scanNavBtn.click();
+  });
+  updateMapEmptyState(mapViewport?.querySelectorAll("[data-shelf-id]").length || 0);
+}
+setupMapDiscoverability();
 
 function showBookActionPopover(shelfWrapper, book, books) {
   shelfWrapper.querySelectorAll(".book-popover").forEach((el) => el.remove());
@@ -1967,9 +2156,29 @@ shelfManagerModal?.addEventListener("click", (e) => {
 const mobileLibraryToggle = document.getElementById("mobileLibraryToggle");
 const mobileLibraryContent = document.getElementById("mobileLibraryContent");
 
-mobileLibraryToggle?.addEventListener("click", () => {
-  if (window.innerWidth <= 768) {
-    mobileLibraryContent.classList.toggle("collapsed");
-    mobileLibraryToggle.classList.toggle("collapsed");
+function setMobileSheetCollapsed(collapsed) {
+  if (!mobileLibraryContent || !mobileLibraryToggle) return;
+  mobileLibraryContent.classList.toggle("collapsed", collapsed);
+  mobileLibraryToggle.classList.toggle("collapsed", collapsed);
+  mobileLibraryToggle.setAttribute("aria-expanded", String(!collapsed));
+}
+
+function applyDefaultMobileSheetState() {
+  if (window.innerWidth <= 768) setMobileSheetCollapsed(true);
+  else setMobileSheetCollapsed(false);
+}
+
+function toggleMobileSheet() {
+  if (window.innerWidth > 768 || !mobileLibraryContent) return;
+  setMobileSheetCollapsed(!mobileLibraryContent.classList.contains("collapsed"));
+}
+
+mobileLibraryToggle?.addEventListener("click", toggleMobileSheet);
+mobileLibraryToggle?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    toggleMobileSheet();
   }
 });
+window.addEventListener("resize", applyDefaultMobileSheetState);
+applyDefaultMobileSheetState();
