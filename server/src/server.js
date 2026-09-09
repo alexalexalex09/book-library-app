@@ -5,6 +5,7 @@ const multer = require("multer");
 const vision = require("@google-cloud/vision");
 const { createClient } = require("@supabase/supabase-js");
 const path = require("path");
+const fs = require("fs");
 const sharp = require("sharp");
 const crypto = require("crypto");
 const axios = require("axios");
@@ -20,17 +21,46 @@ app.use(express.static(clientPath));
 const upload = multer({ storage: multer.memoryStorage() });
 
 // --- INITIALIZATION ---
-let visionClient;
+// Resolve Google Vision credentials from whatever form the current platform can
+// provide, in priority order, without ever crashing the process on bad input:
+//   1. GOOGLE_CREDENTIALS_B64 — base64-encoded service-account JSON. Preferred for
+//      env-var-only / ephemeral hosts (Cloud Agents, Render env) because base64
+//      round-trips the private key's newlines byte-for-byte.
+//   2. GOOGLE_CREDENTIALS — inline service-account JSON string (back-compat).
+//   3. GOOGLE_CREDENTIALS — a path to a service-account JSON file that exists.
+//   4. Application Default Credentials — honors GOOGLE_APPLICATION_CREDENTIALS
+//      (file path, e.g. a Render Secret File or a local key) or platform metadata.
+function resolveVisionClient() {
+  const b64 = (process.env.GOOGLE_CREDENTIALS_B64 || "").trim();
+  if (b64) {
+    try {
+      const json = Buffer.from(b64, "base64").toString("utf8");
+      return new vision.ImageAnnotatorClient({ credentials: JSON.parse(json) });
+    } catch (err) {
+      console.warn(
+        `⚠️ GOOGLE_CREDENTIALS_B64 could not be decoded/parsed (${err.message}); trying other sources.`,
+      );
+    }
+  }
 
-if (process.env.GOOGLE_CREDENTIALS) {
-  // Production (Render): Parse the JSON string from your existing environment variable
-  visionClient = new vision.ImageAnnotatorClient({
-    credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
-  });
-} else {
-  // Local Dev: Fallback to the default file path behavior
-  visionClient = new vision.ImageAnnotatorClient();
+  const raw = (process.env.GOOGLE_CREDENTIALS || "").trim();
+  if (raw.startsWith("{") || raw.startsWith("[")) {
+    return new vision.ImageAnnotatorClient({ credentials: JSON.parse(raw) });
+  }
+
+  if (raw && fs.existsSync(raw)) {
+    return new vision.ImageAnnotatorClient({ keyFilename: raw });
+  }
+
+  if (raw) {
+    console.warn(
+      "⚠️ GOOGLE_CREDENTIALS is neither inline JSON nor an existing file path; falling back to Application Default Credentials.",
+    );
+  }
+  return new vision.ImageAnnotatorClient();
 }
+
+const visionClient = resolveVisionClient();
 
 const rawUrl = process.env.SUPABASE_URL || "";
 const rawKey =
