@@ -43,6 +43,9 @@ const confirmPasswordInput = document.getElementById("confirmPasswordInput");
 const emailInput = document.getElementById("emailInput");
 const passwordInput = document.getElementById("passwordInput");
 const passwordError = document.getElementById("passwordError");
+const googleAuthBtn = document.getElementById("googleAuthBtn");
+const googleAuthBtnText = document.getElementById("googleAuthBtnText");
+const authProviderError = document.getElementById("authProviderError");
 
 function checkPasswordMatch() {
   if (!isSignUpMode) return;
@@ -116,6 +119,30 @@ authForm?.addEventListener("submit", async (e) => {
   } finally {
     authActionBtn.textContent = originalText;
     authActionBtn.disabled = false;
+  }
+});
+
+googleAuthBtn?.addEventListener("click", async () => {
+  const originalText = googleAuthBtnText.textContent;
+  googleAuthBtn.disabled = true;
+  googleAuthBtnText.textContent = "Connecting...";
+  authProviderError.classList.add("hidden-element");
+  authProviderError.textContent = "";
+
+  try {
+    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const { error } = await supabaseClient.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo },
+    });
+
+    if (error) throw error;
+  } catch (error) {
+    authProviderError.textContent =
+      error?.message || "Unable to connect to Google. Please try again.";
+    authProviderError.classList.remove("hidden-element");
+    googleAuthBtn.disabled = false;
+    googleAuthBtnText.textContent = originalText;
   }
 });
 

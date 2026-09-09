@@ -173,6 +173,56 @@ html, body {
   color: #475569;
 }
 
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #e2e8f0;
+}
+
+.google-auth-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+}
+
+.google-auth-btn:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.google-auth-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.google-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.auth-error {
+  display: block;
+  margin-top: 10px;
+  color: #dc2626;
+  font-size: 0.85rem;
+}
+
 /* ==========================================
    4. SCAN WORKSPACE & CANVAS TOOLBAR
    ========================================== */
