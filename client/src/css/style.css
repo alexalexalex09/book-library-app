@@ -314,64 +314,54 @@ input:focus-visible,
   color: #475569;
 }
 
-/* Scan progress: Upload -> Review -> Save */
-.scan-steps {
-  list-style: none;
+.auth-divider {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px 20px 0;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.scan-step {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.85rem;
-  font-weight: 600;
+  gap: 12px;
+  margin: 18px 0;
   color: #94a3b8;
-  white-space: nowrap;
+  font-size: 0.8rem;
 }
 
-.scan-step-dot {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: inline-flex;
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #e2e8f0;
+}
+
+.google-auth-btn {
+  display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.75rem;
-  font-weight: 700;
-  background: #e2e8f0;
-  color: #64748b;
+  gap: 10px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #334155;
 }
 
-.scan-step.is-active {
-  color: #1d4ed8;
+.google-auth-btn:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
 }
 
-.scan-step.is-active .scan-step-dot {
-  background: #3b82f6;
-  color: #ffffff;
+.google-auth-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
-.scan-step.is-done {
-  color: #047857;
+.google-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
-.scan-step.is-done .scan-step-dot {
-  background: #10b981;
-  color: #ffffff;
-}
-
-.scan-step-divider {
-  flex: 1;
-  min-width: 16px;
-  height: 2px;
-  border-radius: 999px;
-  background: #e2e8f0;
+.auth-error {
+  display: block;
+  margin-top: 10px;
+  color: #dc2626;
+  font-size: 0.85rem;
 }
 
 /* ==========================================
