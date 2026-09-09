@@ -25,10 +25,10 @@
     <div class="auth-background">
       <div class="auth-card">
         <div class="auth-header">
-          <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 12px;">
-            <img src="/img/logo.svg" alt="HiLibrary Icon" style="height: 42px; width: auto;" />
-            <span style="font-family: system-ui, -apple-system, sans-serif; font-size: 2.25rem; color: #0f172a; line-height: 1;">
-              <strong style="font-weight: 800;">Hi</strong><span style="font-weight: 300; color: #64748b;">Library</span>
+          <div class="brand-lockup">
+            <img src="/img/logo.svg" alt="HiLibrary Icon" class="brand-lockup-logo" />
+            <span class="brand-lockup-word">
+              <strong class="brand-lockup-hi">Hi</strong><span class="brand-lockup-library">Library</span>
             </span>
           </div>
           <p>Your physical library, digitally enhanced.</p>
@@ -56,24 +56,24 @@
     
     <!-- Top Navigation -->
     <nav class="app-nav">
-      <div class="nav-brand" style="display: flex; align-items: center; gap: 8px;">
-        <img src="/img/logo.svg" alt="HiLibrary Icon" class="brand-logo" style="height: 32px; width: auto;" />
-        <span style="font-family: system-ui, -apple-system, sans-serif; font-size: 1.25rem; color: #0f172a; line-height: 1;">
-          <strong style="font-weight: 800;">Hi</strong><span style="font-weight: 300; color: #64748b;">Library</span>
+      <div class="nav-brand">
+        <img src="/img/logo.svg" alt="HiLibrary Icon" class="brand-logo nav-brand-logo" />
+        <span class="nav-brand-word">
+          <strong class="brand-lockup-hi">Hi</strong><span class="brand-lockup-library">Library</span>
         </span>
       </div>
       <div class="nav-links">
         <button id="navUploadBtn" class="nav-btn active" data-target="uploadView">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-          <span class="nav-text">Upload & Scan</span>
+          <span class="nav-text">Scan</span>
         </button>
         <button id="navLibraryBtn" class="nav-btn" data-target="libraryView">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 20l-5-5V4l5 5 6-5 5 5v11l-5-5-6 5z"/></svg>
-          <span class="nav-text">Infinite Library Map</span>
+          <span class="nav-text">Library</span>
         </button>
       </div>
-      <div class="nav-user" style="display: flex; align-items: center; gap: 15px;">
-        <span id="userEmailDisplay" class="nav-text" style="font-size: 0.9rem; color: #71717a; font-weight: 500;"></span>
+      <div class="nav-user">
+        <span id="userEmailDisplay" class="nav-text nav-user-email"></span>
         <button id="logoutBtn" class="logout-btn" title="Log Out">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
@@ -90,47 +90,60 @@
       <div id="uploadView" class="view-section active-view">
         
         <!-- Header (Outside Flex Row) -->
-        <div style="padding: 16px 20px 0; max-width: 1400px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center;">
-          <h2 style="font-size: 1.5rem; font-weight: 700; color: #0f172a; margin: 0;">Scan New Shelf</h2>
-          
-          <label class="auth-btn primary-btn" style="width: auto; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px;">
+        <div class="page-header">
+          <h2 class="page-title">Scan New Shelf</h2>
+
+          <label class="auth-btn primary-btn upload-label-btn">
             <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
             <span>Upload Image</span>
-            <input type="file" id="imageUpload" accept="image/*" style="display: none;" />
+            <input type="file" id="imageUpload" accept="image/*" class="visually-hidden-input" />
           </label>
         </div>
+
+        <!-- Step 1-3 progress: Upload -> Review spines -> Save shelf -->
+        <ol class="scan-steps" id="scanSteps" aria-label="Scan progress">
+          <li class="scan-step is-active" data-step="upload"><span class="scan-step-dot" aria-hidden="true">1</span><span>Upload</span></li>
+          <li class="scan-step-divider" aria-hidden="true"></li>
+          <li class="scan-step" data-step="review"><span class="scan-step-dot" aria-hidden="true">2</span><span>Review spines</span></li>
+          <li class="scan-step-divider" aria-hidden="true"></li>
+          <li class="scan-step" data-step="save"><span class="scan-step-dot" aria-hidden="true">3</span><span>Save shelf</span></li>
+        </ol>
 
         <!-- Workspace (Flex Row: Canvas + Sidebar) -->
         <div class="scan-container">
           <!-- Left: Canvas Area -->
-          <div class="canvas-container">
+          <div class="canvas-container" id="canvasDropzone">
             <button id="cropCanvasBtn" class="crop-canvas-btn" title="Crop Image" aria-label="Crop Image">
               <img src="img/noun_Crop_1935400.svg" alt="Crop" class="crop-icon" />
             </button>
 
-            <div id="placeholderText" class="dropzone-empty-state">
-              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 12px;">
+            <div id="placeholderText" class="dropzone-empty-state clickable-dropzone" role="button" tabindex="0" aria-label="Upload a shelf photo. Activate to choose an image, or drag and drop an image here.">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="dropzone-icon" aria-hidden="true">
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                 <circle cx="8.5" cy="8.5" r="1.5"></circle>
                 <polyline points="21 15 16 10 5 21"></polyline>
               </svg>
               <h3>Upload a shelf photo</h3>
-              <p>Click the button above to begin mapping spines</p>
+              <p>Click anywhere here or drag &amp; drop an image to begin mapping spines</p>
+              <span class="dropzone-cta">
+                <span class="auth-btn primary-btn dropzone-cta-btn">Choose image</span>
+                <span class="dropzone-hint">JPG or PNG, or drag &amp; drop</span>
+              </span>
             </div>
             
-            <canvas id="shelfCanvas" style="display: none;"></canvas>
+            <canvas id="shelfCanvas" class="canvas-hidden"></canvas>
 
-            <div id="canvasControls" class="canvas-controls hidden-element" style="position: absolute; bottom: 12px; right: 12px; background: rgba(15,23,42,0.85); backdrop-filter: blur(4px); padding: 6px 12px; border-radius: 8px; display: flex; align-items: center; gap: 8px; color: white; font-size: 0.8rem;">
+            <div id="canvasControls" class="canvas-controls-bar hidden-element">
               <label for="zoomSlider">Zoom:</label>
-              <input type="range" id="zoomSlider" min="1" max="4" step="0.1" value="1" style="width: 80px; cursor: pointer;">
-              <button id="resetZoomBtn" style="background: #334155; color: white; border: none; border-radius: 4px; padding: 2px 6px; cursor: pointer;">Reset</button>
+              <input type="range" id="zoomSlider" class="zoom-range" min="1" max="4" step="0.1" value="1" />
+              <button id="resetZoomBtn" class="zoom-reset-btn" type="button">Reset</button>
             </div>
           </div>
           
           <!-- Right: Detected Spines Sidebar -->
           <div id="pendingContainer">
-            <h2 style="color: #3f3f46; margin-top: 0; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #e4e4e7; font-size: 1.2rem;">Detected Spines</h2>
-            <div class="empty-state" style="text-align: center; color: #64748b; padding-top: 40px;">
+            <h2 class="sidebar-title">Detected Spines</h2>
+            <div class="empty-state">
               Waiting for image...
             </div>
           </div>
@@ -139,24 +152,41 @@
 
       <!-- VIEW 2: INFINITE LIBRARY MAP -->
       <div id="libraryView" class="view-section hidden-view">
-        <div class="map-container" id="infiniteMap">
+        <div class="map-container" id="infiniteMap" tabindex="0" role="region" aria-label="Library map. Use arrow keys to pan, plus and minus to zoom, F to fit all shelves, Escape to clear selection.">
           <div class="map-controls">
-            <button id="manageShelvesBtn" class="nav-btn manage-shelves-btn" style="background: white; border: 1px solid #d4d4d8; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+            <button id="manageShelvesBtn" class="nav-btn manage-shelves-btn" type="button" aria-label="Manage shelves">
               <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-              <span class="nav-text">📑 Manage Shelves</span>
+              <span class="nav-text">Shelves</span>
             </button>
+            <div class="map-zoom-group" role="group" aria-label="Map zoom controls">
+              <button id="mapZoomOut" class="map-zoom-btn" type="button" aria-label="Zoom map out">−</button>
+              <button id="mapZoomIn" class="map-zoom-btn" type="button" aria-label="Zoom map in">+</button>
+              <button id="mapFitBtn" class="map-zoom-btn map-fit-btn" type="button">Fit</button>
+            </div>
           </div>
           <div class="map-viewport" id="mapViewport">
             <!-- Draggable shelf objects will be dynamically injected here via app.js -->
           </div>
+          <div id="mapHint" class="map-hint" role="status">
+            <span>Drag to explore &bull; Scroll or pinch to zoom &bull; Select a book to edit it</span>
+            <button id="mapHintClose" class="map-hint-close" type="button">Got it</button>
+          </div>
+          <div id="mapEmptyState" class="map-empty-state hidden-element">
+            <div class="map-empty-card">
+              <h3>Your library map is empty</h3>
+              <p>Scan your first shelf to place it here. Drag to explore and scroll to zoom once shelves appear.</p>
+              <button id="emptyScanBtn" class="auth-btn primary-btn" type="button">Scan your first shelf</button>
+            </div>
+          </div>
         </div>
         <aside class="sidebar">
-          <div class="sidebar-header" id="mobileLibraryToggle">
-            <h2 style="margin: 0;">My Library</h2>
+          <div class="sidebar-header" id="mobileLibraryToggle" role="button" tabindex="0" aria-expanded="false" aria-controls="mobileLibraryContent">
+            <span class="sheet-handle" aria-hidden="true"></span>
+            <h2 class="sidebar-heading">My Library</h2>
             <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
           </div>
           <div class="sidebar-content" id="mobileLibraryContent">
-            <input type="text" id="searchInput" class="search-input" placeholder="Search books by title or author..." style="margin-top: 12px;">
+            <input type="text" id="searchInput" class="search-input sidebar-search" placeholder="Search books by title or author..." />
             <ul id="libraryList" class="library-list"></ul>
           </div>
         </aside>
@@ -166,36 +196,62 @@
   </div>
 
   <!-- MODALS (Outside of Main App Container) -->
-  <div id="shelfManagerModal" class="modal-overlay hidden-view">
-    <div class="modal-content">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-        <h2 style="margin: 0; color: #3f3f46;">Manage Shelves</h2>
-        <button id="closeManagerBtn" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #71717a;">&times;</button>
+  <div id="shelfManagerModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="shelfManagerTitle">
+    <div class="modal-content" role="document">
+      <div class="modal-header">
+        <h2 id="shelfManagerTitle" class="modal-title">Manage Shelves</h2>
+        <button id="closeManagerBtn" class="icon-btn" type="button" aria-label="Close shelf manager">&times;</button>
       </div>
-      <ul id="shelfManagerList" style="list-style: none; padding: 0; max-height: 400px; overflow-y: auto;"></ul>
+      <ul id="shelfManagerList" class="manager-list"></ul>
     </div>
   </div>
 
-  <div id="cropModal" class="hidden-view" style="position: fixed; inset: 0; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(4px); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px;">
-    <div style="background: white; padding: 20px; border-radius: 12px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; gap: 14px; align-items: center; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);">
-      <div style="width: 100%; display: flex; justify-content: space-between; align-items: center;">
-        <h3 style="margin: 0; font-size: 1.1rem; color: #0f172a; font-weight: 700;">Crop Image Area</h3>
-        <span style="font-size: 0.8rem; color: #64748b;">Click and drag to select area</span>
+  <div id="cropModal" class="hidden-view crop-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="cropModalTitle">
+    <div class="crop-modal-card" role="document">
+      <div class="crop-modal-header">
+        <h3 id="cropModalTitle" class="crop-modal-title">Crop Image Area</h3>
+        <span class="crop-modal-hint">Click and drag to select area</span>
       </div>
       
       <!-- Fitted Image Container -->
-      <div style="position: relative; display: flex; justify-content: center; align-items: center; max-height: 65vh; max-width: 100%; border: 1px solid #e2e8f0; border-radius: 6px; background: #0f172a; overflow: hidden;">
-        <canvas id="cropCanvas" style="cursor: crosshair; display: block; max-width: 100%; max-height: 65vh; width: auto; height: auto; object-fit: contain;"></canvas>
+      <div class="crop-canvas-wrap">
+        <canvas id="cropCanvas" class="crop-canvas"></canvas>
       </div>
       
-      <div style="display: flex; gap: 10px; width: 100%; justify-content: flex-end;">
-        <button id="cancelCropBtn" class="auth-btn secondary-btn" style="width: auto; padding: 8px 16px; background: #f1f5f9; border-color: #cbd5e1; color: #475569;">Cancel</button>
-        <button id="applyCropBtn" class="auth-btn primary-btn" style="width: auto; padding: 8px 16px;">Crop & Re-scan</button>
+      <div class="crop-modal-actions">
+        <button id="cancelCropBtn" class="auth-btn secondary-btn modal-btn" type="button">Cancel</button>
+        <button id="applyCropBtn" class="auth-btn primary-btn modal-btn" type="button">Crop & Re-scan</button>
       </div>
     </div>
   </div>
 
   <!-- Application Scripts -->
+  <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+  <div id="confirmModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle" aria-describedby="confirmModalMessage">
+    <div class="modal-content modal-dialog" role="document">
+      <h2 id="confirmModalTitle" class="modal-title">Please confirm</h2>
+      <p id="confirmModalMessage" class="modal-message"></p>
+      <div class="modal-actions">
+        <button id="confirmModalCancel" class="auth-btn secondary-btn modal-btn" type="button">Cancel</button>
+        <button id="confirmModalOk" class="auth-btn primary-btn modal-btn modal-btn-danger" type="button">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="promptModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="promptModalTitle" aria-describedby="promptModalHint">
+    <div class="modal-content modal-dialog" role="document">
+      <h2 id="promptModalTitle" class="modal-title">Rename</h2>
+      <p id="promptModalHint" class="modal-message"></p>
+      <label class="modal-input-label" for="promptModalInput">Name</label>
+      <input id="promptModalInput" class="auth-input modal-input" type="text" />
+      <div class="modal-actions">
+        <button id="promptModalCancel" class="auth-btn secondary-btn modal-btn" type="button">Cancel</button>
+        <button id="promptModalOk" class="auth-btn primary-btn modal-btn" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
   <script src="js/api.js"></script>
   <script src="js/app.js"></script>
 </body>
