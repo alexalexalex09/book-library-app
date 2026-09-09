@@ -22,13 +22,25 @@ const upload = multer({ storage: multer.memoryStorage() });
 // --- INITIALIZATION ---
 let visionClient;
 
-if (process.env.GOOGLE_CREDENTIALS) {
+const googleCredentials = (process.env.GOOGLE_CREDENTIALS || "").trim();
+const googleCredentialsIsJson =
+  googleCredentials.startsWith("{") || googleCredentials.startsWith("[");
+
+if (googleCredentials && googleCredentialsIsJson) {
   // Production (Render): Parse the JSON string from your existing environment variable
   visionClient = new vision.ImageAnnotatorClient({
-    credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
+    credentials: JSON.parse(googleCredentials),
   });
 } else {
-  // Local Dev: Fallback to the default file path behavior
+  // Local Dev: Fallback to the default file path behavior. If GOOGLE_CREDENTIALS
+  // holds a file path (or anything that is not inline JSON), defer to Application
+  // Default Credentials (e.g. GOOGLE_APPLICATION_CREDENTIALS) instead of crashing
+  // the whole server on an unguarded JSON.parse.
+  if (googleCredentials) {
+    console.warn(
+      "⚠️ GOOGLE_CREDENTIALS is not inline JSON; falling back to Application Default Credentials.",
+    );
+  }
   visionClient = new vision.ImageAnnotatorClient();
 }
 
