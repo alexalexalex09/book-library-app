@@ -390,19 +390,31 @@ input:focus-visible,
   position: relative;
   flex: 1;
   min-width: 0;
+  width: 100%;
   background: #0f172a;
   border-radius: 12px;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
+  text-align: center;
   min-height: 450px;
+  max-height: calc(100dvh - 260px);
 }
 
 #shelfCanvas {
-  max-width: 100%;
-  height: auto;
   display: block;
+  flex: 0 1 auto;
+  align-self: center;
+  justify-self: center;
+  margin: auto;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: calc(100dvh - 300px);
+  min-height: 0;
+  object-fit: contain;
+  object-position: center center;
 }
 
 .save-shelf-btn {
@@ -447,10 +459,13 @@ input:focus-visible,
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  align-self: center;
   gap: 12px;
   color: #94a3b8;
   text-align: center;
   width: 100%;
+  max-width: 100%;
+  margin: auto;
 }
 
 .canvas-container.drag-over {
@@ -1018,6 +1033,9 @@ input:focus-visible,
   display: flex;
   justify-content: center;
   align-items: center;
+  text-align: center;
+  width: 100%;
+  margin: 0 auto;
   max-height: 65vh;
   max-width: 100%;
   border: 1px solid var(--border);
@@ -1029,11 +1047,15 @@ input:focus-visible,
 .crop-canvas {
   cursor: crosshair;
   display: block;
+  flex: 0 1 auto;
+  align-self: center;
+  margin: auto;
   max-width: 100%;
   max-height: 65vh;
   width: auto;
   height: auto;
   object-fit: contain;
+  object-position: center center;
 }
 
 .crop-modal-actions {
@@ -1602,12 +1624,26 @@ input:focus-visible,
     padding: 12px;
   }
 
-  .canvas-container,
-  #shelfCanvas {
-    max-height: 35vh !important;
-    width: 100% !important;
-    object-fit: contain;
+  .canvas-container {
+    width: 100%;
+    min-height: 320px;
+    max-height: 42vh;
     margin: 0 auto;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+
+  #shelfCanvas {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 100%;
+    margin: auto;
+    align-self: center;
+    justify-self: center;
+    object-fit: contain;
+    object-position: center center;
   }
 
   #pendingContainer {
