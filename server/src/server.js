@@ -516,7 +516,7 @@ app.get("/api/books", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "Search query is too long" });
 
   const apiKey = (process.env.GOOGLE_BOOKS_API_KEY || "").trim();
-  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchQuery)}&maxResults=1${apiKey ? `&key=${apiKey}` : ""}`;
+  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchQuery)}&maxResults=3${apiKey ? `&key=${apiKey}` : ""}`;
 
   try {
     const response = await fetch(url);

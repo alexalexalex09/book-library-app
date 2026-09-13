@@ -1348,6 +1348,8 @@ input:focus-visible,
 
 .spine-card.is-confirmed {
   border-color: var(--success);
+  background-color: rgba(16, 185, 129, 0.08);
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.25);
 }
 
 .empty-state {
@@ -1488,6 +1490,28 @@ input:focus-visible,
   cursor: pointer;
   align-self: flex-start;
   min-height: 36px;
+}
+
+.spine-confirmed-row {
+  display: flex;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  border-radius: var(--radius-md);
+  background-color: rgba(16, 185, 129, 0.12);
+}
+
+.spine-confirmed-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #065f46;
+  background: rgba(16, 185, 129, 0.2);
 }
 
 .library-row {
