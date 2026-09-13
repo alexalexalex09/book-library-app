@@ -4,3 +4,4 @@
 # Secret Environment Variables
 **/.env
 **/google-credentials.json
+**/google-credentials.txt

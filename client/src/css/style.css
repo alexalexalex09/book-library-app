@@ -137,6 +137,10 @@ html, body {
   text-align: center;
 }
 
+.auth-form {
+  margin-top:1em;
+}
+
 .auth-input {
   width: 100%;
   padding: 10px 14px;
@@ -160,6 +164,7 @@ html, body {
   cursor: pointer;
   border: none;
   transition: opacity 0.2s;
+  margin: 1em 0em;
 }
 
 .primary-btn {
@@ -171,6 +176,19 @@ html, body {
   background-color: #ffffff;
   border: 1px solid #cbd5e1;
   color: #475569;
+}
+
+.auth-footer {
+  margin-top: 1em;
+}
+
+.text-link {
+  background-color: unset;
+  border: none;
+  text-decoration: underline;
+  color: #3b82f6;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: unset;
 }
 
 /* ==========================================
