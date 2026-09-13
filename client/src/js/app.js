@@ -13,6 +13,185 @@ let currentUser = null;
 let myLibrary = [];
 
 // ==========================================
+// 1b. TOASTS + ACCESSIBLE DIALOGS (Step 7)
+// Branded non-blocking feedback replaces alert();
+// confirmDialog()/promptDialog() replace confirm()/prompt().
+// ==========================================
+function showToast(message, type = "info", durationMs = 4200) {
+  const container = document.getElementById("toastContainer");
+  if (!container) return;
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.setAttribute("role", type === "error" ? "alert" : "status");
+
+  const text = document.createElement("span");
+  text.className = "toast-message";
+  text.textContent = message;
+
+  const close = document.createElement("button");
+  close.className = "toast-close";
+  close.type = "button";
+  close.setAttribute("aria-label", "Dismiss notification");
+  close.textContent = "✕";
+  close.addEventListener("click", () => toast.remove());
+
+  toast.appendChild(text);
+  toast.appendChild(close);
+  container.appendChild(toast);
+
+  while (container.children.length > 3) container.firstChild.remove();
+  if (durationMs > 0) setTimeout(() => toast.remove(), durationMs);
+}
+
+let lastFocusedBeforeModal = null;
+
+function getFocusableIn(container) {
+  return Array.from(
+    container.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+}
+
+function trapFocusInModal(modal, e) {
+  if (e.key !== "Tab") return;
+  const items = getFocusableIn(modal);
+  if (items.length === 0) {
+    e.preventDefault();
+    return;
+  }
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
+function openModalWithFocus(modal, focusTarget) {
+  lastFocusedBeforeModal = document.activeElement;
+  modal.classList.remove("hidden-view");
+  const target = focusTarget || getFocusableIn(modal)[0];
+  if (target) setTimeout(() => target.focus(), 0);
+}
+
+function closeModalAndRestore(modal) {
+  modal.classList.add("hidden-view");
+  if (lastFocusedBeforeModal && document.contains(lastFocusedBeforeModal)) {
+    lastFocusedBeforeModal.focus();
+  }
+  lastFocusedBeforeModal = null;
+}
+
+function confirmDialog({ title = "Please confirm", message = "Are you sure?", confirmLabel = "Delete", cancelLabel = "Cancel" } = {}) {
+  const modal = document.getElementById("confirmModal");
+  const titleEl = document.getElementById("confirmModalTitle");
+  const msgEl = document.getElementById("confirmModalMessage");
+  const okBtn = document.getElementById("confirmModalOk");
+  const cancelBtn = document.getElementById("confirmModalCancel");
+  return new Promise((resolve) => {
+    if (!modal || !okBtn || !cancelBtn) {
+      resolve(window.confirm(message));
+      return;
+    }
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+    okBtn.textContent = confirmLabel;
+    cancelBtn.textContent = cancelLabel;
+
+    const onKey = (e) => {
+      trapFocusInModal(modal, e);
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        cleanup(false);
+      }
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onOverlay = (e) => {
+      if (e.target === modal) cleanup(false);
+    };
+    function cleanup(result) {
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      modal.removeEventListener("keydown", onKey);
+      modal.removeEventListener("click", onOverlay);
+      closeModalAndRestore(modal);
+      resolve(result);
+    }
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    modal.addEventListener("keydown", onKey);
+    modal.addEventListener("click", onOverlay);
+    openModalWithFocus(modal, cancelBtn);
+  });
+}
+
+function promptDialog({ title = "Rename", hint = "", initialValue = "", confirmLabel = "Save", cancelLabel = "Cancel", label = "Name" } = {}) {
+  const modal = document.getElementById("promptModal");
+  const titleEl = document.getElementById("promptModalTitle");
+  const hintEl = document.getElementById("promptModalHint");
+  const labelEl = modal?.querySelector(".modal-input-label");
+  const input = document.getElementById("promptModalInput");
+  const okBtn = document.getElementById("promptModalOk");
+  const cancelBtn = document.getElementById("promptModalCancel");
+  return new Promise((resolve) => {
+    if (!modal || !input || !okBtn || !cancelBtn) {
+      resolve(window.prompt(hint || title, initialValue));
+      return;
+    }
+    titleEl.textContent = title;
+    hintEl.textContent = hint;
+    hintEl.style.display = hint ? "" : "none";
+    if (labelEl) labelEl.textContent = label;
+    input.value = initialValue ?? "";
+
+    const onKey = (e) => {
+      trapFocusInModal(modal, e);
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        cleanup(null);
+      } else if (e.key === "Enter" && document.activeElement === input) {
+        e.preventDefault();
+        cleanup(input.value);
+      }
+    };
+    const onOk = () => cleanup(input.value);
+    const onCancel = () => cleanup(null);
+    const onOverlay = (e) => {
+      if (e.target === modal) cleanup(null);
+    };
+    function cleanup(result) {
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      modal.removeEventListener("keydown", onKey);
+      modal.removeEventListener("click", onOverlay);
+      closeModalAndRestore(modal);
+      if (typeof result === "string") {
+        const trimmed = result.trim();
+        resolve(trimmed === "" ? null : trimmed);
+      } else {
+        resolve(result);
+      }
+    }
+    okBtn.textContent = confirmLabel;
+    cancelBtn.textContent = cancelLabel;
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    modal.addEventListener("keydown", onKey);
+    modal.addEventListener("click", onOverlay);
+    openModalWithFocus(modal, input);
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+  });
+}
+
+// ==========================================
 // 2. PROGRESSIVE BACKGROUND LOADING
 // ==========================================
 function loadHighResBackground() {
@@ -43,6 +222,9 @@ const confirmPasswordInput = document.getElementById("confirmPasswordInput");
 const emailInput = document.getElementById("emailInput");
 const passwordInput = document.getElementById("passwordInput");
 const passwordError = document.getElementById("passwordError");
+const googleAuthBtn = document.getElementById("googleAuthBtn");
+const googleAuthBtnText = document.getElementById("googleAuthBtnText");
+const authProviderError = document.getElementById("authProviderError");
 
 function checkPasswordMatch() {
   if (!isSignUpMode) return;
@@ -99,9 +281,9 @@ authForm?.addEventListener("submit", async (e) => {
 
       const { error } = await supabaseClient.auth.signUp({ email, password });
       if (error) {
-        alert("Sign up error: " + error.message);
+        showToast("Sign up error: " + error.message, "error");
       } else {
-        alert("Account created successfully! You can now log in.");
+        showToast("Account created successfully! You can now log in.", "success");
         authToggleBtn.click();
       }
     } else {
@@ -110,12 +292,36 @@ authForm?.addEventListener("submit", async (e) => {
         password,
       });
       if (error) {
-        alert("Login error: " + error.message);
+        showToast("Login error: " + error.message, "error");
       }
     }
   } finally {
     authActionBtn.textContent = originalText;
     authActionBtn.disabled = false;
+  }
+});
+
+googleAuthBtn?.addEventListener("click", async () => {
+  const originalText = googleAuthBtnText.textContent;
+  googleAuthBtn.disabled = true;
+  googleAuthBtnText.textContent = "Connecting...";
+  authProviderError.classList.add("hidden-element");
+  authProviderError.textContent = "";
+
+  try {
+    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const { error } = await supabaseClient.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo },
+    });
+
+    if (error) throw error;
+  } catch (error) {
+    authProviderError.textContent =
+      error?.message || "Unable to connect to Google. Please try again.";
+    authProviderError.classList.remove("hidden-element");
+    googleAuthBtn.disabled = false;
+    googleAuthBtnText.textContent = originalText;
   }
 });
 
@@ -133,6 +339,7 @@ supabaseClient.auth.onAuthStateChange((event, session) => {
     document.getElementById("userEmailDisplay").textContent = currentUser.email;
     loadLibraryData();
     loadLibraryMap();
+    updateScanSteps();
   } else {
     loggedOutView.classList.remove("hidden-element");
     loggedInView.classList.add("hidden-element");
@@ -166,6 +373,27 @@ document.querySelectorAll(".nav-btn[data-target]").forEach((btn) => {
     if (targetId === "libraryView") loadLibraryMap();
   });
 });
+
+// Scan progress: 1 Upload -> 2 Review spines -> 3 Save shelf
+function updateScanSteps() {
+  const stepsEl = document.getElementById("scanSteps");
+  if (!stepsEl) return;
+  const hasImage = Boolean(currentLoadedImage || currentUploadedFile);
+  const hasSpines = hasImage && currentDetectedSpines.length > 0;
+  const states = {
+    upload: hasImage ? "done" : "active",
+    review: !hasImage ? "todo" : hasSpines ? "done" : "active",
+    save: hasSpines ? "active" : "todo",
+  };
+  stepsEl.querySelectorAll(".scan-step").forEach((step) => {
+    const key = step.getAttribute("data-step");
+    step.classList.remove("is-active", "is-done");
+    if (states[key] === "active") step.classList.add("is-active");
+    if (states[key] === "done") step.classList.add("is-done");
+    if (states[key] === "active") step.setAttribute("aria-current", "step");
+    else step.removeAttribute("aria-current");
+  });
+}
 
 function showLoadingOverlay(message = "Analyzing bookshelf image with AI...") {
   let overlay = document.getElementById("loadingOverlay");
@@ -485,6 +713,7 @@ imageUpload?.addEventListener("change", async (e) => {
   placeholderText.style.display = "none";
   shelfCanvas.style.display = "block";
   canvasControls.classList.remove("hidden-element");
+  updateScanSteps();
 
   canvasState = {
     scale: 1,
@@ -503,28 +732,29 @@ imageUpload?.addEventListener("change", async (e) => {
     shelfCanvas.height = img.height;
     currentLoadedImage = img;
     redrawCanvasOverlays(null);
+    updateScanSteps();
   };
   img.src = URL.createObjectURL(file);
 
   const formData = new FormData();
   formData.append("image", file);
-  if (currentUser) formData.append("user_id", currentUser.id);
 
   document.getElementById("pendingContainer").innerHTML =
-    "<p style='text-align:center;'>Scanning shelf...</p>";
+    "<p class='scan-loading-text'>Scanning shelf...</p>";
 
   showLoadingOverlay("Scanning shelf image & detecting spines...");
 
   try {
-    const response = await fetch("/api/ocr", {
+    const response = await authenticatedFetch("/api/ocr", {
       method: "POST",
       body: formData,
     });
     const data = await response.json();
 
     if (data.duplicate) {
-      alert(
+      showToast(
         "This image is already in your library! Navigating to its location on the map.",
+        "info",
       );
 
       if (ctx && shelfCanvas)
@@ -534,6 +764,7 @@ imageUpload?.addEventListener("change", async (e) => {
       if (canvasControls) canvasControls.classList.add("hidden-element");
       document.getElementById("pendingContainer").innerHTML =
         "<p class='empty-state'>Upload a new image to continue.</p>";
+      updateScanSteps();
 
       const mapNavBtn = document.querySelector(
         '.nav-btn[data-target="libraryView"]',
@@ -552,15 +783,65 @@ imageUpload?.addEventListener("change", async (e) => {
   } catch (err) {
     console.error("Scan failed:", err);
     document.getElementById("pendingContainer").innerHTML =
-      "<p style='color:red;'>Scan failed. Check console.</p>";
+      "<p class='scan-error'>Scan failed. Check console.</p>";
+    updateScanSteps();
   } finally {
     hideLoadingOverlay();
   }
 });
 
+// Empty canvas is the upload target: click, keyboard, and drag & drop.
+function forwardFileToImageUpload(file) {
+  if (!file || !imageUpload) return;
+  if (file.type && !file.type.startsWith("image/")) return;
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  imageUpload.files = transfer.files;
+  imageUpload.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function setupCanvasDropzone() {
+  const dropzone = document.getElementById("canvasDropzone");
+  if (!dropzone || !placeholderText || !imageUpload) return;
+
+  const activateUpload = () => imageUpload.click();
+
+  placeholderText.addEventListener("click", (e) => {
+    if (e.target.closest("#cropCanvasBtn")) return;
+    activateUpload();
+  });
+  placeholderText.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      activateUpload();
+    }
+  });
+
+  ["dragenter", "dragover"].forEach((evt) =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.add("drag-over");
+    }),
+  );
+  ["dragleave", "drop"].forEach((evt) =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      if (evt !== "drop" || e.relatedTarget) dropzone.classList.remove("drag-over");
+    }),
+  );
+  dropzone.addEventListener("drop", (e) => {
+    dropzone.classList.remove("drag-over");
+    const file = e.dataTransfer?.files?.[0];
+    if (file) forwardFileToImageUpload(file);
+  });
+}
+setupCanvasDropzone();
+updateScanSteps();
+
 function renderDetectedSpines() {
   const container = document.getElementById("pendingContainer");
   container.innerHTML = "";
+  updateScanSteps();
 
   if (currentDetectedSpines.length === 0) {
     container.innerHTML = "<p class='empty-state'>No spines detected.</p>";
@@ -569,38 +850,34 @@ function renderDetectedSpines() {
 
   redrawCanvasOverlays(null);
 
+  // Step 2 header: review progress within the 1-2-3 flow
+  const stepHint = document.createElement("p");
+  stepHint.textContent = "Step 2 of 3 — review each spine, then save the shelf once.";
+  stepHint.className = "spines-step-hint";
+  container.appendChild(stepHint);
+
   // Toolbar
   const header = document.createElement("div");
-  header.style.display = "flex";
-  header.style.justifyContent = "space-between";
-  header.style.alignItems = "center";
-  header.style.marginBottom = "12px";
+  header.className = "spines-toolbar";
 
   const titleEl = document.createElement("strong");
+  titleEl.className = "spines-title";
   titleEl.textContent = `Detected Spines (${currentDetectedSpines.length})`;
-  titleEl.style.color = "#3f3f46";
 
   const batchActions = document.createElement("div");
-  batchActions.style.display = "flex";
-  batchActions.style.gap = "6px";
+  batchActions.className = "spines-batch-actions";
 
   // Mobile Maximize / Minimize Toggle Button (Styled as 32x32px icon button)
   const maximizeBtn = document.createElement("button");
-  maximizeBtn.className = "auth-btn secondary-btn maximize-spines-btn";
-  maximizeBtn.style.cssText = `
-    width: 32px;
-    height: 32px;
-    min-width: 32px;
-    padding: 0;
-    font-size: 0.75rem;
-    border-radius: 6px;
-    line-height: 1;
-  `;
+  maximizeBtn.className = "auth-btn secondary-btn maximize-spines-btn spine-icon-btn";
+  maximizeBtn.type = "button";
 
   const updateMaximizeBtn = () => {
     const isMax = container.classList.contains("maximized");
     maximizeBtn.textContent = isMax ? "▼" : "▲";
     maximizeBtn.title = isMax ? "Minimize" : "Maximize";
+    maximizeBtn.setAttribute("aria-label", isMax ? "Minimize detected spines" : "Maximize detected spines");
+    maximizeBtn.setAttribute("aria-expanded", String(isMax));
   };
 
   updateMaximizeBtn();
@@ -612,15 +889,15 @@ function renderDetectedSpines() {
 
   const searchAllBtn = document.createElement("button");
   searchAllBtn.textContent = "Search All";
-  searchAllBtn.className = "auth-btn primary-btn";
-  searchAllBtn.style.padding = "4px 8px";
-  searchAllBtn.style.fontSize = "0.75rem";
+  searchAllBtn.className = "auth-btn primary-btn spine-batch-btn";
+  searchAllBtn.type = "button";
+  searchAllBtn.setAttribute("aria-label", "Search all detected spines in Google Books");
 
   const skipUnlabeledBtn = document.createElement("button");
   skipUnlabeledBtn.textContent = "Skip Unlabeled";
-  skipUnlabeledBtn.className = "auth-btn secondary-btn";
-  skipUnlabeledBtn.style.padding = "4px 8px";
-  skipUnlabeledBtn.style.fontSize = "0.75rem";
+  skipUnlabeledBtn.className = "auth-btn secondary-btn spine-batch-btn";
+  skipUnlabeledBtn.type = "button";
+  skipUnlabeledBtn.setAttribute("aria-label", "Remove unlabeled spines from the list");
 
   searchAllBtn.onclick = () => {
     const searchBtns = container.querySelectorAll(".spine-search-btn");
@@ -644,48 +921,27 @@ function renderDetectedSpines() {
   header.appendChild(batchActions);
   container.appendChild(header);
 
-  const topSaveBtn = document.createElement("button");
-  topSaveBtn.textContent = "Save Shelf to Library";
-  topSaveBtn.className = "auth-btn primary-btn save-shelf-btn";
-  topSaveBtn.style.marginBottom = "16px";
-  topSaveBtn.onclick = saveShelfToDatabase;
-  container.appendChild(topSaveBtn);
+  const spinesScroll = document.createElement("div");
+  spinesScroll.className = "spines-scroll";
+  container.appendChild(spinesScroll);
 
   currentDetectedSpines.forEach((spine, index) => {
     const div = document.createElement("div");
-    div.style.padding = "12px";
-    div.style.marginBottom = "8px";
-    div.style.border = "1px solid #e4e4e7";
-    div.style.borderRadius = "8px";
-    div.style.backgroundColor = "white";
-    div.style.transition = "border-color 0.2s, box-shadow 0.2s";
+    div.className = "spine-card";
 
     const inputRow = document.createElement("div");
-    inputRow.style.display = "flex";
-    inputRow.style.alignItems = "center";
-    inputRow.style.gap = "8px";
-    inputRow.style.marginBottom = "8px";
+    inputRow.className = "spine-input-row";
 
     const numberBadge = document.createElement("div");
+    numberBadge.className = "spine-number";
     numberBadge.textContent = index + 1;
-    numberBadge.style.background = "#8b5cf6";
-    numberBadge.style.color = "white";
-    numberBadge.style.width = "24px";
-    numberBadge.style.height = "24px";
-    numberBadge.style.borderRadius = "50%";
-    numberBadge.style.display = "flex";
-    numberBadge.style.alignItems = "center";
-    numberBadge.style.justifyContent = "center";
-    numberBadge.style.fontSize = "0.8rem";
-    numberBadge.style.fontWeight = "bold";
-    numberBadge.style.flexShrink = "0";
+    numberBadge.setAttribute("aria-hidden", "true");
 
     const titleInput = document.createElement("input");
     titleInput.type = "text";
     titleInput.value = spine.title;
-    titleInput.className = "auth-input";
-    titleInput.style.padding = "8px";
-    titleInput.style.flex = "1";
+    titleInput.className = "auth-input spine-card-input";
+    titleInput.setAttribute("aria-label", `Spine ${index + 1} title`);
 
     titleInput.addEventListener("input", (e) => {
       spine.title = e.target.value;
@@ -693,14 +949,12 @@ function renderDetectedSpines() {
 
     const highlight = () => {
       activeEditingSpineIndex = index;
-      div.style.borderColor = "#10b981";
-      div.style.boxShadow = "0 0 0 2px rgba(16, 185, 129, 0.2)";
+      div.classList.add("is-highlighted");
       redrawCanvasOverlays(index);
     };
 
     const unhighlight = () => {
-      div.style.borderColor = "#e4e4e7";
-      div.style.boxShadow = "none";
+      div.classList.remove("is-highlighted");
       redrawCanvasOverlays(null);
     };
 
@@ -713,25 +967,19 @@ function renderDetectedSpines() {
     inputRow.appendChild(titleInput);
 
     const actionRow = document.createElement("div");
-    actionRow.style.display = "flex";
-    actionRow.style.gap = "8px";
-    actionRow.style.paddingLeft = "32px";
+    actionRow.className = "spine-actions";
 
     const searchBtn = document.createElement("button");
     searchBtn.textContent = "Search Book";
-    searchBtn.className = "auth-btn primary-btn spine-search-btn";
-    searchBtn.style.padding = "6px 12px";
-    searchBtn.style.fontSize = "0.85rem";
-    searchBtn.style.flex = "1";
+    searchBtn.className = "auth-btn primary-btn spine-search-btn spine-btn spine-btn-primary";
+    searchBtn.type = "button";
+    searchBtn.setAttribute("aria-label", `Search book for spine ${index + 1}`);
 
     const skipBtn = document.createElement("button");
     skipBtn.textContent = "Skip";
-    skipBtn.className = "auth-btn secondary-btn";
-    skipBtn.style.padding = "6px 12px";
-    skipBtn.style.fontSize = "0.85rem";
-    skipBtn.style.width = "auto";
-    skipBtn.style.backgroundColor = "#e5e7eb";
-    skipBtn.style.borderColor = "#d1d5db";
+    skipBtn.className = "auth-btn secondary-btn spine-btn spine-btn-skip";
+    skipBtn.type = "button";
+    skipBtn.setAttribute("aria-label", `Skip spine ${index + 1}`);
 
     skipBtn.onclick = () => {
       currentDetectedSpines.splice(index, 1);
@@ -743,25 +991,21 @@ function renderDetectedSpines() {
     actionRow.appendChild(skipBtn);
 
     const searchResults = document.createElement("div");
-    searchResults.style.paddingLeft = "32px";
-    searchResults.style.marginTop = "12px";
-    searchResults.style.display = "flex";
-    searchResults.style.flexDirection = "column";
-    searchResults.style.gap = "8px";
+    searchResults.className = "search-results-col";
 
     searchBtn.onclick = async () => {
       searchResults.innerHTML =
-        "<span style='font-size:0.85rem; color:#71717a;'>Searching Google Books...</span>";
+        "<span class='search-status'>Searching Google Books...</span>";
       try {
         const query = encodeURIComponent(titleInput.value);
-        const res = await fetch(`/api/books?q=${query}`);
+        const res = await authenticatedFetch(`/api/books?q=${query}`);
         const data = await res.json();
 
         searchResults.innerHTML = "";
 
         if (!data.items || data.items.length === 0) {
           searchResults.innerHTML =
-            "<span style='font-size:0.85rem; color:#ef4444;'>No results found.</span>";
+            "<span class='search-status-error'>No results found.</span>";
           return;
         }
 
@@ -776,53 +1020,34 @@ function renderDetectedSpines() {
             "https://via.placeholder.com/50x70?text=No+Cover";
 
           const card = document.createElement("div");
-          card.style.display = "flex";
-          card.style.gap = "12px";
-          card.style.padding = "12px";
-          card.style.border = "2px solid #3b82f6";
-          card.style.borderRadius = "8px";
-          card.style.backgroundColor = "#eff6ff";
+          card.className = "book-result-card";
 
           const img = document.createElement("img");
           img.src = thumbUrl;
-          img.style.width = "50px";
-          img.style.height = "70px";
-          img.style.objectFit = "cover";
-          img.style.borderRadius = "4px";
+          img.alt = "";
+          img.className = "book-result-thumb";
 
           const infoCol = document.createElement("div");
-          infoCol.style.display = "flex";
-          infoCol.style.flexDirection = "column";
-          infoCol.style.flex = "1";
-          infoCol.style.justifyContent = "center";
-          infoCol.style.gap = "4px";
+          infoCol.className = "book-result-info";
 
           const titleEl = document.createElement("strong");
+          titleEl.className = "book-result-title";
           titleEl.textContent = title;
-          titleEl.style.fontSize = "0.95rem";
-          titleEl.style.color = "#1e3a8a";
 
           const authorEl = document.createElement("span");
+          authorEl.className = "book-result-author";
           authorEl.textContent = `By ${authors}`;
-          authorEl.style.fontSize = "0.8rem";
-          authorEl.style.color = "#64748b";
 
           const confirmBtn = document.createElement("button");
           confirmBtn.textContent = "Confirm & Save";
-          confirmBtn.style.backgroundColor = "#10b981";
-          confirmBtn.style.color = "white";
-          confirmBtn.style.border = "none";
-          confirmBtn.style.padding = "6px 12px";
-          confirmBtn.style.borderRadius = "4px";
-          confirmBtn.style.fontSize = "0.85rem";
-          confirmBtn.style.fontWeight = "bold";
-          confirmBtn.style.cursor = "pointer";
-          confirmBtn.style.alignSelf = "flex-start";
+          confirmBtn.className = "book-confirm-btn";
+          confirmBtn.type = "button";
+          confirmBtn.setAttribute("aria-label", `Use ${title} for spine ${index + 1}`);
 
           confirmBtn.onclick = () => {
             titleInput.value = title;
             spine.title = title;
-            div.style.borderColor = "#10b981";
+            div.classList.add("is-confirmed");
             searchResults.innerHTML = "";
           };
 
@@ -837,22 +1062,30 @@ function renderDetectedSpines() {
         });
       } catch (err) {
         searchResults.innerHTML =
-          "<span style='font-size:0.85rem; color:#ef4444;'>Search failed.</span>";
+          "<span class='search-status-error'>Search failed.</span>";
       }
     };
 
     div.appendChild(inputRow);
     div.appendChild(actionRow);
     div.appendChild(searchResults);
-    container.appendChild(div);
+    spinesScroll.appendChild(div);
   });
 
-  const bottomSaveBtn = document.createElement("button");
-  bottomSaveBtn.textContent = "Save Shelf to Library";
-  bottomSaveBtn.className = "auth-btn primary-btn save-shelf-btn";
-  bottomSaveBtn.style.marginTop = "8px";
-  bottomSaveBtn.onclick = saveShelfToDatabase;
-  container.appendChild(bottomSaveBtn);
+  // Step 3: one sticky save action for the whole shelf.
+  const stickySave = document.createElement("div");
+  stickySave.className = "spines-sticky-save";
+  const saveBtn = document.createElement("button");
+  saveBtn.textContent = `Save Shelf to Library (${currentDetectedSpines.length})`;
+  saveBtn.className = "auth-btn primary-btn save-shelf-btn";
+  saveBtn.type = "button";
+  saveBtn.onclick = saveShelfToDatabase;
+  const saveCount = document.createElement("span");
+  saveCount.className = "spines-save-count";
+  saveCount.textContent = "Step 3 of 3 — all spines above will be saved together.";
+  stickySave.appendChild(saveBtn);
+  stickySave.appendChild(saveCount);
+  container.appendChild(stickySave);
 }
 
 // ==========================================
@@ -914,8 +1147,10 @@ function drawCropOverlay() {
 }
 
 cropCanvasBtn?.addEventListener("click", () => {
-  if (!currentLoadedImage) return alert("Please upload an image first.");
-
+  if (!currentLoadedImage) {
+    showToast("Please upload an image first.", "info");
+    return;
+  }
   cropCanvas.width =
     currentLoadedImage.naturalWidth || currentLoadedImage.width;
   cropCanvas.height =
@@ -930,7 +1165,24 @@ cropCanvasBtn?.addEventListener("click", () => {
   };
 
   drawCropOverlay();
-  cropModal.classList.remove("hidden-view");
+  openModalWithFocus(cropModal, cancelCropBtn);
+});
+
+function closeCropModal() {
+  if (!cropModal) return;
+  closeModalAndRestore(cropModal);
+}
+
+cropModal?.addEventListener("click", (e) => {
+  if (e.target === cropModal) closeCropModal();
+});
+
+cropModal?.addEventListener("keydown", (e) => {
+  trapFocusInModal(cropModal, e);
+  if (e.key === "Escape") {
+    e.stopPropagation();
+    closeCropModal();
+  }
 });
 
 const getCropMousePos = (e) => {
@@ -997,12 +1249,13 @@ window.addEventListener("mouseup", stopCrop);
 window.addEventListener("touchend", stopCrop);
 
 cancelCropBtn?.addEventListener("click", () => {
-  cropModal.classList.add("hidden-view");
+  closeCropModal();
 });
 
 applyCropBtn?.addEventListener("click", async () => {
   if (!cropSelection || cropSelection.w < 20 || cropSelection.h < 20) {
-    return alert("Please select a valid crop region.");
+    showToast("Please select a valid crop region.", "error");
+    return;
   }
 
   // Draw cropped image region to offscreen canvas
@@ -1023,7 +1276,7 @@ applyCropBtn?.addEventListener("click", async () => {
     cropSelection.h,
   );
 
-  cropModal.classList.add("hidden-view");
+  closeCropModal();
   showLoadingOverlay("Cropping image & re-running AI scan...");
 
   offCanvas.toBlob(
@@ -1042,17 +1295,17 @@ applyCropBtn?.addEventListener("click", async () => {
         shelfCanvas.height = img.height;
         currentLoadedImage = img;
         redrawCanvasOverlays(null);
+        updateScanSteps();
       };
       img.src = URL.createObjectURL(croppedFile);
 
       // Trigger API OCR on cropped image
       const formData = new FormData();
       formData.append("image", croppedFile);
-      if (currentUser) formData.append("user_id", currentUser.id);
       formData.append("force_rescan", "true");
 
       try {
-        const response = await fetch("/api/ocr", {
+        const response = await authenticatedFetch("/api/ocr", {
           method: "POST",
           body: formData,
         });
@@ -1062,7 +1315,7 @@ applyCropBtn?.addEventListener("click", async () => {
         renderDetectedSpines();
       } catch (err) {
         console.error("Cropped scan failed:", err);
-        alert("Scan failed on cropped image.");
+        showToast("Scan failed on cropped image.", "error");
       } finally {
         hideLoadingOverlay();
       }
@@ -1077,7 +1330,7 @@ applyCropBtn?.addEventListener("click", async () => {
 // ==========================================
 async function saveShelfToDatabase() {
   if (!currentUploadedFile || currentDetectedSpines.length === 0) {
-    alert("No image or detected books to save.");
+    showToast("No image or detected books to save.", "error");
     return;
   }
 
@@ -1097,7 +1350,7 @@ async function saveShelfToDatabase() {
         .upload(fileName, currentUploadedFile);
 
     if (uploadError) {
-      alert("Failed to upload shelf image: " + uploadError.message);
+      showToast("Failed to upload shelf image: " + uploadError.message, "error");
       return;
     }
 
@@ -1117,7 +1370,7 @@ async function saveShelfToDatabase() {
       .single();
 
     if (shelfError) {
-      alert("Failed to save shelf record: " + shelfError.message);
+      showToast("Failed to save shelf record: " + shelfError.message, "error");
       return;
     }
 
@@ -1144,12 +1397,13 @@ async function saveShelfToDatabase() {
 
     if (booksError) {
       console.error("Failed to insert user_books:", booksError);
-      alert("Shelf created, but books failed to save: " + booksError.message);
+      showToast("Shelf created, but books failed to save: " + booksError.message, "error");
       return;
     }
 
-    alert(
+    showToast(
       `Successfully saved shelf and ${booksToInsert.length} book(s) to your library!`,
+      "success",
     );
 
     currentDetectedSpines = [];
@@ -1170,14 +1424,17 @@ async function saveShelfToDatabase() {
     loadLibraryData();
  } catch (err) {
     console.error("Save failed:", err);
-    alert("An unexpected error occurred while saving.");
+    showToast("An unexpected error occurred while saving.", "error");
   } finally {
-    // Restore all save buttons
+    // Restore the single sticky save button
     const saveBtns = document.querySelectorAll(".save-shelf-btn");
     saveBtns.forEach(btn => {
       btn.disabled = false;
-      btn.textContent = "Save Shelf to Library";
+      btn.textContent = currentDetectedSpines.length > 0
+        ? `Save Shelf to Library (${currentDetectedSpines.length})`
+        : "Save Shelf to Library";
     });
+    updateScanSteps();
   }
 }
 
@@ -1196,7 +1453,10 @@ async function deleteBookFromLibrary(bookId) {
     .delete()
     .eq("id", bookId);
 
-  if (error) return alert("Failed to delete book: " + error.message);
+  if (error) {
+    showToast("Failed to delete book: " + error.message, "error");
+    return;
+  }
 
   myLibrary = myLibrary.filter((b) => b.id !== bookId);
   renderLibraryList(myLibrary);
@@ -1215,32 +1475,48 @@ function renderLibraryList(books) {
   list.innerHTML = "";
   books.forEach((book) => {
     const li = document.createElement("li");
-    li.style.cssText =
-      "padding: 8px; border-bottom: 1px solid #e4e4e7; cursor: pointer; display: flex; justify-content: space-between; align-items: center;";
+    li.className = "library-row";
+    li.tabIndex = 0;
+    li.setAttribute("role", "button");
+    li.setAttribute("aria-label", `Locate ${book.title} on the map`);
 
     const titleSpan = document.createElement("span");
+    titleSpan.className = "library-row-title";
     titleSpan.textContent = book.title;
-    titleSpan.style.flex = "1";
 
     const delBtn = document.createElement("button");
+    delBtn.className = "library-delete-btn";
+    delBtn.type = "button";
     delBtn.innerHTML = "🗑️";
-    delBtn.title = "Delete Book";
-    delBtn.style.cssText =
-      "background: none; border: none; cursor: pointer; font-size: 0.9rem; padding: 2px 6px; margin-left: 8px;";
+    delBtn.title = `Delete ${book.title}`;
+    delBtn.setAttribute("aria-label", `Delete ${book.title} from library`);
 
     delBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!confirm(`Delete "${book.title}" from library?`)) return;
+      const confirmed = await confirmDialog({
+        title: "Delete book?",
+        message: `Delete "${book.title}" from library?`,
+        confirmLabel: "Delete",
+      });
+      if (!confirmed) return;
       await deleteBookFromLibrary(book.id);
+      showToast(`Deleted "${book.title}".`, "success");
     });
 
-    li.addEventListener("click", () => {
+    const activate = () => {
       if (
         document.getElementById("libraryView").classList.contains("active-view")
       ) {
         zoomToBookOnMap(book);
       } else {
-        alert(`Selected: ${book.title}`);
+        showToast(`Selected: ${book.title}`, "info");
+      }
+    };
+    li.addEventListener("click", activate);
+    li.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        activate();
       }
     });
 
@@ -1301,8 +1577,16 @@ function deselectAllMapBooks() {
   });
 }
 
-function zoomToShelfOnMap(shelfId) {
-  const shelfWrapper = document.querySelector(`[data-shelf-id="${shelfId}"]`);
+function redrawMapFocus(shelfWrapper, focusedEl) {
+  if (!shelfWrapper) return;
+  shelfWrapper.querySelectorAll("polygon").forEach((poly) => {
+    if (poly === focusedEl) poly.setAttribute("stroke-width", "4");
+    else if (poly.getAttribute("stroke") === "#10b981") poly.setAttribute("stroke-width", "3");
+    else poly.setAttribute("stroke-width", "2");
+  });
+}
+
+function zoomToShelfOnMap(shelfId) {  const shelfWrapper = document.querySelector(`[data-shelf-id="${shelfId}"]`);
   if (!shelfWrapper) return;
 
   const shelfLeft = parseFloat(shelfWrapper.style.left);
@@ -1342,46 +1626,82 @@ async function loadLibraryMap() {
 
     const shelfWrapper = document.createElement("div");
     shelfWrapper.dataset.shelfId = shelf.id;
-    shelfWrapper.style.cssText = `
-      position: absolute; left: ${startX}px; top: ${startY}px;
-      width: 300px; background: white; padding: 10px; border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid #e4e4e7;
-      cursor: grab; user-select: none; transition: box-shadow 0.2s;
-    `;
+    shelfWrapper.className = "shelf-card";
+    shelfWrapper.tabIndex = 0;
+    shelfWrapper.setAttribute("role", "group");
+    shelfWrapper.setAttribute(
+      "aria-label",
+      `Shelf ${shelf.name || "Untitled Shelf"}. Use arrow keys to move, Enter to rename.`,
+    );
+    shelfWrapper.style.left = `${startX}px`;
+    shelfWrapper.style.top = `${startY}px`;
 
     shelfWrapper.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; pointer-events: none;">
-        <span style="font-weight: 600; font-size: 0.95rem; color: #3f3f46;">${shelf.name || "Untitled Shelf"}</span>
-        <div style="pointer-events: auto; display: flex; gap: 6px;">
-          <button class="rescan-shelf-btn" title="Re-run OCR Scan" style="background:none; border:none; cursor:pointer; color:#3b82f6; font-size:1rem;">🔄</button>
-          <button class="edit-name-btn" title="Rename" style="background:none; border:none; cursor:pointer; color:#71717a; font-size:1rem;">✏️</button>
-          <button class="delete-shelf-btn" title="Delete Shelf" style="background:none; border:none; cursor:pointer; color:#ef4444; font-size:1rem;">🗑️</button>
+      <div class="shelf-card-header">
+        <span class="shelf-name shelf-card-name"></span>
+        <div class="shelf-card-actions">
+          <button class="rescan-shelf-btn shelf-icon-btn shelf-icon-btn-rescan" type="button" title="Re-run OCR Scan" aria-label="Re-run OCR scan for this shelf">🔄</button>
+          <button class="edit-name-btn shelf-icon-btn shelf-icon-btn-rename" type="button" title="Rename shelf" aria-label="Rename this shelf">✏️</button>
+          <button class="delete-shelf-btn shelf-icon-btn shelf-icon-btn-delete" type="button" title="Delete Shelf" aria-label="Delete this shelf and all its books">🗑️</button>
         </div>
       </div>
-      <div style="position: relative; width: 100%;">
-        <img src="${shelf.image_url}" draggable="false" style="width: 100%; display: block; border-radius: 4px; pointer-events: none; border: 1px solid #f4f4f5;">
-        <svg class="shelf-svg-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none;"></svg>
+      <div class="shelf-img-wrap">
+        <img draggable="false" alt="" class="shelf-img" />
+        <svg class="shelf-svg-overlay" aria-hidden="true"></svg>
       </div>
     `;
+    shelfWrapper.querySelector(".shelf-name").textContent =
+      shelf.name || "Untitled Shelf";
+    shelfWrapper.querySelector("img").src = shelf.image_url;
+
+    // Keyboard: arrows nudge the shelf; Enter renames.
+    shelfWrapper.addEventListener("keydown", (e) => {
+      if (e.target.closest("button")) return;
+      const step = e.shiftKey ? 1 : 10;
+      let handled = true;
+      let left = parseFloat(shelfWrapper.style.left || "0");
+      let top = parseFloat(shelfWrapper.style.top || "0");
+      if (e.key === "ArrowLeft") left -= step;
+      else if (e.key === "ArrowRight") left += step;
+      else if (e.key === "ArrowUp") top -= step;
+      else if (e.key === "ArrowDown") top += step;
+      else if (e.key === "Enter") {
+        shelfWrapper.querySelector(".edit-name-btn")?.click();
+      } else handled = false;
+      if (!handled) return;
+      e.preventDefault();
+      if (e.key.startsWith("Arrow")) {
+        shelfWrapper.style.left = `${left}px`;
+        shelfWrapper.style.top = `${top}px`;
+        supabaseClient
+          .from("shelves")
+          .update({ map_x: left, map_y: top })
+          .eq("id", shelf.id)
+          .then();
+      }
+    });
 
     shelfWrapper
       .querySelector(".rescan-shelf-btn")
       .addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (
-          !confirm(
+        const confirmed = await confirmDialog({
+          title: "Re-run scan?",
+          message:
             "Re-run scan on this shelf? This will open the scan workspace with fresh spine detections.",
-          )
-        )
-          return;
+          confirmLabel: "Re-scan",
+          cancelLabel: "Cancel",
+        });
+        if (!confirmed) return;
 
         const scanNavBtn = document.querySelector(
-          '.nav-btn[data-target="scanView"]',
+          '.nav-btn[data-target="uploadView"]',
         );
         if (scanNavBtn) scanNavBtn.click();
 
         document.getElementById("pendingContainer").innerHTML =
-          "<p style='text-align:center;'>Fetching shelf image for re-scan...</p>";
+          "<p class='scan-loading-text'>Fetching shelf image for re-scan...</p>";
+        updateScanSteps();
 
         const response = await fetch(shelf.image_url);
         const blob = await response.blob();
@@ -1393,6 +1713,7 @@ async function loadLibraryMap() {
         placeholderText.style.display = "none";
         shelfCanvas.style.display = "block";
         canvasControls.classList.remove("hidden-element");
+        updateScanSteps();
 
         const img = new Image();
         img.onload = () => {
@@ -1400,15 +1721,15 @@ async function loadLibraryMap() {
           shelfCanvas.height = img.height;
           currentLoadedImage = img;
           redrawCanvasOverlays(null);
+          updateScanSteps();
         };
         img.src = URL.createObjectURL(file);
 
         const formData = new FormData();
         formData.append("image", file);
-        formData.append("user_id", currentUser.id);
         formData.append("force_rescan", "true");
 
-        const scanRes = await fetch("/api/ocr", {
+        const scanRes = await authenticatedFetch("/api/ocr", {
           method: "POST",
           body: formData,
         });
@@ -1421,17 +1742,19 @@ async function loadLibraryMap() {
 
     shelfWrapper
       .querySelector(".edit-name-btn")
-      .addEventListener("click", (e) => {
+      .addEventListener("click", async (e) => {
         e.stopPropagation();
-        const newName = prompt(
-          "Enter new shelf name:",
-          shelf.name || "Untitled Shelf",
-        );
+        const newName = await promptDialog({
+          title: "Rename shelf",
+          hint: "Enter a name for this shelf.",
+          initialValue: shelf.name || "Untitled Shelf",
+          label: "Shelf name",
+        });
         if (newName)
           updateShelfName(
             shelf.id,
             newName,
-            shelfWrapper.querySelector("span"),
+            shelfWrapper.querySelector(".shelf-name"),
           );
       });
 
@@ -1439,13 +1762,19 @@ async function loadLibraryMap() {
       .querySelector(".delete-shelf-btn")
       .addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (!confirm("Delete this shelf and all its books?")) return;
+        const confirmed = await confirmDialog({
+          title: "Delete shelf?",
+          message: "Delete this shelf and all its books?",
+          confirmLabel: "Delete",
+        });
+        if (!confirmed) return;
         await supabaseClient
           .from("user_books")
           .delete()
           .eq("shelf_id", shelf.id);
         await supabaseClient.from("shelves").delete().eq("id", shelf.id);
         shelfWrapper.remove();
+        showToast("Shelf deleted.", "success");
         loadLibraryData();
       });
 
@@ -1484,9 +1813,7 @@ async function loadLibraryMap() {
         initialLeft: parseFloat(shelfWrapper.style.left),
         initialTop: parseFloat(shelfWrapper.style.top),
       };
-      shelfWrapper.style.cursor = "grabbing";
-      shelfWrapper.style.zIndex = 1000;
-      shelfWrapper.style.boxShadow = "0 8px 24px rgba(0,0,0,0.25)";
+      shelfWrapper.classList.add("is-dragging");
     };
     shelfWrapper.addEventListener("mousedown", initShelfDrag);
     shelfWrapper.addEventListener("touchstart", initShelfDrag, {
@@ -1495,43 +1822,152 @@ async function loadLibraryMap() {
 
     mapViewport.appendChild(shelfWrapper);
   });
+
+  updateMapEmptyState((shelves || []).length);
 }
+
+function updateMapEmptyState(shelfCount) {
+  const emptyState = document.getElementById("mapEmptyState");
+  if (!emptyState) return;
+  const isEmpty = !shelfCount || shelfCount === 0;
+  emptyState.classList.toggle("hidden-element", !isEmpty);
+  const fitBtn = document.getElementById("mapFitBtn");
+  if (fitBtn) fitBtn.disabled = isEmpty;
+}
+
+function applyMapTransform() {
+  if (!mapViewport) return;
+  mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
+}
+
+function zoomMapByFactor(factor) {
+  if (!infiniteMap) return;
+  const rect = infiniteMap.getBoundingClientRect();
+  const centerX = rect.width / 2;
+  const centerY = rect.height / 2;
+  const newScale = Math.min(Math.max(0.1, mapState.scale * factor), 5);
+  mapState.x = centerX - (centerX - mapState.x) * (newScale / mapState.scale);
+  mapState.y = centerY - (centerY - mapState.y) * (newScale / mapState.scale);
+  mapState.scale = newScale;
+  applyMapTransform();
+}
+
+function fitMapToShelves() {
+  if (!infiniteMap) return;
+  const shelves = Array.from(mapViewport?.querySelectorAll("[data-shelf-id]") || []);
+  if (shelves.length === 0) return;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  shelves.forEach((el) => {
+    const left = parseFloat(el.style.left || "0");
+    const top = parseFloat(el.style.top || "0");
+    const width = el.offsetWidth || 320;
+    const height = el.offsetHeight || 260;
+    minX = Math.min(minX, left);
+    minY = Math.min(minY, top);
+    maxX = Math.max(maxX, left + width);
+    maxY = Math.max(maxY, top + height);
+  });
+  const rect = infiniteMap.getBoundingClientRect();
+  const padding = 48;
+  const contentWidth = Math.max(1, maxX - minX + padding * 2);
+  const contentHeight = Math.max(1, maxY - minY + padding * 2);
+  const fitScale = Math.min(Math.max(0.1, Math.min(rect.width / contentWidth, rect.height / contentHeight)), 2);
+  mapState.scale = fitScale;
+  mapState.x = rect.width / 2 - (minX + (maxX - minX) / 2) * fitScale;
+  mapState.y = rect.height / 2 - (minY + (maxY - minY) / 2) * fitScale;
+  applyMapTransform();
+}
+
+function setupMapDiscoverability() {
+  const hint = document.getElementById("mapHint");
+  const hintClose = document.getElementById("mapHintClose");
+  try {
+    if (window.localStorage?.getItem("hilibrary-map-hint-dismissed") === "1" && hint) {
+      hint.style.display = "none";
+    }
+  } catch (err) {
+    /* storage unavailable */
+  }
+  hintClose?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (hint) hint.style.display = "none";
+    try {
+      window.localStorage?.setItem("hilibrary-map-hint-dismissed", "1");
+    } catch (err) {
+      /* storage unavailable */
+    }
+  });
+
+  document.getElementById("mapZoomIn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    zoomMapByFactor(1.25);
+  });
+  document.getElementById("mapZoomOut")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    zoomMapByFactor(1 / 1.25);
+  });
+  document.getElementById("mapFitBtn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    fitMapToShelves();
+  });
+  document.getElementById("emptyScanBtn")?.addEventListener("click", () => {
+    const scanNavBtn = document.querySelector('.nav-btn[data-target="uploadView"]');
+    if (scanNavBtn) scanNavBtn.click();
+  });
+  updateMapEmptyState(mapViewport?.querySelectorAll("[data-shelf-id]").length || 0);
+
+  // Keyboard-accessible map pan/zoom (Step 8).
+  infiniteMap?.addEventListener("keydown", (e) => {
+    if (e.target.closest("button, input, [role='dialog'], .shelf-card")) return;
+    const panStep = e.shiftKey ? 10 : 60;
+    let handled = true;
+    if (e.key === "ArrowLeft") mapState.x += panStep;
+    else if (e.key === "ArrowRight") mapState.x -= panStep;
+    else if (e.key === "ArrowUp") mapState.y += panStep;
+    else if (e.key === "ArrowDown") mapState.y -= panStep;
+    else if (e.key === "+" || e.key === "=") zoomMapByFactor(1.25);
+    else if (e.key === "-" || e.key === "_") zoomMapByFactor(1 / 1.25);
+    else if (e.key === "f" || e.key === "F" || e.key === "0") fitMapToShelves();
+    else if (e.key === "Escape") deselectAllMapBooks();
+    else handled = false;
+    if (!handled) return;
+    e.preventDefault();
+    if (e.key.startsWith("Arrow")) applyMapTransform();
+  });
+  infiniteMap?.addEventListener("focus", () => infiniteMap.classList.add("kb-focus"));
+  infiniteMap?.addEventListener("blur", () => infiniteMap.classList.remove("kb-focus"));
+}
+setupMapDiscoverability();
 
 function showBookActionPopover(shelfWrapper, book, books) {
   shelfWrapper.querySelectorAll(".book-popover").forEach((el) => el.remove());
 
   const popover = document.createElement("div");
   popover.className = "book-popover";
-  popover.style.cssText = `
-    position: absolute;
-    top: -45px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #1e293b;
-    color: white;
-    padding: 6px 12px;
-    border-radius: 6px;
-    font-size: 0.8rem;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    z-index: 100;
-    pointer-events: auto;
-    white-space: nowrap;
-  `;
+  popover.setAttribute("role", "dialog");
+  popover.setAttribute("aria-label", `Actions for ${book.title}`);
 
   popover.innerHTML = `
-    <span style="font-weight: 600; max-width: 140px; overflow: hidden; text-overflow: ellipsis;">${book.title}</span>
-    <button class="popover-del-btn" style="background: #ef4444; color: white; border: none; border-radius: 4px; padding: 2px 6px; cursor: pointer; font-weight: bold; font-size: 0.75rem;">Delete</button>
-    <button class="popover-close-btn" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 0.9rem;">✕</button>
+    <span class="popover-title book-popover-title"></span>
+    <button class="popover-del-btn book-popover-delete" type="button">Delete</button>
+    <button class="popover-close-btn book-popover-close" type="button" aria-label="Close book actions">✕</button>
   `;
+  popover.querySelector(".popover-title").textContent = book.title;
+  popover.querySelector(".popover-del-btn").setAttribute("aria-label", `Delete ${book.title}`);
 
   popover
     .querySelector(".popover-del-btn")
     .addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!confirm(`Delete "${book.title}"?`)) return;
+      const confirmed = await confirmDialog({
+        title: "Delete book?",
+        message: `Delete "${book.title}"?`,
+        confirmLabel: "Delete",
+      });
+      if (!confirmed) return;
       await deleteBookFromLibrary(book.id);
       popover.remove();
     });
@@ -1541,9 +1977,7 @@ function showBookActionPopover(shelfWrapper, book, books) {
     deselectAllMapBooks();
   });
 
-  const imgContainer = shelfWrapper.querySelector(
-    "div[style*='position: relative']",
-  );
+  const imgContainer = shelfWrapper.querySelector(".shelf-img-wrap");
   if (imgContainer) imgContainer.appendChild(popover);
 }
 
@@ -1597,6 +2031,9 @@ function renderShelfSvgOverlays(
     polyEl.setAttribute("stroke-width", isSelected ? "3" : "2");
     polyEl.style.cursor = "pointer";
     polyEl.style.pointerEvents = "auto";
+    polyEl.setAttribute("tabindex", "0");
+    polyEl.setAttribute("role", "button");
+    polyEl.setAttribute("aria-label", `Select book ${book.title || "untitled"}`);
 
     const selectBook = (e) => {
       e.stopPropagation();
@@ -1608,6 +2045,18 @@ function renderShelfSvgOverlays(
 
     polyEl.addEventListener("mousedown", selectBook);
     polyEl.addEventListener("touchstart", selectBook, { passive: false });
+    polyEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        selectBook(e);
+      }
+    });
+    polyEl.addEventListener("focus", () => {
+      redrawMapFocus(shelfWrapper, polyEl);
+    });
+    polyEl.addEventListener("blur", () => {
+      redrawMapFocus(shelfWrapper, null);
+    });
 
     svg.appendChild(polyEl);
 
@@ -1795,9 +2244,7 @@ const handleEnd = async () => {
   }
 
   if (activeShelfDrag) {
-    activeShelfDrag.element.style.cursor = "grab";
-    activeShelfDrag.element.style.zIndex = "";
-    activeShelfDrag.element.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
+    activeShelfDrag.element.classList.remove("is-dragging");
 
     const finalX = parseFloat(activeShelfDrag.element.style.left);
     const finalY = parseFloat(activeShelfDrag.element.style.top);
@@ -1905,8 +2352,8 @@ const closeManagerBtn = document.getElementById("closeManagerBtn");
 const shelfManagerList = document.getElementById("shelfManagerList");
 
 manageShelvesBtn?.addEventListener("click", async () => {
-  shelfManagerModal.classList.remove("hidden-view");
-  shelfManagerList.innerHTML = "<p style='text-align:center;'>Loading...</p>";
+  openModalWithFocus(shelfManagerModal);
+  shelfManagerList.innerHTML = "<p class='scan-loading-text'>Loading...</p>";
 
   const { data: shelves } = await supabaseClient
     .from("shelves")
@@ -1918,25 +2365,51 @@ manageShelvesBtn?.addEventListener("click", async () => {
     const li = document.createElement("li");
     li.className = "manager-list-item";
     li.innerHTML = `
-      <span style="font-weight: 500;">${shelf.name || "Untitled Shelf"}</span>
-      <div>
-        <button class="modal-edit-btn" style="background:#f4f4f5; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; margin-right:4px;">Rename</button>
-        <button class="modal-del-btn" style="background:#fee2e2; color:#ef4444; border:none; padding:4px 8px; border-radius:4px; cursor:pointer;">Delete</button>
+      <span class="manager-shelf-name"></span>
+      <div class="manager-shelf-actions">
+        <button class="modal-edit-btn" type="button">Rename</button>
+        <button class="modal-del-btn" type="button">Delete</button>
       </div>
     `;
+    li.querySelector(".manager-shelf-name").textContent =
+      shelf.name || "Untitled Shelf";
+    li.querySelector(".modal-edit-btn").setAttribute(
+      "aria-label",
+      `Rename ${shelf.name || "Untitled Shelf"}`,
+    );
+    li.querySelector(".modal-del-btn").setAttribute(
+      "aria-label",
+      `Delete ${shelf.name || "Untitled Shelf"}`,
+    );
 
     li.querySelector(".modal-edit-btn").addEventListener("click", async () => {
-      const newName = prompt("Rename shelf:", shelf.name || "Untitled");
+      const newName = await promptDialog({
+        title: "Rename shelf",
+        hint: "Enter a new name for this shelf.",
+        initialValue: shelf.name || "Untitled Shelf",
+        label: "Shelf name",
+      });
       if (newName) {
-        await updateShelfName(shelf.id, newName, li.querySelector("span"));
+        await updateShelfName(
+          shelf.id,
+          newName,
+          li.querySelector(".manager-shelf-name"),
+        );
+        showToast("Shelf renamed.", "success");
         loadLibraryMap();
       }
     });
 
     li.querySelector(".modal-del-btn").addEventListener("click", async () => {
-      if (!confirm("Delete this shelf?")) return;
+      const confirmed = await confirmDialog({
+        title: "Delete shelf?",
+        message: `Delete "${shelf.name || "Untitled Shelf"}"?`,
+        confirmLabel: "Delete",
+      });
+      if (!confirmed) return;
       await supabaseClient.from("shelves").delete().eq("id", shelf.id);
       li.remove();
+      showToast("Shelf deleted.", "success");
       loadLibraryMap();
     });
 
@@ -1944,13 +2417,24 @@ manageShelvesBtn?.addEventListener("click", async () => {
   });
 });
 
-closeManagerBtn?.addEventListener("click", () =>
-  shelfManagerModal.classList.add("hidden-view"),
-);
+function closeShelfManager() {
+  if (!shelfManagerModal) return;
+  closeModalAndRestore(shelfManagerModal);
+}
+
+closeManagerBtn?.addEventListener("click", closeShelfManager);
 
 shelfManagerModal?.addEventListener("click", (e) => {
   if (e.target === shelfManagerModal) {
-    shelfManagerModal.classList.add("hidden-view");
+    closeShelfManager();
+  }
+});
+
+shelfManagerModal?.addEventListener("keydown", (e) => {
+  trapFocusInModal(shelfManagerModal, e);
+  if (e.key === "Escape") {
+    e.stopPropagation();
+    closeShelfManager();
   }
 });
 
@@ -1960,9 +2444,29 @@ shelfManagerModal?.addEventListener("click", (e) => {
 const mobileLibraryToggle = document.getElementById("mobileLibraryToggle");
 const mobileLibraryContent = document.getElementById("mobileLibraryContent");
 
-mobileLibraryToggle?.addEventListener("click", () => {
-  if (window.innerWidth <= 768) {
-    mobileLibraryContent.classList.toggle("collapsed");
-    mobileLibraryToggle.classList.toggle("collapsed");
+function setMobileSheetCollapsed(collapsed) {
+  if (!mobileLibraryContent || !mobileLibraryToggle) return;
+  mobileLibraryContent.classList.toggle("collapsed", collapsed);
+  mobileLibraryToggle.classList.toggle("collapsed", collapsed);
+  mobileLibraryToggle.setAttribute("aria-expanded", String(!collapsed));
+}
+
+function applyDefaultMobileSheetState() {
+  if (window.innerWidth <= 768) setMobileSheetCollapsed(true);
+  else setMobileSheetCollapsed(false);
+}
+
+function toggleMobileSheet() {
+  if (window.innerWidth > 768 || !mobileLibraryContent) return;
+  setMobileSheetCollapsed(!mobileLibraryContent.classList.contains("collapsed"));
+}
+
+mobileLibraryToggle?.addEventListener("click", toggleMobileSheet);
+mobileLibraryToggle?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    toggleMobileSheet();
   }
 });
+window.addEventListener("resize", applyDefaultMobileSheetState);
+applyDefaultMobileSheetState();

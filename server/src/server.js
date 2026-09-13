@@ -1,36 +1,80 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const multer = require("multer");
 const vision = require("@google-cloud/vision");
 const { createClient } = require("@supabase/supabase-js");
 const path = require("path");
+const fs = require("fs");
 const sharp = require("sharp");
 const crypto = require("crypto");
 const axios = require("axios");
+const {
+  createImageUpload,
+  createRequireAuth,
+  handleUploadError,
+  setSecurityHeaders,
+} = require("./http-security");
 
 sharp.cache(false);
 
 const app = express();
-app.use(cors());
+app.disable("x-powered-by");
+app.use(setSecurityHeaders);
+
+const allowedOrigin = process.env.CORS_ORIGIN?.trim();
+app.use(
+  cors({
+    origin: allowedOrigin || false,
+    methods: ["GET", "POST"],
+  }),
+);
 
 const clientPath = path.join(__dirname, "../../client/src");
 app.use(express.static(clientPath));
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = createImageUpload();
 
 // --- INITIALIZATION ---
-let visionClient;
+// Resolve Google Vision credentials from whatever form the current platform can
+// provide, in priority order, without ever crashing the process on bad input:
+//   1. GOOGLE_CREDENTIALS_B64 — base64-encoded service-account JSON. Preferred for
+//      env-var-only / ephemeral hosts (Cloud Agents, Render env) because base64
+//      round-trips the private key's newlines byte-for-byte.
+//   2. GOOGLE_CREDENTIALS — inline service-account JSON string (back-compat).
+//   3. GOOGLE_CREDENTIALS — a path to a service-account JSON file that exists.
+//   4. Application Default Credentials — honors GOOGLE_APPLICATION_CREDENTIALS
+//      (file path, e.g. a Render Secret File or a local key) or platform metadata.
+function resolveVisionClient() {
+  const b64 = (process.env.GOOGLE_CREDENTIALS_B64 || "").trim();
+  if (b64) {
+    try {
+      const json = Buffer.from(b64, "base64").toString("utf8");
+      return new vision.ImageAnnotatorClient({ credentials: JSON.parse(json) });
+    } catch (err) {
+      console.warn(
+        `⚠️ GOOGLE_CREDENTIALS_B64 could not be decoded/parsed (${err.message}); trying other sources.`,
+      );
+    }
+  }
 
-if (process.env.GOOGLE_CREDENTIALS) {
-  // Production (Render): Parse the JSON string from your existing environment variable
-  visionClient = new vision.ImageAnnotatorClient({
-    credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
-  });
-} else {
-  // Local Dev: Fallback to the default file path behavior
-  visionClient = new vision.ImageAnnotatorClient();
+  const raw = (process.env.GOOGLE_CREDENTIALS || "").trim();
+  if (raw.startsWith("{") || raw.startsWith("[")) {
+    return new vision.ImageAnnotatorClient({ credentials: JSON.parse(raw) });
+  }
+
+  if (raw && fs.existsSync(raw)) {
+    return new vision.ImageAnnotatorClient({ keyFilename: raw });
+  }
+
+  if (raw) {
+    console.warn(
+      "⚠️ GOOGLE_CREDENTIALS is neither inline JSON nor an existing file path; falling back to Application Default Credentials.",
+    );
+  }
+  return new vision.ImageAnnotatorClient();
 }
+
+const visionClient = resolveVisionClient();
 
 const rawUrl = process.env.SUPABASE_URL || "";
 const rawKey =
@@ -41,6 +85,7 @@ const rawKey =
 const supabaseUrl = rawUrl.trim().replace(/^["']|["']$/g, "");
 const supabaseKey = rawKey.trim().replace(/^["']|["']$/g, "");
 const supabase = createClient(supabaseUrl, supabaseKey);
+const requireAuth = createRequireAuth(supabase);
 
 // --- COCO RLE DECODER & POLYGON EXTRACTION ---
 
@@ -326,7 +371,7 @@ async function extractSpatialPolygonsRoboflow(
 
 // --- ROUTE HANDLERS ---
 
-app.post("/api/ocr", upload.single("image"), async (req, res) => {
+app.post("/api/ocr", requireAuth, upload.single("image"), async (req, res) => {
   const reqStart = Date.now();
   const timestamp = new Date().toLocaleTimeString();
 
@@ -344,7 +389,7 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
       .createHash("sha256")
       .update(rawBuffer)
       .digest("hex");
-    const userId = req.body.user_id;
+    const userId = req.user.id;
     const forceRescan = req.body.force_rescan === "true";
 
     // 1. Check if shelf already exists in user's library (unless forcing a re-scan)
@@ -462,10 +507,13 @@ app.post("/api/ocr", upload.single("image"), async (req, res) => {
   }
 });
 
-app.get("/api/books", async (req, res) => {
-  const searchQuery = req.query.q;
+app.get("/api/books", requireAuth, async (req, res) => {
+  const searchQuery =
+    typeof req.query.q === "string" ? req.query.q.trim() : "";
   if (!searchQuery)
     return res.status(400).json({ error: "Missing search query" });
+  if (searchQuery.length > 200)
+    return res.status(400).json({ error: "Search query is too long" });
 
   const apiKey = (process.env.GOOGLE_BOOKS_API_KEY || "").trim();
   const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchQuery)}&maxResults=1${apiKey ? `&key=${apiKey}` : ""}`;
@@ -560,6 +608,13 @@ Output format JSON array:
 }
 
 app.use((req, res) => res.sendFile(path.join(clientPath, "index.html")));
+app.use(handleUploadError);
+app.use((error, req, res, next) => {
+  console.error("Unhandled request error:", error);
+  res.status(500).json({ error: "Internal server error" });
+});
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, "0.0.0.0", () =>
+  console.log(`Server running on 0.0.0.0:${PORT}`),
+);
