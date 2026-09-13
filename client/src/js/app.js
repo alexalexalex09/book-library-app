@@ -393,6 +393,17 @@ function updateScanSteps() {
     if (states[key] === "active") step.setAttribute("aria-current", "step");
     else step.removeAttribute("aria-current");
   });
+
+  const statusEl = document.getElementById("scanStepStatus");
+  if (statusEl) {
+    const messages = {
+      upload: "Step 1 of 3 — Upload a shelf photo",
+      review: "Step 2 of 3 — Review the detected spines",
+      save: "Step 3 of 3 — Save this shelf to your library",
+    };
+    const activeKey = Object.keys(states).find((key) => states[key] === "active") || "upload";
+    statusEl.textContent = messages[activeKey];
+  }
 }
 
 function showLoadingOverlay(message = "Analyzing bookshelf image with AI...") {

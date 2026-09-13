@@ -6,7 +6,7 @@
   <title>HiLibrary</title>
   
   <!-- CSS Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=3">
+  <link rel="stylesheet" href="css/style.css?v=5">
   
   <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -116,14 +116,24 @@
           </label>
         </div>
 
-        <!-- Step 1-3 progress: Upload -> Review spines -> Save shelf -->
-        <ol class="scan-steps" id="scanSteps" aria-label="Scan progress">
-          <li class="scan-step is-active" data-step="upload"><span class="scan-step-dot" aria-hidden="true">1</span><span>Upload</span></li>
-          <li class="scan-step-divider" aria-hidden="true"></li>
-          <li class="scan-step" data-step="review"><span class="scan-step-dot" aria-hidden="true">2</span><span>Review spines</span></li>
-          <li class="scan-step-divider" aria-hidden="true"></li>
-          <li class="scan-step" data-step="save"><span class="scan-step-dot" aria-hidden="true">3</span><span>Save shelf</span></li>
-        </ol>
+        <section class="scan-progress" aria-labelledby="scanProgressHeading">
+          <h3 id="scanProgressHeading" class="scan-progress-heading">How scanning works</h3>
+          <ol class="scan-steps" id="scanSteps">
+            <li class="scan-step is-active" data-step="upload">
+              <span class="scan-step-dot" aria-hidden="true">1</span>
+              <span class="scan-step-label">Upload</span>
+            </li>
+            <li class="scan-step" data-step="review">
+              <span class="scan-step-dot" aria-hidden="true">2</span>
+              <span class="scan-step-label">Review spines</span>
+            </li>
+            <li class="scan-step" data-step="save">
+              <span class="scan-step-dot" aria-hidden="true">3</span>
+              <span class="scan-step-label">Save shelf</span>
+            </li>
+          </ol>
+          <p class="scan-progress-status" id="scanStepStatus">Step 1 of 3 — Upload a shelf photo</p>
+        </section>
 
         <!-- Workspace (Flex Row: Canvas + Sidebar) -->
         <div class="scan-container">
