@@ -6,7 +6,7 @@
   <title>HiLibrary</title>
   
   <!-- CSS Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=5">
+  <link rel="stylesheet" href="css/style.css?v=7">
   
   <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -132,7 +132,6 @@
               <span class="scan-step-label">Save shelf</span>
             </li>
           </ol>
-          <p class="scan-progress-status" id="scanStepStatus">Step 1 of 3 — Upload a shelf photo</p>
         </section>
 
         <!-- Workspace (Flex Row: Canvas + Sidebar) -->
@@ -212,7 +211,7 @@
             <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
           </div>
           <div class="sidebar-content" id="mobileLibraryContent">
-            <input type="text" id="searchInput" class="search-input sidebar-search" placeholder="Search books by title or author..." />
+            <input type="text" id="searchInput" class="search-input sidebar-search" placeholder="Filter books by title or author..." />
             <ul id="libraryList" class="library-list"></ul>
           </div>
         </aside>
@@ -261,6 +260,22 @@
       <div class="modal-actions">
         <button id="confirmModalCancel" class="auth-btn secondary-btn modal-btn" type="button">Cancel</button>
         <button id="confirmModalOk" class="auth-btn primary-btn modal-btn modal-btn-danger" type="button">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="bookLookupModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="bookLookupTitle" aria-describedby="bookLookupHint">
+    <div class="modal-content modal-dialog book-lookup-dialog" role="document">
+      <h2 id="bookLookupTitle" class="modal-title">Search Google Books</h2>
+      <p id="bookLookupHint" class="modal-message">Search again and apply a catalog match to this library book.</p>
+      <label class="modal-input-label" for="bookLookupInput">Title</label>
+      <div class="book-lookup-row">
+        <input id="bookLookupInput" class="auth-input modal-input" type="text" autocomplete="off" />
+        <button id="bookLookupSearchBtn" class="auth-btn primary-btn" type="button">Search</button>
+      </div>
+      <div id="bookLookupResults" class="search-results-col book-lookup-results"></div>
+      <div class="modal-actions">
+        <button id="bookLookupCancel" class="auth-btn secondary-btn modal-btn" type="button">Close</button>
       </div>
     </div>
   </div>

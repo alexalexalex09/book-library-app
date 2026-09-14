@@ -477,12 +477,6 @@ input:focus-visible,
   background: var(--success);
 }
 
-.scan-progress-status {
-  margin: 8px 0 0;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
 /* ==========================================
    4. SCAN WORKSPACE & CANVAS TOOLBAR
    ========================================== */
@@ -829,21 +823,23 @@ input:focus-visible,
 
 .book-popover {
   position: absolute;
-  top: -45px;
+  top: -8px;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -100%);
   background: #1e293b;
   color: white;
-  padding: 6px 12px;
-  border-radius: 6px;
+  padding: 8px;
+  border-radius: 8px;
   font-size: 0.8rem;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   z-index: 100;
   pointer-events: auto;
-  white-space: nowrap;
+  min-width: 180px;
+  max-width: 260px;
 }
 
 #libraryView {
@@ -1479,6 +1475,30 @@ input:focus-visible,
   color: var(--text-subtle);
 }
 
+.book-lookup-dialog {
+  max-width: 480px;
+  width: min(480px, calc(100vw - 32px));
+}
+
+.book-lookup-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.book-lookup-row .modal-input {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.book-lookup-results {
+  padding-left: 0;
+  margin-top: 12px;
+  max-height: min(50vh, 360px);
+  overflow-y: auto;
+}
+
 .book-confirm-btn {
   background-color: var(--success);
   color: white;
@@ -1521,6 +1541,7 @@ input:focus-visible,
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 4px;
 }
 
 .library-row-title {
@@ -1531,16 +1552,33 @@ input:focus-visible,
   white-space: nowrap;
 }
 
+.library-row-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.library-lookup-btn,
 .library-delete-btn {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   padding: 2px 6px;
-  margin-left: 8px;
   min-width: 36px;
   min-height: 36px;
   border-radius: 6px;
+  color: var(--text-subtle);
+}
+
+.library-lookup-btn:hover,
+.library-delete-btn:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.library-delete-btn {
+  margin-left: 0;
 }
 
 .shelf-card {
@@ -1629,11 +1667,53 @@ input:focus-visible,
   pointer-events: none;
 }
 
+.book-popover-main {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.book-popover-cover {
+  width: 48px;
+  height: 68px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  object-fit: cover;
+  background: #334155;
+}
+
+.book-popover-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.book-popover-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .book-popover-title {
   font-weight: 600;
-  max-width: 140px;
+  max-width: none;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.book-popover-search {
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 0.75rem;
+  min-height: 32px;
 }
 
 .book-popover-delete {
