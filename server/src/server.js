@@ -9,8 +9,13 @@ const sharp = require("sharp");
 const crypto = require("crypto");
 const axios = require("axios");
 const {
+  ALLOWED_IMAGE_TYPES,
+  MAX_IMAGE_DIMENSION,
+  MAX_IMAGE_PIXELS,
+  createPlanRateLimiter,
   createImageUpload,
   createRequireAuth,
+  sniffImageMime,
   handleUploadError,
   setSecurityHeaders,
 } = require("./http-security");
@@ -78,14 +83,26 @@ const visionClient = resolveVisionClient();
 
 const rawUrl = process.env.SUPABASE_URL || "";
 const rawKey =
-  process.env.SUPABASE_SECRET_KEY ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_ANON_KEY ||
-  "";
+  process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const supabaseUrl = rawUrl.trim().replace(/^["']|["']$/g, "");
 const supabaseKey = rawKey.trim().replace(/^["']|["']$/g, "");
+if (!supabaseKey) {
+  throw new Error(
+    "Missing SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY for server.",
+  );
+}
 const supabase = createClient(supabaseUrl, supabaseKey);
 const requireAuth = createRequireAuth(supabase);
+const ocrRateLimit = createPlanRateLimiter({
+  action: "ocr",
+  windowMs: 15 * 60 * 1000,
+  message: "OCR limit reached for your plan. Please try again later.",
+});
+const booksRateLimit = createPlanRateLimiter({
+  action: "books",
+  windowMs: 60 * 1000,
+  message: "Book search limit reached for your plan. Please try again later.",
+});
 
 // --- COCO RLE DECODER & POLYGON EXTRACTION ---
 
@@ -310,9 +327,12 @@ async function extractSpatialPolygonsRoboflow(
   const response = await axios({
     method: "POST",
     url: url,
-    params: { api_key: apiKey, confidence: 0.3 },
+    params: { confidence: 0.3 },
     data: base64Image,
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Bearer ${apiKey}`,
+    },
   });
 
   const predictions = response.data?.predictions || [];
@@ -371,7 +391,12 @@ async function extractSpatialPolygonsRoboflow(
 
 // --- ROUTE HANDLERS ---
 
-app.post("/api/ocr", requireAuth, upload.single("image"), async (req, res) => {
+app.post(
+  "/api/ocr",
+  requireAuth,
+  ocrRateLimit,
+  upload.single("image"),
+  async (req, res) => {
   const reqStart = Date.now();
   const timestamp = new Date().toLocaleTimeString();
 
@@ -381,10 +406,32 @@ app.post("/api/ocr", requireAuth, upload.single("image"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No image uploaded" });
 
+    const detectedMime = sniffImageMime(req.file.buffer);
+    if (!detectedMime || !ALLOWED_IMAGE_TYPES.has(detectedMime)) {
+      return res.status(400).json({
+        error: "Upload must be one JPEG, PNG, or WebP image",
+      });
+    }
+    if (detectedMime !== req.file.mimetype) {
+      return res.status(400).json({
+        error: "Image content type does not match uploaded file type",
+      });
+    }
+
     const rawBuffer = req.file.buffer;
-    const metadata = await sharp(rawBuffer).metadata();
+    const imageProcessor = sharp(rawBuffer, { limitInputPixels: MAX_IMAGE_PIXELS });
+    const metadata = await imageProcessor.metadata();
     const imgWidth = metadata.width || 1;
     const imgHeight = metadata.height || 1;
+    if (imgWidth > MAX_IMAGE_DIMENSION || imgHeight > MAX_IMAGE_DIMENSION) {
+      return res.status(413).json({
+        error: `Image dimensions exceed ${MAX_IMAGE_DIMENSION}px limit`,
+      });
+    }
+    const normalizedBuffer = await imageProcessor
+      .rotate()
+      .jpeg({ quality: 92, mozjpeg: true })
+      .toBuffer();
     const imageHash = crypto
       .createHash("sha256")
       .update(rawBuffer)
@@ -398,7 +445,7 @@ app.post("/api/ocr", requireAuth, upload.single("image"), async (req, res) => {
         .from("shelves")
         .select("*, user_books(*)")
         .eq("user_id", userId)
-        .ilike("image_url", `%${imageHash}%`)
+        .eq("image_url", `${userId}/${imageHash}.jpg`)
         .maybeSingle();
 
       if (existingError) {
@@ -417,8 +464,6 @@ app.post("/api/ocr", requireAuth, upload.single("image"), async (req, res) => {
         });
       }
     }
-
-    const fileName = `shelf_${Date.now()}.jpg`;
 
     let ocrWords = null;
     try {
@@ -443,13 +488,6 @@ app.post("/api/ocr", requireAuth, upload.single("image"), async (req, res) => {
       console.warn(`[${timestamp}] Cache read warning:`, cacheErr.message);
     }
 
-    const supabaseUpload = supabase.storage
-      .from("shelves")
-      .upload(fileName, rawBuffer, {
-        contentType: req.file.mimetype,
-        upsert: false,
-      });
-
     let spineMasks = [];
 
     if (!ocrWords) {
@@ -457,14 +495,10 @@ app.post("/api/ocr", requireAuth, upload.single("image"), async (req, res) => {
         `[${timestamp}] 🌐 Executing Parallel Pass (Cloud Vision + Roboflow Workflow)...`,
       );
 
-      const [visionResult, roboflowResult, { error: uploadError }] =
-        await Promise.all([
-          extractTextWithCloudVision(rawBuffer, imgWidth, imgHeight),
-          extractSpatialPolygonsRoboflow(rawBuffer, imgWidth, imgHeight),
-          supabaseUpload,
-        ]);
-
-      if (uploadError) throw uploadError;
+      const [visionResult, roboflowResult] = await Promise.all([
+        extractTextWithCloudVision(normalizedBuffer, imgWidth, imgHeight),
+        extractSpatialPolygonsRoboflow(normalizedBuffer, imgWidth, imgHeight),
+      ]);
       ocrWords = visionResult;
       spineMasks = roboflowResult;
 
@@ -480,17 +514,13 @@ app.post("/api/ocr", requireAuth, upload.single("image"), async (req, res) => {
       }
     } else {
       console.log(`[${timestamp}] 🌐 Executing Roboflow Workflow Pass...`);
-      const [roboflowResult, { error: uploadError }] = await Promise.all([
-        extractSpatialPolygonsRoboflow(rawBuffer, imgWidth, imgHeight),
-        supabaseUpload,
-      ]);
-      if (uploadError) throw uploadError;
+      const roboflowResult = await extractSpatialPolygonsRoboflow(
+        normalizedBuffer,
+        imgWidth,
+        imgHeight,
+      );
       spineMasks = roboflowResult;
     }
-
-    const { data: publicUrlData } = supabase.storage
-      .from("shelves")
-      .getPublicUrl(fileName);
     const formattedSpines = mapOcrWordsToSpines(spineMasks, ocrWords);
 
     // AI Refinement Pass
@@ -503,7 +533,6 @@ app.post("/api/ocr", requireAuth, upload.single("image"), async (req, res) => {
 
     res.json({
       spines: refinedSpines,
-      imageUrl: publicUrlData.publicUrl,
       imageHash,
     });
   } catch (error) {
@@ -512,7 +541,7 @@ app.post("/api/ocr", requireAuth, upload.single("image"), async (req, res) => {
   }
 });
 
-app.get("/api/books", requireAuth, async (req, res) => {
+app.get("/api/books", requireAuth, booksRateLimit, async (req, res) => {
   const searchQuery =
     typeof req.query.q === "string" ? req.query.q.trim() : "";
   if (!searchQuery)
@@ -560,12 +589,14 @@ Output format JSON array:
 ]`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`;
+    const url =
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent";
 
     const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
       },
       body: JSON.stringify({
         contents: [
@@ -581,7 +612,6 @@ Output format JSON array:
     });
 
     const data = await response.json();
-    console.dir(data);
     const rawTextResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!rawTextResponse) {

@@ -3,10 +3,13 @@ const { after, before, describe, it } = require("node:test");
 const express = require("express");
 const {
   MAX_IMAGE_BYTES,
+  PLAN_QUOTAS,
   createImageUpload,
   createRequireAuth,
+  getUserPlan,
   getBearerToken,
   handleUploadError,
+  sniffImageMime,
   setSecurityHeaders,
 } = require("../src/http-security");
 
@@ -62,6 +65,65 @@ describe("createRequireAuth", () => {
 
     assert.equal(request.user, verifiedUser);
     assert.equal(nextCalled, true);
+  });
+});
+
+describe("getUserPlan", () => {
+  it("defaults to free when metadata is missing", () => {
+    assert.equal(getUserPlan({ id: "u1" }), "free");
+  });
+
+  it("uses app_metadata plan for premium users", () => {
+    assert.equal(getUserPlan({ app_metadata: { plan: "premium" } }), "premium");
+    assert.equal(getUserPlan({ app_metadata: { plan: "PREMIUM" } }), "premium");
+  });
+
+  it("ignores user_metadata plan values", () => {
+    assert.equal(getUserPlan({ user_metadata: { plan: "premium" } }), "free");
+  });
+});
+
+describe("sniffImageMime", () => {
+  it("detects jpeg/png/webp magic bytes", () => {
+    assert.equal(
+      sniffImageMime(
+        Buffer.from([
+          0xff, 0xd8, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0x00,
+        ]),
+      ),
+      "image/jpeg",
+    );
+    assert.equal(
+      sniffImageMime(
+        Buffer.from([
+          0x89, 0x50, 0x4e, 0x47, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0x00,
+        ]),
+      ),
+      "image/png",
+    );
+    assert.equal(
+      sniffImageMime(
+        Buffer.from([
+          0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42,
+          0x50,
+        ]),
+      ),
+      "image/webp",
+    );
+  });
+
+  it("returns null for unsupported bytes", () => {
+    assert.equal(sniffImageMime(Buffer.from("not-an-image")), null);
+  });
+});
+
+describe("plan quotas", () => {
+  it("keeps premium higher than free limits", () => {
+    assert.ok(PLAN_QUOTAS.free.ocr > 0);
+    assert.ok(PLAN_QUOTAS.premium.ocr > PLAN_QUOTAS.free.ocr);
+    assert.ok(PLAN_QUOTAS.premium.books > PLAN_QUOTAS.free.books);
   });
 });
 
@@ -155,6 +217,13 @@ describe("setSecurityHeaders", () => {
     );
 
     assert.match(headers["Content-Security-Policy"], /object-src 'none'/);
+    assert.doesNotMatch(headers["Content-Security-Policy"], /unsafe-inline/);
+    assert.match(headers["Content-Security-Policy"], /https:\/\/\*\.supabase\.co/);
+    assert.match(headers["Content-Security-Policy"], /img-src/);
+    assert.equal(
+      headers["Strict-Transport-Security"],
+      "max-age=31536000; includeSubDomains",
+    );
     assert.equal(headers["X-Content-Type-Options"], "nosniff");
     assert.equal(headers["X-Frame-Options"], "DENY");
     assert.equal(nextCalled, true);

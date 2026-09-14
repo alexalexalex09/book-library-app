@@ -6,7 +6,7 @@
   <title>HiLibrary</title>
   
   <!-- CSS Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=11">
+  <link rel="stylesheet" href="css/style.css?v=12">
   
   <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -36,7 +36,7 @@
         
         <form id="authForm" class="auth-form">
           <input type="email" id="emailInput" placeholder="Email Address" class="auth-input" required autocomplete="username">
-          <input type="password" id="passwordInput" placeholder="Password" class="auth-input" required autocomplete="current-password">
+          <input type="password" id="passwordInput" placeholder="Password" class="auth-input" required minlength="8" autocomplete="current-password">
           <input type="password" id="confirmPasswordInput" placeholder="Confirm Password" class="auth-input hidden-element" autocomplete="new-password">
           <span id="passwordError" class="auth-error hidden-element">Passwords do not match</span>
           
@@ -294,6 +294,6 @@
   </div>
 
   <script src="js/api.js"></script>
-  <script src="js/app.js?v=11"></script>
+  <script src="js/app.js?v=12"></script>
 </body>
 </html>

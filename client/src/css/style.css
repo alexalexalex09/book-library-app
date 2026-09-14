@@ -962,6 +962,13 @@ input:focus-visible,
   margin-bottom: 16px;
 }
 
+.loading-message {
+  font-weight: 600;
+  font-size: 1.1rem;
+  margin: 0;
+  color: #f8fafc;
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }

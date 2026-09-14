@@ -77,6 +77,36 @@ function shelfMapSizePayload(widthPx) {
   };
 }
 
+function storagePathFromShelfImage(value) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const trimmed = value.trim();
+  if (!/^https?:\/\//i.test(trimmed)) return trimmed;
+  try {
+    const url = new URL(trimmed);
+    const segments = url.pathname.split("/").filter(Boolean);
+    const marker = segments.findIndex((part) =>
+      ["public", "authenticated", "sign"].includes(part),
+    );
+    const bucketIndex = marker >= 0 ? marker + 1 : segments.indexOf("shelves");
+    if (bucketIndex < 0 || segments[bucketIndex] !== "shelves") return "";
+    return decodeURIComponent(segments.slice(bucketIndex + 1).join("/"));
+  } catch {
+    return "";
+  }
+}
+
+async function createShelfSignedUrl(path, expiresIn = 3600) {
+  if (!path) return "";
+  const { data, error } = await supabaseClient.storage
+    .from("shelves")
+    .createSignedUrl(path, expiresIn);
+  if (error) {
+    console.warn("Failed to sign shelf image:", error.message);
+    return "";
+  }
+  return data?.signedUrl || "";
+}
+
 function spinesForStorage(spines) {
   return (spines || []).map((spine) => ({
     title: spine.title || "",
@@ -383,6 +413,11 @@ const googleAuthBtn = document.getElementById("googleAuthBtn");
 const googleAuthBtnText = document.getElementById("googleAuthBtnText");
 const authProviderError = document.getElementById("authProviderError");
 
+if (passwordInput) {
+  passwordInput.removeAttribute("minlength");
+  passwordInput.setAttribute("autocomplete", "current-password");
+}
+
 function checkPasswordMatch() {
   if (!isSignUpMode) return;
 
@@ -409,12 +444,16 @@ authToggleBtn?.addEventListener("click", () => {
   if (isSignUpMode) {
     confirmPasswordInput.classList.remove("hidden-element");
     confirmPasswordInput.setAttribute("required", "true");
+    passwordInput.setAttribute("minlength", "8");
+    passwordInput.setAttribute("autocomplete", "new-password");
     authActionBtn.textContent = "Create Account";
     authToggleText.textContent = "Already have an account?";
     authToggleBtn.textContent = "Log in here";
   } else {
     confirmPasswordInput.classList.add("hidden-element");
     confirmPasswordInput.removeAttribute("required");
+    passwordInput.removeAttribute("minlength");
+    passwordInput.setAttribute("autocomplete", "current-password");
     authActionBtn.textContent = "Log In";
     authToggleText.textContent = "Don't have an account?";
     authToggleBtn.textContent = "Sign up here";
@@ -434,6 +473,10 @@ authForm?.addEventListener("submit", async (e) => {
   try {
     if (isSignUpMode) {
       const confirmPassword = confirmPasswordInput.value;
+      if (password.length < 8) {
+        showToast("Password must be at least 8 characters.", "error");
+        return;
+      }
       if (password !== confirmPassword) return;
 
       const { error } = await supabaseClient.auth.signUp({ email, password });
@@ -560,7 +603,7 @@ function showLoadingOverlay(message = "Analyzing bookshelf image with AI...") {
     overlay.className = "loading-overlay";
     overlay.innerHTML = `
       <div class="loading-spinner"></div>
-      <p id="loadingMessage" style="font-weight: 600; font-size: 1.1rem; margin: 0; color: #f8fafc;"></p>
+      <p id="loadingMessage" class="loading-message"></p>
     `;
     document.body.appendChild(overlay);
   }
@@ -1577,6 +1620,7 @@ async function saveShelfToDatabase() {
     const fileName = currentUploadedImageHash
       ? `${currentUser.id}/${currentUploadedImageHash}.jpg`
       : `${currentUser.id}/${Date.now()}.jpg`;
+    const imagePath = fileName;
 
     const { data: uploadData, error: uploadError } =
       await supabaseClient.storage
@@ -1590,15 +1634,10 @@ async function saveShelfToDatabase() {
       return;
     }
 
-    const { data: publicUrlData } = supabaseClient.storage
-      .from("shelves")
-      .getPublicUrl(fileName);
-    const imageUrl = publicUrlData.publicUrl;
-
     const { data: existingShelf } = await supabaseClient
       .from("shelves")
       .select("id, user_id")
-      .eq("image_url", imageUrl)
+      .eq("image_url", imagePath)
       .maybeSingle();
 
     if (existingShelf) {
@@ -1612,7 +1651,8 @@ async function saveShelfToDatabase() {
           detected_spines: spinesForStorage(currentDetectedSpines),
           dismissed_titles: currentDismissedTitles,
         })
-        .eq("id", existingShelf.id);
+        .eq("id", existingShelf.id)
+        .eq("user_id", currentUser.id);
       if (updateError) {
         showToast("Failed to update shelf: " + updateError.message, "error");
         return;
@@ -1639,7 +1679,7 @@ async function saveShelfToDatabase() {
       .from("shelves")
       .insert({
         user_id: currentUser.id,
-        image_url: imageUrl,
+        image_url: imagePath,
         detected_spines: spinesForStorage(currentDetectedSpines),
         dismissed_titles: currentDismissedTitles,
         map_width: DEFAULT_SHELF_CARD_WIDTH,
@@ -1660,7 +1700,7 @@ async function saveShelfToDatabase() {
       bounding_box: spine.box || spine.boundingBox || null,
       polygon: spine.polygon || null,
       cover: toHttpsUrl(spine.thumbnail) || null,
-      shelf_image_url: imageUrl,
+      shelf_image_url: imagePath,
     }));
 
     let payload = booksToInsert;
@@ -1749,13 +1789,15 @@ async function applyCatalogMatchToLibraryBook(book, match) {
   let { error } = await supabaseClient
     .from("user_books")
     .update(updates)
-    .eq("id", book.id);
+    .eq("id", book.id)
+    .eq("user_id", currentUser.id);
 
   if (error && /cover_url|'cover'/i.test(error.message)) {
     const retry = await supabaseClient
       .from("user_books")
       .update({ title: match.title })
-      .eq("id", book.id);
+      .eq("id", book.id)
+      .eq("user_id", currentUser.id);
     error = retry.error;
   }
 
@@ -1886,7 +1928,8 @@ async function deleteBookFromLibrary(bookId) {
   const { error } = await supabaseClient
     .from("user_books")
     .delete()
-    .eq("id", bookId);
+    .eq("id", bookId)
+    .eq("user_id", currentUser.id);
 
   if (error) {
     showToast("Failed to delete book: " + error.message, "error");
@@ -2110,7 +2153,31 @@ async function loadLibraryMap() {
     );
   }
 
-  shelves.forEach((shelf, index) => {
+  const shelfList = shelves || [];
+  const uniquePaths = Array.from(
+    new Set(
+      shelfList
+        .map((shelf) => storagePathFromShelfImage(shelf.image_url))
+        .filter(Boolean),
+    ),
+  );
+  const signedUrlByPath = new Map();
+  if (uniquePaths.length > 0) {
+    const { data: signedRows, error: signedError } = await supabaseClient.storage
+      .from("shelves")
+      .createSignedUrls(uniquePaths, 3600);
+    if (signedError) {
+      console.warn("Failed to sign shelf images:", signedError.message);
+    } else {
+      (signedRows || []).forEach((row) => {
+        if (row?.path && row?.signedUrl) {
+          signedUrlByPath.set(row.path, row.signedUrl);
+        }
+      });
+    }
+  }
+
+  shelfList.forEach((shelf, index) => {
     const startX = shelf.map_x ?? index * 350 + 50;
     const startY = shelf.map_y ?? 50;
 
@@ -2167,6 +2234,7 @@ async function loadLibraryMap() {
           .from("shelves")
           .update({ map_x: left, map_y: top })
           .eq("id", shelf.id)
+          .eq("user_id", currentUser.id)
           .then();
       }
     });
@@ -2193,7 +2261,15 @@ async function loadLibraryMap() {
           "<p class='scan-loading-text'>Fetching shelf image for re-scan...</p>";
         updateScanSteps();
 
-        const response = await fetch(shelf.image_url);
+        const shelfImagePath = storagePathFromShelfImage(shelf.image_url);
+        const signedShelfImageUrl =
+          signedUrlByPath.get(shelfImagePath) ||
+          (await createShelfSignedUrl(shelfImagePath));
+        if (!signedShelfImageUrl) {
+          showToast("Could not access shelf image for re-scan.", "error");
+          return;
+        }
+        const response = await fetch(signedShelfImageUrl);
         const blob = await response.blob();
         const file = new File([blob], "rescan_shelf.jpg", {
           type: "image/jpeg",
@@ -2269,8 +2345,13 @@ async function loadLibraryMap() {
         await supabaseClient
           .from("user_books")
           .delete()
-          .eq("shelf_id", shelf.id);
-        await supabaseClient.from("shelves").delete().eq("id", shelf.id);
+          .eq("shelf_id", shelf.id)
+          .eq("user_id", currentUser.id);
+        await supabaseClient
+          .from("shelves")
+          .delete()
+          .eq("id", shelf.id)
+          .eq("user_id", currentUser.id);
         shelfWrapper.remove();
         showToast("Shelf deleted.", "success");
         loadLibraryData();
@@ -2287,10 +2368,22 @@ async function loadLibraryMap() {
     imgElement.alt = shelf.name || "Shelf photo";
     imgElement.decoding = "async";
     imgElement.loading = "lazy";
-    imgElement.dataset.src = shelf.image_url || "";
+    const shelfImagePath = storagePathFromShelfImage(shelf.image_url);
+    imgElement.dataset.path = shelfImagePath;
+    imgElement.dataset.src = signedUrlByPath.get(shelfImagePath) || "";
 
     const revealShelfImage = () => {
-      if (!imgElement.dataset.src || imgElement.dataset.loaded === "1") return;
+      if (imgElement.dataset.loaded === "1") return;
+      if (!imgElement.dataset.src && imgElement.dataset.path) {
+        createShelfSignedUrl(imgElement.dataset.path).then((signedUrl) => {
+          if (signedUrl) {
+            imgElement.dataset.src = signedUrl;
+            revealShelfImage();
+          }
+        });
+        return;
+      }
+      if (!imgElement.dataset.src) return;
       imgElement.dataset.loaded = "1";
       imgElement.loading = "eager";
       imgElement.onload = () => {
@@ -2662,7 +2755,8 @@ async function updateShelfName(shelfId, newName, textNode) {
   const { error } = await supabaseClient
     .from("shelves")
     .update({ name: newName })
-    .eq("id", shelfId);
+    .eq("id", shelfId)
+    .eq("user_id", currentUser.id);
   if (!error && textNode) textNode.textContent = newName;
 }
 
@@ -2817,7 +2911,8 @@ const handleEnd = async () => {
     await supabaseClient
       .from("user_books")
       .update({ polygon: book.polygon, bounding_box: book.bounding_box })
-      .eq("id", book.id);
+      .eq("id", book.id)
+      .eq("user_id", currentUser.id);
 
     activeMapEditPoint = null;
   }
@@ -2828,6 +2923,7 @@ const handleEnd = async () => {
       .from("shelves")
       .update(shelfMapSizePayload(width))
       .eq("id", activeShelfResize.id)
+      .eq("user_id", currentUser.id)
       .then(({ error }) => {
         if (error) {
           console.warn("Failed to save shelf size:", error.message);
@@ -2845,6 +2941,7 @@ const handleEnd = async () => {
       .from("shelves")
       .update({ map_x: finalX, map_y: finalY })
       .eq("id", activeShelfDrag.id)
+      .eq("user_id", currentUser.id)
       .then();
     activeShelfDrag = null;
   }
@@ -3035,7 +3132,11 @@ manageShelvesBtn?.addEventListener("click", async () => {
         confirmLabel: "Delete",
       });
       if (!confirmed) return;
-      await supabaseClient.from("shelves").delete().eq("id", shelf.id);
+      await supabaseClient
+        .from("shelves")
+        .delete()
+        .eq("id", shelf.id)
+        .eq("user_id", currentUser.id);
       li.remove();
       showToast("Shelf deleted.", "success");
       loadLibraryMap();
