@@ -53,7 +53,7 @@ function createBookCoverImage(src, { hideOnError = false } = {}) {
 }
 
 function bookCoverSrc(book) {
-  return toHttpsUrl(book?.cover_url || book?.thumbnail || "");
+  return toHttpsUrl(book?.cover || "");
 }
 
 function parseBookSearchItems(data) {
@@ -1483,7 +1483,7 @@ async function saveShelfToDatabase() {
       title: spine.title?.trim() || "Untitled Book",
       bounding_box: spine.box || spine.boundingBox || null,
       polygon: spine.polygon || null,
-      cover_url: toHttpsUrl(spine.thumbnail) || null,
+      cover: toHttpsUrl(spine.thumbnail) || null,
       shelf_image_url: imageUrl,
     }));
 
@@ -1492,8 +1492,8 @@ async function saveShelfToDatabase() {
       .from("user_books")
       .insert(payload);
 
-    if (booksError && /cover_url/i.test(booksError.message)) {
-      payload = payload.map(({ cover_url, ...rest }) => rest);
+    if (booksError && /cover_url|'cover'/i.test(booksError.message)) {
+      payload = payload.map(({ cover, ...rest }) => rest);
       const retry = await supabaseClient.from("user_books").insert(payload);
       booksError = retry.error;
     }
@@ -1567,14 +1567,14 @@ function refreshLibraryList() {
 
 async function applyCatalogMatchToLibraryBook(book, match) {
   const updates = { title: match.title };
-  if (match.thumbnail) updates.cover_url = match.thumbnail;
+  if (match.thumbnail) updates.cover = match.thumbnail;
 
   let { error } = await supabaseClient
     .from("user_books")
     .update(updates)
     .eq("id", book.id);
 
-  if (error && /cover_url/i.test(error.message)) {
+  if (error && /cover_url|'cover'/i.test(error.message)) {
     const retry = await supabaseClient
       .from("user_books")
       .update({ title: match.title })
@@ -1588,11 +1588,11 @@ async function applyCatalogMatchToLibraryBook(book, match) {
   }
 
   book.title = match.title;
-  if (match.thumbnail) book.cover_url = match.thumbnail;
+  if (match.thumbnail) book.cover = match.thumbnail;
   const stored = myLibrary.find((entry) => entry.id === book.id);
   if (stored) {
     stored.title = match.title;
-    if (match.thumbnail) stored.cover_url = match.thumbnail;
+    if (match.thumbnail) stored.cover = match.thumbnail;
   }
 
   refreshLibraryList();
@@ -2248,38 +2248,12 @@ function showBookActionPopover(shelfWrapper, book, books) {
   main.appendChild(meta);
   popover.appendChild(main);
 
-  const attachCover = (src) => {
-    if (!src || popover.querySelector(".book-popover-cover")) return;
-    const img = createBookCoverImage(src, { hideOnError: true });
+  const savedCover = bookCoverSrc(book);
+  if (savedCover) {
+    const img = createBookCoverImage(savedCover, { hideOnError: true });
     img.classList.add("book-popover-cover");
     img.alt = `Cover of ${book.title || "this book"}`;
     main.prepend(img);
-  };
-
-  const existingCover = bookCoverSrc(book);
-  if (existingCover) {
-    attachCover(existingCover);
-  } else if (book.title) {
-    searchBooksByQuery(book.title)
-      .then((matches) => {
-        if (!popover.isConnected) return;
-        const cover = matches.find((match) => match.thumbnail)?.thumbnail;
-        if (!cover) return;
-        book.cover_url = cover;
-        const stored = myLibrary.find((entry) => entry.id === book.id);
-        if (stored) stored.cover_url = cover;
-        attachCover(cover);
-        supabaseClient
-          .from("user_books")
-          .update({ cover_url: cover })
-          .eq("id", book.id)
-          .then(({ error }) => {
-            if (error && !/cover_url/i.test(error.message)) {
-              console.warn("Failed to save book cover:", error.message);
-            }
-          });
-      })
-      .catch(() => {});
   }
 
   actions.querySelector(".popover-search-btn").addEventListener("click", (e) => {
