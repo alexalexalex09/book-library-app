@@ -12,8 +12,11 @@ const supabaseClient = window.supabase.createClient(
 let currentUser = null;
 let myLibrary = [];
 let bookLookupTarget = null;
+let currentDismissedTitles = [];
 
 const SEARCH_RESULT_LIMIT = 3;
+const DEFAULT_SHELF_CARD_WIDTH = 300;
+const MIN_SHELF_CARD_WIDTH = 160;
 const BOOK_COVER_PLACEHOLDER =
   "data:image/svg+xml," +
   encodeURIComponent(
@@ -54,6 +57,53 @@ function createBookCoverImage(src, { hideOnError = false } = {}) {
 
 function bookCoverSrc(book) {
   return toHttpsUrl(book?.cover || "");
+}
+
+function shelfDisplayWidth(shelf) {
+  const width = Number(shelf?.map_width);
+  if (Number.isFinite(width) && width > 0) return Math.round(width);
+  const scale = Number(shelf?.map_scale);
+  if (Number.isFinite(scale) && scale > 0) {
+    return Math.round(DEFAULT_SHELF_CARD_WIDTH * scale);
+  }
+  return DEFAULT_SHELF_CARD_WIDTH;
+}
+
+function shelfMapSizePayload(widthPx) {
+  const map_width = Math.max(MIN_SHELF_CARD_WIDTH, Math.round(widthPx));
+  return {
+    map_width,
+    map_scale: map_width / DEFAULT_SHELF_CARD_WIDTH,
+  };
+}
+
+function spinesForStorage(spines) {
+  return (spines || []).map((spine) => ({
+    title: spine.title || "",
+    box: spine.box || spine.boundingBox || null,
+    polygon: spine.polygon || null,
+    confirmed: Boolean(spine.confirmed),
+    confirmedTitle: spine.confirmedTitle || null,
+    author: spine.author || null,
+    thumbnail: toHttpsUrl(spine.thumbnail) || null,
+  }));
+}
+
+function rememberDismissedTitle(title) {
+  const value = String(title || "").trim();
+  if (!value) return;
+  const seen = currentDismissedTitles.map((t) => t.toLowerCase());
+  if (!seen.includes(value.toLowerCase())) currentDismissedTitles.push(value);
+}
+
+function applyDismissedTitles(spines, dismissed) {
+  const skip = new Set(
+    (dismissed || []).map((title) => String(title).trim().toLowerCase()).filter(Boolean),
+  );
+  if (skip.size === 0) return spines || [];
+  return (spines || []).filter(
+    (spine) => !skip.has(String(spine.title || "").trim().toLowerCase()),
+  );
 }
 
 function parseBookSearchItems(data) {
@@ -549,6 +599,78 @@ let canvasState = {
   startY: 0,
 };
 
+const CANVAS_ZOOM_MIN = 1;
+const CANVAS_ZOOM_MAX = 4;
+
+function getSpineBounds(spine) {
+  if (spine?.polygon && spine.polygon.length >= 3) {
+    const xs = spine.polygon.map((p) => p.x);
+    const ys = spine.polygon.map((p) => p.y);
+    return {
+      minX: Math.min(...xs),
+      maxX: Math.max(...xs),
+      minY: Math.min(...ys),
+      maxY: Math.max(...ys),
+    };
+  }
+  return spine?.box || spine?.boundingBox || null;
+}
+
+function setCanvasZoom(newScale) {
+  if (!shelfCanvas) return;
+  const oldScale = canvasState.scale || CANVAS_ZOOM_MIN;
+  newScale = Math.min(CANVAS_ZOOM_MAX, Math.max(CANVAS_ZOOM_MIN, newScale));
+  const cw = shelfCanvas.width;
+  const ch = shelfCanvas.height;
+
+  if (newScale <= CANVAS_ZOOM_MIN) {
+    canvasState.scale = CANVAS_ZOOM_MIN;
+    canvasState.offsetX = 0;
+    canvasState.offsetY = 0;
+  } else {
+    const viewCx = (cw / 2 - canvasState.offsetX) / oldScale;
+    const viewCy = (ch / 2 - canvasState.offsetY) / oldScale;
+    const imgCx = cw / 2;
+    const imgCy = ch / 2;
+    let targetImgX = viewCx;
+    let targetImgY = viewCy;
+    if (newScale < oldScale && oldScale > CANVAS_ZOOM_MIN) {
+      const keep = (newScale - CANVAS_ZOOM_MIN) / (oldScale - CANVAS_ZOOM_MIN);
+      targetImgX = imgCx + (viewCx - imgCx) * keep;
+      targetImgY = imgCy + (viewCy - imgCy) * keep;
+    }
+    canvasState.scale = newScale;
+    canvasState.offsetX = cw / 2 - targetImgX * newScale;
+    canvasState.offsetY = ch / 2 - targetImgY * newScale;
+  }
+
+  if (zoomSlider) zoomSlider.value = String(canvasState.scale);
+  redrawCanvasOverlays(activeEditingSpineIndex);
+}
+
+function zoomCanvasToSpine(spine) {
+  if (!shelfCanvas || !spine) return;
+  const box = getSpineBounds(spine);
+  if (!box) return;
+
+  const w = Math.max(0.02, box.maxX - box.minX) * shelfCanvas.width;
+  const h = Math.max(0.02, box.maxY - box.minY) * shelfCanvas.height;
+  const scale = Math.min(
+    CANVAS_ZOOM_MAX,
+    Math.max(
+      CANVAS_ZOOM_MIN,
+      Math.min((shelfCanvas.width * 0.55) / w, (shelfCanvas.height * 0.55) / h),
+    ),
+  );
+  const cx = ((box.minX + box.maxX) / 2) * shelfCanvas.width;
+  const cy = ((box.minY + box.maxY) / 2) * shelfCanvas.height;
+  canvasState.scale = scale;
+  canvasState.offsetX = shelfCanvas.width / 2 - cx * scale;
+  canvasState.offsetY = shelfCanvas.height / 2 - cy * scale;
+  if (zoomSlider) zoomSlider.value = String(Number(scale.toFixed(2)));
+  redrawCanvasOverlays(activeEditingSpineIndex);
+}
+
 let activeEditingSpineIndex = null;
 let activeControlPoint = null; // { spineIndex, pointIndex }
 
@@ -697,16 +819,11 @@ function redrawCanvasOverlays(highlightedIndex = null) {
 }
 
 zoomSlider?.addEventListener("input", (e) => {
-  canvasState.scale = parseFloat(e.target.value);
-  redrawCanvasOverlays(null);
+  setCanvasZoom(parseFloat(e.target.value));
 });
 
 resetZoomBtn?.addEventListener("click", () => {
-  canvasState.scale = 1;
-  canvasState.offsetX = 0;
-  canvasState.offsetY = 0;
-  if (zoomSlider) zoomSlider.value = "1";
-  redrawCanvasOverlays(null);
+  setCanvasZoom(CANVAS_ZOOM_MIN);
 });
 
 const startCanvasDrag = (e) => {
@@ -817,6 +934,7 @@ imageUpload?.addEventListener("change", async (e) => {
   if (!file) return;
 
   currentUploadedFile = file;
+  currentDismissedTitles = [];
   placeholderText.style.display = "none";
   shelfCanvas.style.display = "block";
   canvasControls.classList.remove("hidden-element");
@@ -945,7 +1063,10 @@ function setupCanvasDropzone() {
 setupCanvasDropzone();
 updateScanSteps();
 
-function renderDetectedSpines() {
+function renderDetectedSpines(options = {}) {
+  const preserveScroll = Boolean(options.preserveScroll);
+  const existingScroll = document.querySelector("#pendingContainer .spines-scroll");
+  const savedScrollTop = preserveScroll && existingScroll ? existingScroll.scrollTop : 0;
   const renderConfirmedBookRow = (containerEl, spineData) => {
     if (!spineData.confirmed) return;
 
@@ -1048,7 +1169,9 @@ function renderDetectedSpines() {
   skipUnlabeledBtn.onclick = () => {
     currentDetectedSpines = currentDetectedSpines.filter((spine) => {
       const title = (spine.title || "").trim().toLowerCase();
-      return title !== "" && title !== "unlabeled spine";
+      const keep = title !== "" && title !== "unlabeled spine";
+      if (!keep) rememberDismissedTitle(spine.title);
+      return keep;
     });
     activeEditingSpineIndex = null;
     renderDetectedSpines();
@@ -1108,6 +1231,10 @@ function renderDetectedSpines() {
     };
 
     titleInput.addEventListener("focus", highlight);
+    titleInput.addEventListener("click", () => {
+      highlight();
+      zoomCanvasToSpine(spine);
+    });
     titleInput.addEventListener("blur", unhighlight);
     div.addEventListener("mouseenter", highlight);
     div.addEventListener("mouseleave", unhighlight);
@@ -1131,9 +1258,10 @@ function renderDetectedSpines() {
     skipBtn.setAttribute("aria-label", `Skip spine ${index + 1}`);
 
     skipBtn.onclick = () => {
+      rememberDismissedTitle(currentDetectedSpines[index]?.title);
       currentDetectedSpines.splice(index, 1);
       activeEditingSpineIndex = null;
-      renderDetectedSpines();
+      renderDetectedSpines({ preserveScroll: true });
     };
 
     actionRow.appendChild(searchBtn);
@@ -1189,6 +1317,7 @@ function renderDetectedSpines() {
   stickySave.appendChild(saveBtn);
   stickySave.appendChild(saveCount);
   container.appendChild(stickySave);
+  if (preserveScroll) spinesScroll.scrollTop = savedScrollTop;
 }
 
 // ==========================================
@@ -1445,12 +1574,16 @@ async function saveShelfToDatabase() {
   });
 
   try {
-    const fileName = `${currentUser.id}/${Date.now()}.jpg`;
+    const fileName = currentUploadedImageHash
+      ? `${currentUser.id}/${currentUploadedImageHash}.jpg`
+      : `${currentUser.id}/${Date.now()}.jpg`;
 
     const { data: uploadData, error: uploadError } =
       await supabaseClient.storage
         .from("shelves")
-        .upload(fileName, currentUploadedFile);
+        .upload(fileName, currentUploadedFile, {
+          upsert: Boolean(currentUploadedImageHash),
+        });
 
     if (uploadError) {
       showToast("Failed to upload shelf image: " + uploadError.message, "error");
@@ -1462,12 +1595,55 @@ async function saveShelfToDatabase() {
       .getPublicUrl(fileName);
     const imageUrl = publicUrlData.publicUrl;
 
+    const { data: existingShelf } = await supabaseClient
+      .from("shelves")
+      .select("id, user_id")
+      .eq("image_url", imageUrl)
+      .maybeSingle();
+
+    if (existingShelf) {
+      if (existingShelf.user_id !== currentUser.id) {
+        showToast("This shelf image is already saved.", "error");
+        return;
+      }
+      const { error: updateError } = await supabaseClient
+        .from("shelves")
+        .update({
+          detected_spines: spinesForStorage(currentDetectedSpines),
+          dismissed_titles: currentDismissedTitles,
+        })
+        .eq("id", existingShelf.id);
+      if (updateError) {
+        showToast("Failed to update shelf: " + updateError.message, "error");
+        return;
+      }
+      showToast("This image is already in your library.", "info");
+      currentDetectedSpines = [];
+      currentDismissedTitles = [];
+      currentUploadedFile = null;
+      currentLoadedImage = null;
+      currentUploadedImageHash = null;
+      document.getElementById("pendingContainer").innerHTML =
+        "<p class='empty-state'>Upload a new image to continue.</p>";
+      if (ctx && shelfCanvas) {
+        ctx.clearRect(0, 0, shelfCanvas.width, shelfCanvas.height);
+        shelfCanvas.style.display = "none";
+      }
+      if (placeholderText) placeholderText.style.display = "flex";
+      if (canvasControls) canvasControls.classList.add("hidden-element");
+      loadLibraryData();
+      return;
+    }
+
     const { data: shelfData, error: shelfError } = await supabaseClient
       .from("shelves")
       .insert({
         user_id: currentUser.id,
         image_url: imageUrl,
-        image_hash: currentUploadedImageHash,
+        detected_spines: spinesForStorage(currentDetectedSpines),
+        dismissed_titles: currentDismissedTitles,
+        map_width: DEFAULT_SHELF_CARD_WIDTH,
+        map_scale: 1,
       })
       .select()
       .single();
@@ -1516,6 +1692,7 @@ async function saveShelfToDatabase() {
     );
 
     currentDetectedSpines = [];
+    currentDismissedTitles = [];
     currentUploadedFile = null;
     currentLoadedImage = null;
     currentUploadedImageHash = null;
@@ -1827,8 +2004,10 @@ let mapState = {
   pinchCenterY: 0,
 };
 let activeShelfDrag = null;
+let activeShelfResize = null;
 let activeMapEditPoint = null;
 let activeSelectedBookId = null;
+let shelfImageObserver = null;
 
 const getPos = (e) => ({
   x: e.touches ? e.touches[0].clientX : e.clientX,
@@ -1859,18 +2038,38 @@ function redrawMapFocus(shelfWrapper, focusedEl) {
   });
 }
 
-function zoomToShelfOnMap(shelfId) {  const shelfWrapper = document.querySelector(`[data-shelf-id="${shelfId}"]`);
+function whenShelfImageReady(shelfWrapper, callback) {
   if (!shelfWrapper) return;
+  const img = shelfWrapper.querySelector(".shelf-img");
+  const run = () => requestAnimationFrame(() => callback());
+  shelfWrapper._revealShelfImage?.();
+  if (img?.complete && img.naturalWidth) {
+    run();
+    return;
+  }
+  img?.addEventListener("load", run, { once: true });
+  img?.addEventListener("error", run, { once: true });
+}
+
+function zoomToShelfOnMap(shelfId) {
+  const shelfWrapper = document.querySelector(`[data-shelf-id="${shelfId}"]`);
+  if (!shelfWrapper) return;
+  whenShelfImageReady(shelfWrapper, () => {
 
   const shelfLeft = parseFloat(shelfWrapper.style.left);
   const shelfTop = parseFloat(shelfWrapper.style.top);
+  const shelfW = shelfWrapper.offsetWidth || 300;
+  const shelfH = shelfWrapper.offsetHeight || 200;
 
   const rect = infiniteMap.getBoundingClientRect();
-  const targetScale = 1.2;
+  const targetScale = Math.min(
+    1.2,
+    Math.max(0.15, (rect.width * 0.8) / Math.max(shelfW, 1)),
+  );
   mapState.scale = targetScale;
 
-  mapState.x = rect.width / 2 - (shelfLeft + 150) * targetScale;
-  mapState.y = rect.height / 2 - (shelfTop + 100) * targetScale;
+  mapState.x = rect.width / 2 - (shelfLeft + shelfW / 2) * targetScale;
+  mapState.y = rect.height / 2 - (shelfTop + shelfH / 2) * targetScale;
 
   mapViewport.style.transition = "transform 0.4s ease-in-out";
   mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
@@ -1880,6 +2079,7 @@ function zoomToShelfOnMap(shelfId) {  const shelfWrapper = document.querySelecto
     mapViewport.style.transition = "none";
     shelfWrapper.style.border = "1px solid #e4e4e7";
   }, 1200);
+  });
 }
 
 async function loadLibraryMap() {
@@ -1892,6 +2092,23 @@ async function loadLibraryMap() {
   if (error) return console.error("Error loading map:", error);
 
   mapViewport.innerHTML = "";
+
+  if (shelfImageObserver) {
+    shelfImageObserver.disconnect();
+    shelfImageObserver = null;
+  }
+  if (typeof IntersectionObserver === "function" && infiniteMap) {
+    shelfImageObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          entry.target._revealShelfImage?.();
+          shelfImageObserver?.unobserve(entry.target);
+        });
+      },
+      { root: infiniteMap, rootMargin: "400px", threshold: 0 },
+    );
+  }
 
   shelves.forEach((shelf, index) => {
     const startX = shelf.map_x ?? index * 350 + 50;
@@ -1921,11 +2138,11 @@ async function loadLibraryMap() {
       <div class="shelf-img-wrap">
         <img draggable="false" alt="" class="shelf-img" />
         <svg class="shelf-svg-overlay" aria-hidden="true"></svg>
+        <button class="shelf-resize-handle" type="button" aria-label="Resize shelf image"></button>
       </div>
     `;
     shelfWrapper.querySelector(".shelf-name").textContent =
       shelf.name || "Untitled Shelf";
-    shelfWrapper.querySelector("img").src = shelf.image_url;
 
     // Keyboard: arrows nudge the shelf; Enter renames.
     shelfWrapper.addEventListener("keydown", (e) => {
@@ -2008,7 +2225,15 @@ async function loadLibraryMap() {
         });
         const scanData = await scanRes.json();
 
-        currentDetectedSpines = scanData.spines || [];
+        currentDismissedTitles = Array.isArray(shelf.dismissed_titles)
+          ? shelf.dismissed_titles
+              .map((title) => String(title || "").trim())
+              .filter(Boolean)
+          : [];
+        currentDetectedSpines = applyDismissedTitles(
+          scanData.spines || [],
+          currentDismissedTitles,
+        );
         currentUploadedImageHash = scanData.imageHash || null;
         renderDetectedSpines();
       });
@@ -2052,28 +2277,58 @@ async function loadLibraryMap() {
       });
 
     const imgElement = shelfWrapper.querySelector("img");
-    imgElement.onload = () => {
-      renderShelfSvgOverlays(
-        shelfWrapper,
-        shelf.user_books || [],
-        activeSelectedBookId,
-        false,
-      );
+    const applyShelfWidth = (widthPx) => {
+      const width = Math.max(MIN_SHELF_CARD_WIDTH, Math.round(widthPx));
+      shelfWrapper.style.width = `${width}px`;
+      return width;
     };
-    if (imgElement.complete) {
-      renderShelfSvgOverlays(
-        shelfWrapper,
-        shelf.user_books || [],
-        activeSelectedBookId,
-        false,
-      );
-    }
+    applyShelfWidth(shelfDisplayWidth(shelf));
+
+    imgElement.alt = shelf.name || "Shelf photo";
+    imgElement.decoding = "async";
+    imgElement.loading = "lazy";
+    imgElement.dataset.src = shelf.image_url || "";
+
+    const revealShelfImage = () => {
+      if (!imgElement.dataset.src || imgElement.dataset.loaded === "1") return;
+      imgElement.dataset.loaded = "1";
+      imgElement.loading = "eager";
+      imgElement.onload = () => {
+        renderShelfSvgOverlays(
+          shelfWrapper,
+          shelf.user_books || [],
+          activeSelectedBookId,
+          false,
+        );
+      };
+      imgElement.src = imgElement.dataset.src;
+    };
+    shelfWrapper._revealShelfImage = revealShelfImage;
+
+    const resizeHandle = shelfWrapper.querySelector(".shelf-resize-handle");
+    const initShelfResize = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const pos = getPos(e);
+      activeShelfResize = {
+        element: shelfWrapper,
+        id: shelf.id,
+        startX: pos.x,
+        startWidth: shelfWrapper.offsetWidth,
+        books: shelf.user_books || [],
+      };
+    };
+    resizeHandle?.addEventListener("mousedown", initShelfResize);
+    resizeHandle?.addEventListener("touchstart", initShelfResize, {
+      passive: false,
+    });
 
     const initShelfDrag = (e) => {
       if (
         e.target.closest("svg") ||
         e.target.closest("button") ||
-        e.target.closest(".book-popover")
+        e.target.closest(".book-popover") ||
+        e.target.closest(".shelf-resize-handle")
       )
         return;
       e.stopPropagation();
@@ -2094,6 +2349,12 @@ async function loadLibraryMap() {
     });
 
     mapViewport.appendChild(shelfWrapper);
+
+    if (shelfImageObserver) {
+      shelfImageObserver.observe(shelfWrapper);
+    } else {
+      revealShelfImage();
+    }
   });
 
   updateMapEmptyState((shelves || []).length);
@@ -2340,10 +2601,7 @@ function renderShelfSvgOverlays(
 
     const selectBook = (e) => {
       e.stopPropagation();
-      deselectAllMapBooks();
-      activeSelectedBookId = book.id;
-      renderShelfSvgOverlays(shelfWrapper, books, book.id, true);
-      showBookActionPopover(shelfWrapper, book, books);
+      zoomToBookOnMap(book, { showHandles: true, books });
     };
 
     polyEl.addEventListener("mousedown", selectBook);
@@ -2510,6 +2768,24 @@ const handleMove = (e) => {
     return;
   }
 
+  if (activeShelfResize) {
+    if (e.touches) e.preventDefault();
+    const pos = getPos(e);
+    const dx = (pos.x - activeShelfResize.startX) / mapState.scale;
+    const width = Math.max(
+      MIN_SHELF_CARD_WIDTH,
+      activeShelfResize.startWidth + dx,
+    );
+    activeShelfResize.element.style.width = `${Math.round(width)}px`;
+    renderShelfSvgOverlays(
+      activeShelfResize.element,
+      activeShelfResize.books,
+      activeSelectedBookId,
+      Boolean(activeSelectedBookId),
+    );
+    return;
+  }
+
   if (!activeShelfDrag && !mapState.isDragging) return;
   if (e.touches) e.preventDefault();
 
@@ -2544,6 +2820,20 @@ const handleEnd = async () => {
       .eq("id", book.id);
 
     activeMapEditPoint = null;
+  }
+
+  if (activeShelfResize) {
+    const width = Math.round(activeShelfResize.element.offsetWidth);
+    supabaseClient
+      .from("shelves")
+      .update(shelfMapSizePayload(width))
+      .eq("id", activeShelfResize.id)
+      .then(({ error }) => {
+        if (error) {
+          console.warn("Failed to save shelf size:", error.message);
+        }
+      });
+    activeShelfResize = null;
   }
 
   if (activeShelfDrag) {
@@ -2592,8 +2882,24 @@ infiniteMap?.addEventListener(
   { passive: false },
 );
 
-function zoomToBookOnMap(book) {
+function getBookBounds(book) {
   const box = book.bounding_box || book.boundingBox;
+  if (box && Number.isFinite(box.minX) && Number.isFinite(box.maxX)) return box;
+  if (book.polygon && book.polygon.length >= 3) {
+    const xs = book.polygon.map((p) => p.x);
+    const ys = book.polygon.map((p) => p.y);
+    return {
+      minX: Math.min(...xs),
+      maxX: Math.max(...xs),
+      minY: Math.min(...ys),
+      maxY: Math.max(...ys),
+    };
+  }
+  return null;
+}
+
+function zoomToBookOnMap(book, { showHandles = false, books } = {}) {
+  const box = getBookBounds(book);
   if (!box) return;
 
   const shelfWrapper = document.querySelector(
@@ -2601,27 +2907,38 @@ function zoomToBookOnMap(book) {
   );
   if (!shelfWrapper) return;
 
+  whenShelfImageReady(shelfWrapper, () => {
   const imgElement = shelfWrapper.querySelector("img");
   if (!imgElement) return;
 
   activeSelectedBookId = book.id;
 
-  const renderedWidth = imgElement.clientWidth || 280;
+  const renderedWidth = imgElement.clientWidth || imgElement.naturalWidth || 280;
   const renderedHeight =
     imgElement.clientHeight ||
     renderedWidth * (imgElement.naturalHeight / (imgElement.naturalWidth || 1));
 
+  const bookW = Math.max(8, (box.maxX - box.minX) * renderedWidth);
+  const bookH = Math.max(8, (box.maxY - box.minY) * renderedHeight);
   const bookCx = ((box.minX + box.maxX) / 2) * renderedWidth;
   const bookCy = ((box.minY + box.maxY) / 2) * renderedHeight;
 
-  const shelfLeft = parseFloat(shelfWrapper.style.left);
-  const shelfTop = parseFloat(shelfWrapper.style.top);
+  const shelfLeft = parseFloat(shelfWrapper.style.left) || 0;
+  const shelfTop = parseFloat(shelfWrapper.style.top) || 0;
+  const imgLeft = imgElement.offsetLeft || 0;
+  const imgTop = imgElement.offsetTop || 0;
 
-  const targetX = shelfLeft + bookCx;
-  const targetY = shelfTop + bookCy;
+  const targetX = shelfLeft + imgLeft + bookCx;
+  const targetY = shelfTop + imgTop + bookCy;
 
   const rect = infiniteMap.getBoundingClientRect();
-  const targetScale = 1.2;
+  const targetScale = Math.min(
+    5,
+    Math.max(
+      0.4,
+      Math.min((rect.width * 0.45) / bookW, (rect.height * 0.45) / bookH),
+    ),
+  );
   mapState.scale = targetScale;
 
   mapState.x = rect.width / 2 - targetX * targetScale;
@@ -2634,16 +2951,24 @@ function zoomToBookOnMap(book) {
     mapViewport.style.transition = "none";
   }, 400);
 
+  const applySelection = (shelfBooks) => {
+    const list = shelfBooks || [];
+    renderShelfSvgOverlays(shelfWrapper, list, book.id, showHandles);
+    const selectedBook = list.find((b) => b.id === book.id) || book;
+    showBookActionPopover(shelfWrapper, selectedBook, list);
+  };
+
+  if (books) {
+    applySelection(books);
+    return;
+  }
+
   supabaseClient
     .from("user_books")
     .select("*")
     .eq("shelf_id", book.shelf_id)
-    .then(({ data: shelfBooks }) => {
-      const books = shelfBooks || [];
-      renderShelfSvgOverlays(shelfWrapper, books, book.id, false);
-      const selectedBook = books.find((b) => b.id === book.id) || book;
-      showBookActionPopover(shelfWrapper, selectedBook, books);
-    });
+    .then(({ data: shelfBooks }) => applySelection(shelfBooks));
+  });
 }
 
 // ==========================================

@@ -1584,6 +1584,7 @@ input:focus-visible,
 .shelf-card {
   position: absolute;
   width: 300px;
+  min-width: 160px;
   background: var(--surface);
   padding: 10px;
   border-radius: var(--radius-md);
@@ -1647,14 +1648,46 @@ input:focus-visible,
 .shelf-img-wrap {
   position: relative;
   width: 100%;
+  min-height: 160px;
+  background: #f4f4f5;
+  border-radius: var(--radius-sm);
 }
 
 .shelf-img {
   width: 100%;
+  height: auto;
   display: block;
   border-radius: var(--radius-sm);
   pointer-events: none;
   border: 1px solid #f4f4f5;
+}
+
+.shelf-img:not([src]) {
+  visibility: hidden;
+  min-height: 160px;
+}
+
+.shelf-resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg, transparent 50%, #94a3b8 50%, #94a3b8 60%, transparent 60%),
+    linear-gradient(135deg, transparent 70%, #94a3b8 70%, #94a3b8 80%, transparent 80%);
+  background-color: rgba(255, 255, 255, 0.7);
+  z-index: 5;
+  pointer-events: auto;
+}
+
+.shelf-resize-handle:hover,
+.shelf-resize-handle:focus-visible {
+  background-color: #ffffff;
 }
 
 .shelf-svg-overlay {

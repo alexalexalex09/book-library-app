@@ -394,14 +394,19 @@ app.post("/api/ocr", requireAuth, upload.single("image"), async (req, res) => {
 
     // 1. Check if shelf already exists in user's library (unless forcing a re-scan)
     if (userId && !forceRescan) {
-      const { data: existingShelf } = await supabase
+      const { data: existingShelf, error: existingError } = await supabase
         .from("shelves")
         .select("*, user_books(*)")
         .eq("user_id", userId)
-        .eq("image_hash", imageHash)
+        .ilike("image_url", `%${imageHash}%`)
         .maybeSingle();
 
-      if (existingShelf) {
+      if (existingError) {
+        console.warn(
+          `[${timestamp}] Duplicate lookup warning:`,
+          existingError.message,
+        );
+      } else if (existingShelf) {
         console.log(
           `[${timestamp}] 🔁 Found duplicate shelf photo for user. Redirecting.`,
         );
