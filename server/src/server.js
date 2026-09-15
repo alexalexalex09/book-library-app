@@ -9,6 +9,12 @@ const sharp = require("sharp");
 const crypto = require("crypto");
 const axios = require("axios");
 const {
+  resolveNormalizationSize,
+  mapPolygonFromInferencePoints,
+  mapPolygonFromRleMaskSpace,
+  normalizeBoxFromInference,
+} = require("./image-geometry");
+const {
   ALLOWED_IMAGE_TYPES,
   MAX_IMAGE_DIMENSION,
   MAX_IMAGE_PIXELS,
@@ -346,6 +352,25 @@ async function extractSpatialPolygonsRoboflow(
     },
   });
 
+  const responseImageWidth =
+    Number(response.data?.image?.width) ||
+    Number(response.data?.image?.w) ||
+    Number(response.data?.image_width) ||
+    Number(response.data?.width) ||
+    imgWidth;
+  const responseImageHeight =
+    Number(response.data?.image?.height) ||
+    Number(response.data?.image?.h) ||
+    Number(response.data?.image_height) ||
+    Number(response.data?.height) ||
+    imgHeight;
+  const inferenceDims = {
+    inferenceWidth: responseImageWidth,
+    inferenceHeight: responseImageHeight,
+    imageWidth: imgWidth,
+    imageHeight: imgHeight,
+  };
+
   const predictions = response.data?.predictions || [];
 
   return predictions
@@ -353,32 +378,38 @@ async function extractSpatialPolygonsRoboflow(
       let polygon = [];
 
       if (pred.rle_mask && pred.rle_mask.counts) {
-        polygon = extractPolygonFromRLE(pred.rle_mask);
+        const [maskHeight = 0, maskWidth = 0] = pred.rle_mask.size || [];
+        const maskPolygon = extractPolygonFromRLE(pred.rle_mask);
+        polygon = mapPolygonFromRleMaskSpace(maskPolygon, {
+          maskWidth,
+          maskHeight,
+          imageWidth: imgWidth,
+          imageHeight: imgHeight,
+        });
       } else if (pred.points || pred.polygon) {
-        let rawPoints = pred.points || pred.polygon || [];
-        const normalizedPoints = rawPoints.map((pt) => ({
-          x: pt.x > 1 ? pt.x / imgWidth : pt.x,
-          y: pt.y > 1 ? pt.y / imgHeight : pt.y,
-        }));
+        const rawPoints = pred.points || pred.polygon || [];
+        const normalizedPoints = mapPolygonFromInferencePoints(rawPoints, inferenceDims);
         // Downsample raw points with normalized epsilon
         polygon = simplifyPolygon(normalizedPoints, 0.002);
       } else if (pred.width && pred.height) {
-        const w = pred.width > 1 ? pred.width / imgWidth : pred.width;
-        const h = pred.height > 1 ? pred.height / imgHeight : pred.height;
-        const cx = pred.x > 1 ? pred.x / imgWidth : pred.x;
-        const cy = pred.y > 1 ? pred.y / imgHeight : pred.y;
+        const box = normalizeBoxFromInference(
+          {
+            x: pred.x,
+            y: pred.y,
+            width: pred.width,
+            height: pred.height,
+          },
+          inferenceDims,
+        );
 
-        const minX = Math.max(0, cx - w / 2);
-        const maxX = Math.min(1, cx + w / 2);
-        const minY = Math.max(0, cy - h / 2);
-        const maxY = Math.min(1, cy + h / 2);
-
-        polygon = [
-          { x: minX, y: minY },
-          { x: maxX, y: minY },
-          { x: maxX, y: maxY },
-          { x: minX, y: maxY },
-        ];
+        if (box) {
+          polygon = [
+            { x: box.minX, y: box.minY },
+            { x: box.maxX, y: box.minY },
+            { x: box.maxX, y: box.maxY },
+            { x: box.minX, y: box.maxY },
+          ];
+        }
       }
 
       const xs = polygon.map((p) => p.x);
@@ -431,18 +462,24 @@ app.post(
 
     const rawBuffer = req.file.buffer;
     const imageProcessor = sharp(rawBuffer, { limitInputPixels: MAX_IMAGE_PIXELS });
-    const metadata = await imageProcessor.metadata();
-    const imgWidth = metadata.width || 1;
-    const imgHeight = metadata.height || 1;
+    const storedMetadata = await imageProcessor.metadata();
+    const normalizedBuffer = await imageProcessor
+      .rotate()
+      .jpeg({ quality: 92, mozjpeg: true })
+      .toBuffer();
+    const orientedMetadata = await sharp(normalizedBuffer).metadata();
+    const { width: imgWidth, height: imgHeight } = resolveNormalizationSize({
+      storedWidth: storedMetadata.width || 1,
+      storedHeight: storedMetadata.height || 1,
+      orientedWidth: orientedMetadata.width,
+      orientedHeight: orientedMetadata.height,
+    });
+
     if (imgWidth > MAX_IMAGE_DIMENSION || imgHeight > MAX_IMAGE_DIMENSION) {
       return res.status(413).json({
         error: `Image dimensions exceed ${MAX_IMAGE_DIMENSION}px limit`,
       });
     }
-    const normalizedBuffer = await imageProcessor
-      .rotate()
-      .jpeg({ quality: 92, mozjpeg: true })
-      .toBuffer();
     const imageHash = crypto
       .createHash("sha256")
       .update(rawBuffer)

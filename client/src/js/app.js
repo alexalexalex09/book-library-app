@@ -1302,7 +1302,7 @@ function renderDetectedSpines(options = {}) {
 
   const updateMaximizeBtn = () => {
     const isMax = container.classList.contains("maximized");
-    maximizeBtn.textContent = isMax ? "▼" : "▲";
+    maximizeBtn.textContent = isMax ? "▼ Show Image" : "▲ Hide Image";
     maximizeBtn.title = isMax ? "Minimize" : "Maximize";
     maximizeBtn.setAttribute("aria-label", isMax ? "Minimize detected spines" : "Maximize detected spines");
     maximizeBtn.setAttribute("aria-expanded", String(isMax));
