@@ -13,6 +13,9 @@ let currentUser = null;
 let myLibrary = [];
 let bookLookupTarget = null;
 let currentDismissedTitles = [];
+let lastShelvesSnapshot = [];
+let offlineMode = !navigator.onLine;
+const offlineStore = window.HiLibraryOffline || null;
 
 const SEARCH_RESULT_LIMIT = 3;
 const DEFAULT_SHELF_CARD_WIDTH = 300;
@@ -22,6 +25,61 @@ const BOOK_COVER_PLACEHOLDER =
   encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="70"><rect width="100%" height="100%" fill="#e5e7eb"/><text x="50%" y="52%" text-anchor="middle" font-size="9" fill="#71717a">No cover</text></svg>',
   );
+
+function isOfflineActive() {
+  return offlineMode || !navigator.onLine;
+}
+
+function setOfflineMode(enabled) {
+  offlineMode = Boolean(enabled);
+  const banner = document.getElementById("offlineBanner");
+  if (!banner) return;
+  banner.classList.toggle("hidden-element", !offlineMode);
+}
+
+function requireOnline(actionLabel = "This action", notify = true) {
+  if (!isOfflineActive()) return true;
+  if (notify) showToast(`${actionLabel} requires an internet connection.`, "info");
+  return false;
+}
+
+function mediaCacheKeyForShelfPath(storagePath) {
+  if (!storagePath) return "";
+  return `/offline-media/shelves/${encodeURIComponent(storagePath)}`;
+}
+
+function mediaCacheKeyForCover(url) {
+  if (!url) return "";
+  return `/offline-media/covers/${encodeURIComponent(url)}`;
+}
+
+async function resolveCoverImageSource(url) {
+  if (!url || !offlineStore) return url;
+  const cacheKey = mediaCacheKeyForCover(url);
+  if (!cacheKey) return url;
+  if (isOfflineActive()) {
+    return (await offlineStore.getCachedMediaBlobUrl(cacheKey)) || url;
+  }
+  return (await offlineStore.getOrCacheMediaBlobUrl(cacheKey, url)) || url;
+}
+
+async function persistOfflineSnapshot() {
+  if (!offlineStore || !currentUser?.id) return;
+  try {
+    await offlineStore.saveSnapshot({
+      userId: currentUser.id,
+      email: currentUser.email || "",
+      books: myLibrary,
+      shelves: lastShelvesSnapshot,
+    });
+    await offlineStore.setLastUser({
+      userId: currentUser.id,
+      email: currentUser.email || "",
+    });
+  } catch (error) {
+    console.warn("Failed to persist offline snapshot:", error?.message || error);
+  }
+}
 
 function toHttpsUrl(rawUrl) {
   if (typeof rawUrl !== "string" || !rawUrl.trim()) return "";
@@ -42,7 +100,16 @@ function createBookCoverImage(src, { hideOnError = false } = {}) {
   img.alt = "";
   img.referrerPolicy = "no-referrer";
   const httpsSrc = toHttpsUrl(src);
-  img.src = httpsSrc || BOOK_COVER_PLACEHOLDER;
+  img.src = BOOK_COVER_PLACEHOLDER;
+  if (httpsSrc) {
+    resolveCoverImageSource(httpsSrc)
+      .then((resolved) => {
+        img.src = resolved || httpsSrc;
+      })
+      .catch(() => {
+        img.src = httpsSrc;
+      });
+  }
   img.addEventListener("error", () => {
     if (hideOnError) {
       img.remove();
@@ -528,26 +595,74 @@ googleAuthBtn?.addEventListener("click", async () => {
 // ==========================================
 // 4. AUTH STATE & NAVIGATION
 // ==========================================
-supabaseClient.auth.onAuthStateChange((event, session) => {
-  currentUser = session?.user || null;
+async function applyAuthState(session) {
   const loggedOutView = document.getElementById("loggedOutView");
   const loggedInView = document.getElementById("loggedInView");
 
-  if (currentUser) {
+  if (session?.user) {
+    currentUser = session.user;
+    setOfflineMode(false);
     loggedOutView.classList.add("hidden-element");
     loggedInView.classList.remove("hidden-element");
     document.getElementById("userEmailDisplay").textContent = currentUser.email;
+    await Promise.all([loadLibraryData(), loadLibraryMap()]);
+    updateScanSteps();
+    return;
+  }
+
+  if (offlineStore && !navigator.onLine) {
+    const lastUser = await offlineStore.getLastUser();
+    const snapshot = await offlineStore.getSnapshot(lastUser?.userId);
+    if (lastUser?.userId && snapshot) {
+      currentUser = { id: lastUser.userId, email: lastUser.email || "Offline user" };
+      setOfflineMode(true);
+      loggedOutView.classList.add("hidden-element");
+      loggedInView.classList.remove("hidden-element");
+      document.getElementById("userEmailDisplay").textContent = `${currentUser.email} (offline)`;
+      await Promise.all([loadLibraryData(), loadLibraryMap()]);
+      updateScanSteps();
+      return;
+    }
+  }
+
+  currentUser = null;
+  setOfflineMode(false);
+  loggedOutView.classList.remove("hidden-element");
+  loggedInView.classList.add("hidden-element");
+}
+
+supabaseClient.auth.onAuthStateChange((event, session) => {
+  applyAuthState(session).catch((error) => {
+    console.error("Failed to apply auth state:", error);
+  });
+});
+
+window.addEventListener("offline", () => {
+  setOfflineMode(true);
+});
+
+window.addEventListener("online", () => {
+  setOfflineMode(false);
+  if (currentUser?.id) {
     loadLibraryData();
     loadLibraryMap();
-    updateScanSteps();
-  } else {
-    loggedOutView.classList.remove("hidden-element");
-    loggedInView.classList.add("hidden-element");
   }
 });
 
-document.getElementById("logoutBtn")?.addEventListener("click", () => {
-  supabaseClient.auth.signOut();
+document.getElementById("logoutBtn")?.addEventListener("click", async () => {
+  const userId = currentUser?.id;
+  if (offlineStore && userId) {
+    await offlineStore.clearUser(userId).catch(() => {});
+    await offlineStore.clearMediaCache().catch(() => {});
+  }
+  supabaseClient.auth.signOut().catch(() => {});
+  if (isOfflineActive()) {
+    currentUser = null;
+    const loggedOutView = document.getElementById("loggedOutView");
+    const loggedInView = document.getElementById("loggedInView");
+    loggedOutView?.classList.remove("hidden-element");
+    loggedInView?.classList.add("hidden-element");
+  }
 });
 
 // View Toggling
@@ -615,6 +730,10 @@ function hideLoadingOverlay() {
   const overlay = document.getElementById("loadingOverlay");
   if (overlay) overlay.style.display = "none";
 }
+
+window.addEventListener("DOMContentLoaded", () => {
+  setOfflineMode(offlineMode);
+});
 
 // ==========================================
 // 5. UPLOAD & SCANNING LOGIC (CANVAS)
@@ -1013,6 +1132,10 @@ imageUpload?.addEventListener("change", async (e) => {
   showLoadingOverlay("Scanning shelf image & detecting spines...");
 
   try {
+    if (!requireOnline("Shelf scanning")) {
+      hideLoadingOverlay();
+      return;
+    }
     const response = await authenticatedFetch("/api/ocr", {
       method: "POST",
       body: formData,
@@ -1314,6 +1437,7 @@ function renderDetectedSpines(options = {}) {
     searchResults.className = "search-results-col";
 
     searchBtn.onclick = async () => {
+      if (!requireOnline("Book search")) return;
       searchResults.innerHTML =
         "<span class='search-status'>Searching Google Books...</span>";
       try {
@@ -1580,6 +1704,10 @@ applyCropBtn?.addEventListener("click", async () => {
       formData.append("force_rescan", "true");
 
       try {
+        if (!requireOnline("Shelf scanning")) {
+          hideLoadingOverlay();
+          return;
+        }
         const response = await authenticatedFetch("/api/ocr", {
           method: "POST",
           body: formData,
@@ -1604,6 +1732,7 @@ applyCropBtn?.addEventListener("click", async () => {
 // 6. DATABASE SAVING & LOADING
 // ==========================================
 async function saveShelfToDatabase() {
+  if (!requireOnline("Saving shelves")) return;
   if (!currentUploadedFile || currentDetectedSpines.length === 0) {
     showToast("No image or detected books to save.", "error");
     return;
@@ -1783,6 +1912,7 @@ function refreshLibraryList() {
 }
 
 async function applyCatalogMatchToLibraryBook(book, match) {
+  if (!requireOnline("Book updates")) return false;
   const updates = { title: match.title };
   if (match.thumbnail) updates.cover = match.thumbnail;
 
@@ -1815,6 +1945,7 @@ async function applyCatalogMatchToLibraryBook(book, match) {
   }
 
   refreshLibraryList();
+  await persistOfflineSnapshot();
   if (
     document.getElementById("libraryView")?.classList.contains("active-view")
   ) {
@@ -1825,6 +1956,7 @@ async function applyCatalogMatchToLibraryBook(book, match) {
 }
 
 async function runBookLookupSearch() {
+  if (!requireOnline("Book search")) return;
   const input = document.getElementById("bookLookupInput");
   const results = document.getElementById("bookLookupResults");
   const searchBtn = document.getElementById("bookLookupSearchBtn");
@@ -1916,15 +2048,35 @@ function setupBookLookupModal() {
 setupBookLookupModal();
 
 async function loadLibraryData() {
-  const { data } = await supabaseClient
-    .from("user_books")
-    .select("*")
-    .eq("user_id", currentUser.id);
-  myLibrary = data || [];
+  if (!currentUser?.id) return;
+  try {
+    if (isOfflineActive()) throw new Error("offline");
+    const { data, error } = await supabaseClient
+      .from("user_books")
+      .select("*")
+      .eq("user_id", currentUser.id);
+    if (error) throw error;
+    myLibrary = data || [];
+    setOfflineMode(false);
+    await persistOfflineSnapshot();
+  } catch (error) {
+    if (offlineStore) {
+      const snapshot = await offlineStore.getSnapshot(currentUser.id);
+      if (snapshot?.books) {
+        myLibrary = snapshot.books;
+        setOfflineMode(true);
+      } else {
+        myLibrary = [];
+      }
+    } else {
+      myLibrary = [];
+    }
+  }
   refreshLibraryList();
 }
 
 async function deleteBookFromLibrary(bookId) {
+  if (!requireOnline("Deleting books")) return false;
   const { error } = await supabaseClient
     .from("user_books")
     .delete()
@@ -1933,7 +2085,7 @@ async function deleteBookFromLibrary(bookId) {
 
   if (error) {
     showToast("Failed to delete book: " + error.message, "error");
-    return;
+    return false;
   }
 
   myLibrary = myLibrary.filter((b) => b.id !== bookId);
@@ -1944,6 +2096,8 @@ async function deleteBookFromLibrary(bookId) {
   ) {
     loadLibraryMap();
   }
+  await persistOfflineSnapshot();
+  return true;
 }
 
 function renderLibraryList(books) {
@@ -1994,8 +2148,8 @@ function renderLibraryList(books) {
         confirmLabel: "Delete",
       });
       if (!confirmed) return;
-      await deleteBookFromLibrary(book.id);
-      showToast(`Deleted "${book.title}".`, "success");
+      const deleted = await deleteBookFromLibrary(book.id);
+      if (deleted) showToast(`Deleted "${book.title}".`, "success");
     });
 
     const activate = () => {
@@ -2128,11 +2282,23 @@ function zoomToShelfOnMap(shelfId) {
 async function loadLibraryMap() {
   if (!currentUser || !mapViewport) return;
 
-  const { data: shelves, error } = await supabaseClient
-    .from("shelves")
-    .select("*, user_books(*)")
-    .eq("user_id", currentUser.id);
-  if (error) return console.error("Error loading map:", error);
+  let shelves = [];
+  try {
+    if (isOfflineActive()) throw new Error("offline");
+    const response = await supabaseClient
+      .from("shelves")
+      .select("*, user_books(*)")
+      .eq("user_id", currentUser.id);
+    if (response.error) throw response.error;
+    shelves = response.data || [];
+    setOfflineMode(false);
+  } catch (error) {
+    if (offlineStore) {
+      const snapshot = await offlineStore.getSnapshot(currentUser.id);
+      shelves = snapshot?.shelves || [];
+      if (shelves.length > 0) setOfflineMode(true);
+    }
+  }
 
   mapViewport.innerHTML = "";
 
@@ -2154,6 +2320,7 @@ async function loadLibraryMap() {
   }
 
   const shelfList = shelves || [];
+  lastShelvesSnapshot = shelfList;
   const uniquePaths = Array.from(
     new Set(
       shelfList
@@ -2162,7 +2329,7 @@ async function loadLibraryMap() {
     ),
   );
   const signedUrlByPath = new Map();
-  if (uniquePaths.length > 0) {
+  if (uniquePaths.length > 0 && !isOfflineActive()) {
     const { data: signedRows, error: signedError } = await supabaseClient.storage
       .from("shelves")
       .createSignedUrls(uniquePaths, 3600);
@@ -2175,6 +2342,15 @@ async function loadLibraryMap() {
         }
       });
     }
+  }
+  if (offlineStore && uniquePaths.length > 0) {
+    const entries = uniquePaths
+      .map((pathValue) => ({
+        cacheKey: mediaCacheKeyForShelfPath(pathValue),
+        sourceUrl: signedUrlByPath.get(pathValue) || "",
+      }))
+      .filter((entry) => entry.cacheKey && entry.sourceUrl);
+    offlineStore.prefetchMedia(entries).catch(() => {});
   }
 
   shelfList.forEach((shelf, index) => {
@@ -2230,12 +2406,14 @@ async function loadLibraryMap() {
       if (e.key.startsWith("Arrow")) {
         shelfWrapper.style.left = `${left}px`;
         shelfWrapper.style.top = `${top}px`;
-        supabaseClient
-          .from("shelves")
-          .update({ map_x: left, map_y: top })
-          .eq("id", shelf.id)
-          .eq("user_id", currentUser.id)
-          .then();
+        if (requireOnline("", false)) {
+          supabaseClient
+            .from("shelves")
+            .update({ map_x: left, map_y: top })
+            .eq("id", shelf.id)
+            .eq("user_id", currentUser.id)
+            .then();
+        }
       }
     });
 
@@ -2243,6 +2421,7 @@ async function loadLibraryMap() {
       .querySelector(".rescan-shelf-btn")
       .addEventListener("click", async (e) => {
         e.stopPropagation();
+        if (!requireOnline("Shelf rescan")) return;
         const confirmed = await confirmDialog({
           title: "Re-run scan?",
           message:
@@ -2262,6 +2441,7 @@ async function loadLibraryMap() {
         updateScanSteps();
 
         const shelfImagePath = storagePathFromShelfImage(shelf.image_url);
+        const shelfMediaCacheKey = mediaCacheKeyForShelfPath(shelfImagePath);
         const signedShelfImageUrl =
           signedUrlByPath.get(shelfImagePath) ||
           (await createShelfSignedUrl(shelfImagePath));
@@ -2269,7 +2449,13 @@ async function loadLibraryMap() {
           showToast("Could not access shelf image for re-scan.", "error");
           return;
         }
-        const response = await fetch(signedShelfImageUrl);
+        const sourceUrl = offlineStore
+          ? await offlineStore.getOrCacheMediaBlobUrl(
+              shelfMediaCacheKey,
+              signedShelfImageUrl,
+            )
+          : signedShelfImageUrl;
+        const response = await fetch(sourceUrl || signedShelfImageUrl);
         const blob = await response.blob();
         const file = new File([blob], "rescan_shelf.jpg", {
           type: "image/jpeg",
@@ -2318,6 +2504,7 @@ async function loadLibraryMap() {
       .querySelector(".edit-name-btn")
       .addEventListener("click", async (e) => {
         e.stopPropagation();
+        if (!requireOnline("Shelf rename")) return;
         const newName = await promptDialog({
           title: "Rename shelf",
           hint: "Enter a name for this shelf.",
@@ -2336,6 +2523,7 @@ async function loadLibraryMap() {
       .querySelector(".delete-shelf-btn")
       .addEventListener("click", async (e) => {
         e.stopPropagation();
+        if (!requireOnline("Shelf deletion")) return;
         const confirmed = await confirmDialog({
           title: "Delete shelf?",
           message: "Delete this shelf and all its books?",
@@ -2369,21 +2557,37 @@ async function loadLibraryMap() {
     imgElement.decoding = "async";
     imgElement.loading = "lazy";
     const shelfImagePath = storagePathFromShelfImage(shelf.image_url);
+    const shelfMediaCacheKey = mediaCacheKeyForShelfPath(shelfImagePath);
     imgElement.dataset.path = shelfImagePath;
+    imgElement.dataset.cacheKey = shelfMediaCacheKey;
     imgElement.dataset.src = signedUrlByPath.get(shelfImagePath) || "";
 
-    const revealShelfImage = () => {
+    const revealShelfImage = async () => {
       if (imgElement.dataset.loaded === "1") return;
-      if (!imgElement.dataset.src && imgElement.dataset.path) {
+      if (!imgElement.dataset.src && imgElement.dataset.path && !isOfflineActive()) {
         createShelfSignedUrl(imgElement.dataset.path).then((signedUrl) => {
           if (signedUrl) {
             imgElement.dataset.src = signedUrl;
-            revealShelfImage();
+            revealShelfImage().catch(() => {});
           }
         });
         return;
       }
-      if (!imgElement.dataset.src) return;
+      let resolvedSrc = imgElement.dataset.src;
+      if (offlineStore && shelfMediaCacheKey) {
+        if (isOfflineActive()) {
+          resolvedSrc =
+            (await offlineStore.getCachedMediaBlobUrl(shelfMediaCacheKey)) ||
+            resolvedSrc;
+        } else if (resolvedSrc) {
+          resolvedSrc =
+            (await offlineStore.getOrCacheMediaBlobUrl(
+              shelfMediaCacheKey,
+              resolvedSrc,
+            )) || resolvedSrc;
+        }
+      }
+      if (!resolvedSrc) return;
       imgElement.dataset.loaded = "1";
       imgElement.loading = "eager";
       imgElement.onload = () => {
@@ -2394,9 +2598,11 @@ async function loadLibraryMap() {
           false,
         );
       };
-      imgElement.src = imgElement.dataset.src;
+      imgElement.src = resolvedSrc;
     };
-    shelfWrapper._revealShelfImage = revealShelfImage;
+    shelfWrapper._revealShelfImage = () => {
+      revealShelfImage().catch(() => {});
+    };
 
     const resizeHandle = shelfWrapper.querySelector(".shelf-resize-handle");
     const initShelfResize = (e) => {
@@ -2446,11 +2652,12 @@ async function loadLibraryMap() {
     if (shelfImageObserver) {
       shelfImageObserver.observe(shelfWrapper);
     } else {
-      revealShelfImage();
+      revealShelfImage().catch(() => {});
     }
   });
 
   updateMapEmptyState((shelves || []).length);
+  await persistOfflineSnapshot();
 }
 
 function updateMapEmptyState(shelfCount) {
@@ -2625,8 +2832,8 @@ function showBookActionPopover(shelfWrapper, book, books) {
         confirmLabel: "Delete",
       });
       if (!confirmed) return;
-      await deleteBookFromLibrary(book.id);
-      popover.remove();
+      const deleted = await deleteBookFromLibrary(book.id);
+      if (deleted) popover.remove();
     });
 
   popover.querySelector(".popover-close-btn").addEventListener("click", (e) => {
@@ -2752,12 +2959,18 @@ function renderShelfSvgOverlays(
 }
 
 async function updateShelfName(shelfId, newName, textNode) {
+  if (!requireOnline("Shelf rename")) return;
   const { error } = await supabaseClient
     .from("shelves")
     .update({ name: newName })
     .eq("id", shelfId)
     .eq("user_id", currentUser.id);
-  if (!error && textNode) textNode.textContent = newName;
+  if (!error) {
+    if (textNode) textNode.textContent = newName;
+    const cachedShelf = lastShelvesSnapshot.find((entry) => entry.id === shelfId);
+    if (cachedShelf) cachedShelf.name = newName;
+    await persistOfflineSnapshot();
+  }
 }
 
 const initMapDrag = (e) => {
@@ -2908,27 +3121,31 @@ window.addEventListener("touchmove", handleMove, { passive: false });
 const handleEnd = async () => {
   if (activeMapEditPoint) {
     const book = activeMapEditPoint.book;
-    await supabaseClient
-      .from("user_books")
-      .update({ polygon: book.polygon, bounding_box: book.bounding_box })
-      .eq("id", book.id)
-      .eq("user_id", currentUser.id);
+    if (requireOnline("", false)) {
+      await supabaseClient
+        .from("user_books")
+        .update({ polygon: book.polygon, bounding_box: book.bounding_box })
+        .eq("id", book.id)
+        .eq("user_id", currentUser.id);
+    }
 
     activeMapEditPoint = null;
   }
 
   if (activeShelfResize) {
     const width = Math.round(activeShelfResize.element.offsetWidth);
-    supabaseClient
-      .from("shelves")
-      .update(shelfMapSizePayload(width))
-      .eq("id", activeShelfResize.id)
-      .eq("user_id", currentUser.id)
-      .then(({ error }) => {
-        if (error) {
-          console.warn("Failed to save shelf size:", error.message);
-        }
-      });
+    if (requireOnline("", false)) {
+      supabaseClient
+        .from("shelves")
+        .update(shelfMapSizePayload(width))
+        .eq("id", activeShelfResize.id)
+        .eq("user_id", currentUser.id)
+        .then(({ error }) => {
+          if (error) {
+            console.warn("Failed to save shelf size:", error.message);
+          }
+        });
+    }
     activeShelfResize = null;
   }
 
@@ -2937,12 +3154,14 @@ const handleEnd = async () => {
 
     const finalX = parseFloat(activeShelfDrag.element.style.left);
     const finalY = parseFloat(activeShelfDrag.element.style.top);
-    supabaseClient
-      .from("shelves")
-      .update({ map_x: finalX, map_y: finalY })
-      .eq("id", activeShelfDrag.id)
-      .eq("user_id", currentUser.id)
-      .then();
+    if (requireOnline("", false)) {
+      supabaseClient
+        .from("shelves")
+        .update({ map_x: finalX, map_y: finalY })
+        .eq("id", activeShelfDrag.id)
+        .eq("user_id", currentUser.id)
+        .then();
+    }
     activeShelfDrag = null;
   }
 
@@ -3059,12 +3278,16 @@ function zoomToBookOnMap(book, { showHandles = false, books } = {}) {
     applySelection(books);
     return;
   }
-
-  supabaseClient
-    .from("user_books")
-    .select("*")
-    .eq("shelf_id", book.shelf_id)
-    .then(({ data: shelfBooks }) => applySelection(shelfBooks));
+  if (isOfflineActive()) {
+    const shelfBooks = myLibrary.filter((entry) => entry.shelf_id === book.shelf_id);
+    applySelection(shelfBooks);
+  } else {
+    supabaseClient
+      .from("user_books")
+      .select("*")
+      .eq("shelf_id", book.shelf_id)
+      .then(({ data: shelfBooks }) => applySelection(shelfBooks));
+  }
   });
 }
 
@@ -3077,6 +3300,7 @@ const closeManagerBtn = document.getElementById("closeManagerBtn");
 const shelfManagerList = document.getElementById("shelfManagerList");
 
 manageShelvesBtn?.addEventListener("click", async () => {
+  if (!requireOnline("Shelf manager")) return;
   openModalWithFocus(shelfManagerModal);
   shelfManagerList.innerHTML = "<p class='scan-loading-text'>Loading...</p>";
 
@@ -3108,6 +3332,7 @@ manageShelvesBtn?.addEventListener("click", async () => {
     );
 
     li.querySelector(".modal-edit-btn").addEventListener("click", async () => {
+      if (!requireOnline("Shelf rename")) return;
       const newName = await promptDialog({
         title: "Rename shelf",
         hint: "Enter a new name for this shelf.",
@@ -3126,6 +3351,7 @@ manageShelvesBtn?.addEventListener("click", async () => {
     });
 
     li.querySelector(".modal-del-btn").addEventListener("click", async () => {
+      if (!requireOnline("Shelf deletion")) return;
       const confirmed = await confirmDialog({
         title: "Delete shelf?",
         message: `Delete "${shelf.name || "Untitled Shelf"}"?`,

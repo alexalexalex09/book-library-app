@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>HiLibrary</title>
   
   <!-- CSS Stylesheet -->
@@ -11,12 +14,13 @@
   <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
+  <link rel="manifest" href="/manifest.webmanifest">
+
   <!-- App Icons & Favicon Links -->
   <link rel="icon" type="image/svg+xml" href="/img/logo.svg" />
-  <link rel="icon" type="image/png" sizes="72x72" href="/img/logo72.png" />
-  <link rel="icon" type="image/png" sizes="128x128" href="/img/logo128.png" />
-  <link rel="icon" type="image/png" sizes="256x256" href="/img/logo256.png" />
-  <link rel="apple-touch-icon" sizes="512x512" href="/img/logo512.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/img/logo-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="/img/logo-512.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/img/logo-180.png" />
 </head>
 <body>
 
@@ -98,6 +102,9 @@
         </button>
       </div>
     </nav>
+    <div id="offlineBanner" class="offline-banner hidden-element" role="status" aria-live="polite">
+      You're offline. Library browsing is available, but scanning and edits are disabled.
+    </div>
     
     <!-- MAIN CONTENT WRAPPER -->
     <main class="main-content">
@@ -293,6 +300,8 @@
     </div>
   </div>
 
+  <script src="js/offline-store.js"></script>
+  <script src="js/pwa.js"></script>
   <script src="js/api.js"></script>
   <script src="js/app.js?v=12"></script>
 </body>

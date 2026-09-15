@@ -220,6 +220,7 @@ describe("setSecurityHeaders", () => {
     assert.doesNotMatch(headers["Content-Security-Policy"], /unsafe-inline/);
     assert.match(headers["Content-Security-Policy"], /https:\/\/\*\.supabase\.co/);
     assert.match(headers["Content-Security-Policy"], /img-src/);
+    assert.match(headers["Content-Security-Policy"], /worker-src 'self'/);
     assert.equal(
       headers["Strict-Transport-Security"],
       "max-age=31536000; includeSubDomains",

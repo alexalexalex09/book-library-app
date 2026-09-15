@@ -1249,6 +1249,54 @@ input:focus-visible,
   min-height: 32px;
 }
 
+.offline-banner {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2100;
+  background: #1e293b;
+  color: #f8fafc;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 8px 12px;
+  width: min(92vw, 560px);
+  text-align: center;
+  font-size: 0.84rem;
+}
+
+.pwa-install-btn {
+  min-height: 40px;
+  min-width: 96px;
+  border: 1px solid var(--border-strong);
+}
+
+.pwa-ios-hint {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: 2600;
+  background: var(--surface-dark);
+  color: #f8fafc;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pwa-ios-hint-close {
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: #f8fafc;
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
 /* ==========================================
    6c. REUSABLE COMPONENTS (Step 9: replace inline styles)
    ========================================== */
@@ -1973,6 +2021,10 @@ input:focus-visible,
     display: none !important;
   }
 
+  .offline-banner {
+    top: 12px;
+  }
+
   /* Mobile Library Sidebar Drawer */
 #libraryView .sidebar {
     position: fixed; /* Locks the drawer to the screen, not the page */
@@ -2016,5 +2068,15 @@ input:focus-visible,
   
   .sidebar-header.collapsed .toggle-icon {
     transform: rotate(180deg);
+  }
+}
+
+@media (display-mode: standalone) and (max-width: 768px) {
+  .app-nav {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .view-section {
+    padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px));
   }
 }

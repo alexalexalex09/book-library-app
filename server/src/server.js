@@ -35,7 +35,18 @@ app.use(
 );
 
 const clientPath = path.join(__dirname, "../../client/src");
-app.use(express.static(clientPath));
+app.use(
+  express.static(clientPath, {
+    setHeaders(res, filePath) {
+      if (filePath.endsWith("sw.js") || filePath.endsWith("manifest.webmanifest")) {
+        res.setHeader("Cache-Control", "no-cache");
+      }
+      if (filePath.endsWith(".webmanifest")) {
+        res.type("application/manifest+json");
+      }
+    },
+  }),
+);
 
 const upload = createImageUpload();
 
