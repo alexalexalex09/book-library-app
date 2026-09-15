@@ -1,5 +1,5 @@
-const SHELL_CACHE = "hilibrary-shell-v1";
-const RUNTIME_CACHE = "hilibrary-runtime-v1";
+const SHELL_CACHE = "hilibrary-shell-v2";
+const RUNTIME_CACHE = "hilibrary-runtime-v2";
 
 const APP_SHELL_URLS = [
   "/",
@@ -65,6 +65,26 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin === self.location.origin && url.pathname.startsWith("/api/")) {
+    return;
+  }
+
+  const isScript = url.origin === self.location.origin && url.pathname.endsWith(".js");
+  if (isScript) {
+    event.respondWith(
+      (async () => {
+        const key = normalizedRequest(request);
+        try {
+          const networkResponse = await fetch(request);
+          const cache = await caches.open(RUNTIME_CACHE);
+          cache.put(key, networkResponse.clone()).catch(() => {});
+          return networkResponse;
+        } catch {
+          const cached = await caches.match(key);
+          if (cached) return cached;
+          throw new Error("Script fetch failed and no cache available");
+        }
+      })(),
+    );
     return;
   }
 

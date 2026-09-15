@@ -1095,11 +1095,15 @@ imageUpload?.addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
 
-  currentUploadedFile = file;
+  currentUploadedFile = null;
+  currentDetectedSpines = [];
+  currentUploadedImageHash = null;
   currentDismissedTitles = [];
   placeholderText.style.display = "none";
   shelfCanvas.style.display = "block";
   canvasControls.classList.remove("hidden-element");
+  document.getElementById("pendingContainer").innerHTML =
+    "<p class='scan-loading-text'>Crop your image to begin scanning...</p>";
   updateScanSteps();
 
   canvasState = {
@@ -1119,66 +1123,11 @@ imageUpload?.addEventListener("change", async (e) => {
     shelfCanvas.height = img.height;
     currentLoadedImage = img;
     redrawCanvasOverlays(null);
+    pendingInitialCrop = true;
+    openCropModalForCurrentImage({ forceRescan: false });
     updateScanSteps();
   };
   img.src = URL.createObjectURL(file);
-
-  const formData = new FormData();
-  formData.append("image", file);
-
-  document.getElementById("pendingContainer").innerHTML =
-    "<p class='scan-loading-text'>Scanning shelf...</p>";
-
-  showLoadingOverlay("Scanning shelf image & detecting spines...");
-
-  try {
-    if (!requireOnline("Shelf scanning")) {
-      hideLoadingOverlay();
-      return;
-    }
-    const response = await authenticatedFetch("/api/ocr", {
-      method: "POST",
-      body: formData,
-    });
-    const data = await response.json();
-
-    if (data.duplicate) {
-      showToast(
-        "This image is already in your library! Navigating to its location on the map.",
-        "info",
-      );
-
-      if (ctx && shelfCanvas)
-        ctx.clearRect(0, 0, shelfCanvas.width, shelfCanvas.height);
-      shelfCanvas.style.display = "none";
-      if (placeholderText) placeholderText.style.display = "flex";
-      if (canvasControls) canvasControls.classList.add("hidden-element");
-      document.getElementById("pendingContainer").innerHTML =
-        "<p class='empty-state'>Upload a new image to continue.</p>";
-      updateScanSteps();
-
-      const mapNavBtn = document.querySelector(
-        '.nav-btn[data-target="libraryView"]',
-      );
-      if (mapNavBtn) mapNavBtn.click();
-
-      setTimeout(() => {
-        zoomToShelfOnMap(data.shelf.id);
-      }, 350);
-      return;
-    }
-
-    currentDetectedSpines = data.spines || [];
-    currentUploadedImageHash = data.imageHash || null;
-    renderDetectedSpines();
-  } catch (err) {
-    console.error("Scan failed:", err);
-    document.getElementById("pendingContainer").innerHTML =
-      "<p class='scan-error'>Scan failed. Check console.</p>";
-    updateScanSteps();
-  } finally {
-    hideLoadingOverlay();
-  }
 });
 
 // Empty canvas is the upload target: click, keyboard, and drag & drop.
@@ -1500,6 +1449,50 @@ const applyCropBtn = document.getElementById("applyCropBtn");
 let cropSelection = null; // { x, y, w, h } in image pixels
 let isCropping = false;
 let cropStart = { x: 0, y: 0 };
+let pendingInitialCrop = false;
+let cropShouldForceRescan = true;
+
+function resetScanWorkspace() {
+  currentUploadedFile = null;
+  currentLoadedImage = null;
+  currentDetectedSpines = [];
+  currentUploadedImageHash = null;
+  currentDismissedTitles = [];
+
+  if (ctx && shelfCanvas) ctx.clearRect(0, 0, shelfCanvas.width, shelfCanvas.height);
+  if (shelfCanvas) shelfCanvas.style.display = "none";
+  if (placeholderText) placeholderText.style.display = "flex";
+  if (canvasControls) canvasControls.classList.add("hidden-element");
+  if (imageUpload) imageUpload.value = "";
+  document.getElementById("pendingContainer").innerHTML =
+    "<p class='empty-state'>Upload a new image to continue.</p>";
+  updateScanSteps();
+}
+
+function openCropModalForCurrentImage({ forceRescan = true } = {}) {
+  if (!currentLoadedImage) {
+    showToast("Please upload an image first.", "info");
+    return;
+  }
+  cropShouldForceRescan = forceRescan;
+  if (applyCropBtn) {
+    applyCropBtn.textContent = forceRescan ? "Crop & Re-scan" : "Crop & Scan";
+  }
+
+  cropCanvas.width = currentLoadedImage.naturalWidth || currentLoadedImage.width;
+  cropCanvas.height = currentLoadedImage.naturalHeight || currentLoadedImage.height;
+
+  // Default crop selection is the full image.
+  cropSelection = {
+    x: 0,
+    y: 0,
+    w: cropCanvas.width,
+    h: cropCanvas.height,
+  };
+
+  drawCropOverlay();
+  openModalWithFocus(cropModal, cancelCropBtn);
+}
 
 function drawCropOverlay() {
   if (!currentLoadedImage || !cropCtx) return;
@@ -1546,25 +1539,8 @@ function drawCropOverlay() {
 }
 
 cropCanvasBtn?.addEventListener("click", () => {
-  if (!currentLoadedImage) {
-    showToast("Please upload an image first.", "info");
-    return;
-  }
-  cropCanvas.width =
-    currentLoadedImage.naturalWidth || currentLoadedImage.width;
-  cropCanvas.height =
-    currentLoadedImage.naturalHeight || currentLoadedImage.height;
-
-  // Default crop selection box (center 80%)
-  cropSelection = {
-    x: Math.round(cropCanvas.width * 0.1),
-    y: Math.round(cropCanvas.height * 0.1),
-    w: Math.round(cropCanvas.width * 0.8),
-    h: Math.round(cropCanvas.height * 0.8),
-  };
-
-  drawCropOverlay();
-  openModalWithFocus(cropModal, cancelCropBtn);
+  pendingInitialCrop = false;
+  openCropModalForCurrentImage({ forceRescan: true });
 });
 
 function closeCropModal() {
@@ -1648,6 +1624,12 @@ window.addEventListener("mouseup", stopCrop);
 window.addEventListener("touchend", stopCrop);
 
 cancelCropBtn?.addEventListener("click", () => {
+  if (pendingInitialCrop) {
+    pendingInitialCrop = false;
+    closeCropModal();
+    resetScanWorkspace();
+    return;
+  }
   closeCropModal();
 });
 
@@ -1685,6 +1667,8 @@ applyCropBtn?.addEventListener("click", async () => {
       const croppedFile = new File([blob], "cropped_shelf.jpg", {
         type: "image/jpeg",
       });
+      const shouldForceRescan = cropShouldForceRescan;
+      pendingInitialCrop = false;
       currentUploadedFile = croppedFile;
 
       // Load cropped preview onto workspace canvas
@@ -1701,7 +1685,10 @@ applyCropBtn?.addEventListener("click", async () => {
       // Trigger API OCR on cropped image
       const formData = new FormData();
       formData.append("image", croppedFile);
-      formData.append("force_rescan", "true");
+      if (shouldForceRescan) {
+        formData.append("force_rescan", "true");
+      }
+      cropShouldForceRescan = true;
 
       try {
         if (!requireOnline("Shelf scanning")) {
@@ -1713,6 +1700,21 @@ applyCropBtn?.addEventListener("click", async () => {
           body: formData,
         });
         const data = await response.json();
+        if (data.duplicate) {
+          showToast(
+            "This image is already in your library! Navigating to its location on the map.",
+            "info",
+          );
+          resetScanWorkspace();
+          const mapNavBtn = document.querySelector(
+            '.nav-btn[data-target="libraryView"]',
+          );
+          if (mapNavBtn) mapNavBtn.click();
+          setTimeout(() => {
+            zoomToShelfOnMap(data.shelf.id);
+          }, 350);
+          return;
+        }
         currentDetectedSpines = data.spines || [];
         currentUploadedImageHash = data.imageHash || null;
         renderDetectedSpines();
