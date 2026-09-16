@@ -538,6 +538,9 @@ authForm?.addEventListener("submit", async (e) => {
   authActionBtn.disabled = true;
 
   try {
+    // #region agent log
+    fetch('http://127.0.0.1:7379/ingest/f9480065-64f6-42e2-84ba-7f071ff6f7b0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcd1f6'},body:JSON.stringify({sessionId:'dcd1f6',runId:'signup-redirect-check',hypothesisId:'H1',location:'client/src/js/app.js:authForm-submit-entry',message:'Auth form submitted',data:{isSignUpMode,origin:window.location.origin,path:window.location.pathname},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (isSignUpMode) {
       const confirmPassword = confirmPasswordInput.value;
       if (password.length < 8) {
@@ -545,8 +548,21 @@ authForm?.addEventListener("submit", async (e) => {
         return;
       }
       if (password !== confirmPassword) return;
+      const emailRedirectTo = `${window.location.origin}${window.location.pathname}`;
 
-      const { error } = await supabaseClient.auth.signUp({ email, password });
+      // #region agent log
+      fetch('http://127.0.0.1:7379/ingest/f9480065-64f6-42e2-84ba-7f071ff6f7b0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcd1f6'},body:JSON.stringify({sessionId:'dcd1f6',runId:'post-fix',hypothesisId:'H2',location:'client/src/js/app.js:signup-call-before',message:'Preparing Supabase signUp call',data:{hasExplicitEmailRedirect:true,emailRedirectTo,hasWindowOrigin:Boolean(window.location.origin)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      const { error } = await supabaseClient.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo,
+        },
+      });
+      // #region agent log
+      fetch('http://127.0.0.1:7379/ingest/f9480065-64f6-42e2-84ba-7f071ff6f7b0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcd1f6'},body:JSON.stringify({sessionId:'dcd1f6',runId:'post-fix',hypothesisId:'H3',location:'client/src/js/app.js:signup-call-after',message:'Supabase signUp returned',data:{hadError:Boolean(error),errorMessage:error?.message||null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (error) {
         showToast("Sign up error: " + error.message, "error");
       } else {
@@ -577,6 +593,9 @@ googleAuthBtn?.addEventListener("click", async () => {
 
   try {
     const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    // #region agent log
+    fetch('http://127.0.0.1:7379/ingest/f9480065-64f6-42e2-84ba-7f071ff6f7b0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcd1f6'},body:JSON.stringify({sessionId:'dcd1f6',runId:'signup-redirect-check',hypothesisId:'H4',location:'client/src/js/app.js:oauth-google-before',message:'OAuth flow sets explicit redirectTo',data:{redirectTo},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const { error } = await supabaseClient.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo },
