@@ -51,7 +51,7 @@ function createBillingRouter({
     stripeSecret && webhookSecret && monthlyPriceId && annualPriceId && appBaseUrl,
   );
   const stripe = billingConfigured
-    ? new Stripe(stripeSecret, { apiVersion: "2024-06-20" })
+    ? new Stripe(stripeSecret, { apiVersion: "2025-08-27.basil" })
     : null;
   const router = express.Router();
 
@@ -164,6 +164,7 @@ function createBillingRouter({
       });
       return res.json({ url: session.url });
     } catch (error) {
+      console.error("Checkout session error:", error?.message || error);
       return res.status(500).json({ error: "Failed to create checkout session" });
     }
   });
