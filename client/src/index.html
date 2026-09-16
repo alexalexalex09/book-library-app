@@ -94,6 +94,14 @@
       </div>
       <div class="nav-user">
         <span id="userEmailDisplay" class="nav-text nav-user-email"></span>
+        <span id="planBadge" class="plan-badge">Free</span>
+        <span id="usageMeter" class="usage-meter">OCR --/-- · Search --/--</span>
+        <button id="upgradeBtn" class="logout-btn" title="Start trial">
+          <span class="nav-text">Start 7-day trial</span>
+        </button>
+        <button id="manageBillingBtn" class="logout-btn hidden-element" title="Manage billing">
+          <span class="nav-text">Manage billing</span>
+        </button>
         <button id="logoutBtn" class="logout-btn" title="Log Out">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
@@ -119,12 +127,11 @@
           <label class="auth-btn primary-btn upload-label-btn">
             <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
             <span>Upload Image</span>
-            <input type="file" id="imageUpload" accept="image/*" class="visually-hidden-input" />
+            <input type="file" id="imageUpload" accept="image/*" class="visually-hidden-input" multiple />
           </label>
         </div>
 
-        <section class="scan-progress" aria-labelledby="scanProgressHeading">
-          <h3 id="scanProgressHeading" class="scan-progress-heading">How scanning works</h3>
+        <section class="scan-progress" aria-label="How scanning works">
           <ol class="scan-steps" id="scanSteps">
             <li class="scan-step is-active" data-step="upload">
               <span class="scan-step-dot" aria-hidden="true">1</span>
@@ -218,6 +225,19 @@
             <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
           </div>
           <div class="sidebar-content" id="mobileLibraryContent">
+            <div class="sidebar-actions-row">
+              <button id="exportCsvBtn" class="auth-btn secondary-btn modal-btn" type="button">Export CSV</button>
+              <button id="exportJsonBtn" class="auth-btn secondary-btn modal-btn" type="button">Export JSON</button>
+            </div>
+            <div class="sidebar-actions-row">
+              <select id="roomFilterSelect" class="auth-input modal-input">
+                <option value="">All rooms</option>
+              </select>
+              <button id="newRoomBtn" class="auth-btn secondary-btn modal-btn" type="button">New room</button>
+            </div>
+            <div class="sidebar-actions-row">
+              <button id="shareLibraryBtn" class="auth-btn secondary-btn modal-btn" type="button">Share library</button>
+            </div>
             <input type="text" id="searchInput" class="search-input sidebar-search" placeholder="Filter books by title or author..." />
             <ul id="libraryList" class="library-list"></ul>
           </div>
@@ -296,6 +316,51 @@
       <div class="modal-actions">
         <button id="promptModalCancel" class="auth-btn secondary-btn modal-btn" type="button">Cancel</button>
         <button id="promptModalOk" class="auth-btn primary-btn modal-btn" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="upgradeModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="upgradeModalTitle">
+    <div class="modal-content modal-dialog" role="document">
+      <h2 id="upgradeModalTitle" class="modal-title">Choose your Premium plan</h2>
+      <p class="modal-message">Start a 7-day free trial. Cancel anytime.</p>
+      <div class="sidebar-actions-row">
+        <button id="upgradeMonthlyBtn" class="auth-btn primary-btn modal-btn" type="button">Monthly · Then $5/mo</button>
+      </div>
+      <div class="sidebar-actions-row">
+        <button id="upgradeAnnualBtn" class="auth-btn primary-btn modal-btn" type="button">Annual · Then $50/yr</button>
+      </div>
+      <div class="modal-actions">
+        <button id="upgradeCancelBtn" class="auth-btn secondary-btn modal-btn" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="customCoverModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="customCoverTitle">
+    <div class="modal-content modal-dialog" role="document">
+      <h2 id="customCoverTitle" class="modal-title">Custom cover</h2>
+      <p class="modal-message">Premium only. Paste a cover URL or upload an image.</p>
+      <label class="modal-input-label" for="customCoverUrlInput">Cover URL</label>
+      <input id="customCoverUrlInput" class="auth-input modal-input" type="text" placeholder="https://..." />
+      <label class="modal-input-label" for="customCoverFileInput">Upload image</label>
+      <input id="customCoverFileInput" class="auth-input modal-input" type="file" accept="image/*" />
+      <div class="modal-actions">
+        <button id="customCoverCancelBtn" class="auth-btn secondary-btn modal-btn" type="button">Cancel</button>
+        <button id="customCoverSaveBtn" class="auth-btn primary-btn modal-btn" type="button">Save cover</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="shareModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="shareModalTitle">
+    <div class="modal-content modal-dialog" role="document">
+      <h2 id="shareModalTitle" class="modal-title">Share library (read-only)</h2>
+      <p class="modal-message">Create and revoke links to your library map.</p>
+      <div class="sidebar-actions-row">
+        <button id="createShareBtn" class="auth-btn primary-btn modal-btn" type="button">Create share link</button>
+      </div>
+      <ul id="shareLinksList" class="manager-list"></ul>
+      <div class="modal-actions">
+        <button id="shareModalCloseBtn" class="auth-btn secondary-btn modal-btn" type="button">Close</button>
       </div>
     </div>
   </div>

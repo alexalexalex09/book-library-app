@@ -5,10 +5,13 @@ const {
   MAX_IMAGE_BYTES,
   PLAN_QUOTAS,
   createImageUpload,
+  createPlanRateLimiter,
   createRequireAuth,
   getUserPlan,
   getBearerToken,
   handleUploadError,
+  normalizePlan,
+  requirePremium,
   sniffImageMime,
   setSecurityHeaders,
 } = require("../src/http-security");
@@ -80,6 +83,39 @@ describe("getUserPlan", () => {
 
   it("ignores user_metadata plan values", () => {
     assert.equal(getUserPlan({ user_metadata: { plan: "premium" } }), "free");
+  });
+});
+
+describe("normalizePlan", () => {
+  it("normalizes unknown values to free", () => {
+    assert.equal(normalizePlan("something-else"), "free");
+    assert.equal(normalizePlan(" premium "), "premium");
+  });
+});
+
+describe("requirePremium", () => {
+  it("allows premium users", () => {
+    let nextCalled = false;
+    const response = createResponse();
+    requirePremium(
+      { user: { app_metadata: { plan: "premium" } } },
+      response,
+      () => {
+        nextCalled = true;
+      },
+    );
+    assert.equal(nextCalled, true);
+    assert.equal(response.statusCode, 200);
+  });
+
+  it("blocks free users with feature lock payload", () => {
+    const response = createResponse();
+    requirePremium({ user: {} }, response, () => {
+      assert.fail("next should not be called");
+    });
+    assert.equal(response.statusCode, 403);
+    assert.equal(response.body.code, "FEATURE_LOCKED");
+    assert.equal(response.body.plan, "free");
   });
 });
 
@@ -228,6 +264,46 @@ describe("setSecurityHeaders", () => {
     assert.equal(headers["X-Content-Type-Options"], "nosniff");
     assert.equal(headers["X-Frame-Options"], "DENY");
     assert.equal(nextCalled, true);
+  });
+});
+
+describe("createPlanRateLimiter", () => {
+  let server;
+  let baseUrl;
+
+  before(async () => {
+    const app = express();
+    app.use((req, res, next) => {
+      req.user = { id: "u1", app_metadata: { plan: "free" } };
+      next();
+    });
+    const limiter = createPlanRateLimiter({
+      action: "books",
+      windowMs: 60_000,
+      message: "Book search limit reached for your plan. Please try again later.",
+    });
+    app.get("/limited", limiter, (req, res) => res.json({ ok: true }));
+    await new Promise((resolve) => {
+      server = app.listen(0, "127.0.0.1", resolve);
+    });
+    baseUrl = `http://127.0.0.1:${server.address().port}`;
+  });
+
+  after(async () => {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  });
+
+  it("returns PLAN_LIMIT payload at limit exhaustion", async () => {
+    let final;
+    for (let i = 0; i < PLAN_QUOTAS.free.books + 1; i++) {
+      final = await fetch(`${baseUrl}/limited`);
+    }
+    assert.equal(final.status, 429);
+    const body = await final.json();
+    assert.equal(body.code, "PLAN_LIMIT");
+    assert.equal(body.plan, "free");
   });
 });
 

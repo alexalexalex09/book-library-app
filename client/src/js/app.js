@@ -11,7 +11,22 @@ const supabaseClient = window.supabase.createClient(
 
 let currentUser = null;
 let myLibrary = [];
+let myRooms = [];
+let selectedRoomId = "";
+let billingState = {
+  plan: "free",
+  status: null,
+  interval: null,
+  trialEndsAt: null,
+  quotas: { ocr: 10, books: 60 },
+};
+let usageState = {
+  ocr: null,
+  books: null,
+};
+let isPublicShareView = false;
 let bookLookupTarget = null;
+let customCoverTarget = null;
 let currentDismissedTitles = [];
 let lastShelvesSnapshot = [];
 let offlineMode = !navigator.onLine;
@@ -25,6 +40,7 @@ const BOOK_COVER_PLACEHOLDER =
   encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="70"><rect width="100%" height="100%" fill="#e5e7eb"/><text x="50%" y="52%" text-anchor="middle" font-size="9" fill="#71717a">No cover</text></svg>',
   );
+const FREE_SEARCH_ALL_LIMIT = 5;
 
 function isOfflineActive() {
   return offlineMode || !navigator.onLine;
@@ -51,6 +67,18 @@ function mediaCacheKeyForShelfPath(storagePath) {
 function mediaCacheKeyForCover(url) {
   if (!url) return "";
   return `/offline-media/covers/${encodeURIComponent(url)}`;
+}
+
+async function resolveCoverSourceUrl(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return toHttpsUrl(value);
+  if (!currentUser?.id) return "";
+  const { data, error } = await supabaseClient.storage
+    .from("shelves")
+    .createSignedUrl(value, 3600);
+  if (error) return "";
+  return data?.signedUrl || "";
 }
 
 async function resolveCoverImageSource(url) {
@@ -81,6 +109,18 @@ async function persistOfflineSnapshot() {
   }
 }
 
+function listCoverPrefetchEntries() {
+  const covers = myLibrary
+    .map((book) => String(book?.cover || "").trim())
+    .filter(Boolean);
+  const unique = Array.from(new Set(covers));
+  const max = isPremiumPlan() ? unique.length : Math.min(unique.length, 20);
+  return unique.slice(0, max).map((value) => ({
+    cacheKey: mediaCacheKeyForCover(value),
+    sourceUrl: value,
+  }));
+}
+
 function toHttpsUrl(rawUrl) {
   if (typeof rawUrl !== "string" || !rawUrl.trim()) return "";
   return rawUrl.trim().replace(/^http:\/\//i, "https://");
@@ -102,7 +142,8 @@ function createBookCoverImage(src, { hideOnError = false } = {}) {
   const httpsSrc = toHttpsUrl(src);
   img.src = BOOK_COVER_PLACEHOLDER;
   if (httpsSrc) {
-    resolveCoverImageSource(httpsSrc)
+    resolveCoverSourceUrl(httpsSrc)
+      .then((resolvedRaw) => resolveCoverImageSource(resolvedRaw || httpsSrc))
       .then((resolved) => {
         img.src = resolved || httpsSrc;
       })
@@ -123,7 +164,7 @@ function createBookCoverImage(src, { hideOnError = false } = {}) {
 }
 
 function bookCoverSrc(book) {
-  return toHttpsUrl(book?.cover || "");
+  return String(book?.cover || "").trim();
 }
 
 function shelfDisplayWidth(shelf) {
@@ -261,9 +302,201 @@ async function searchBooksByQuery(query) {
   );
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.error || `Search failed (${res.status})`);
+    const error = new Error(data.error || `Search failed (${res.status})`);
+    error.code = data.code || null;
+    error.plan = data.plan || null;
+    throw error;
   }
   return parseBookSearchItems(data);
+}
+
+function isPremiumPlan() {
+  return billingState.plan === "premium";
+}
+
+function trialDaysLeft() {
+  if (!billingState.trialEndsAt) return null;
+  const ends = new Date(billingState.trialEndsAt).getTime();
+  if (!Number.isFinite(ends)) return null;
+  const remaining = ends - Date.now();
+  if (remaining <= 0) return 0;
+  return Math.ceil(remaining / (24 * 60 * 60 * 1000));
+}
+
+function buildUsageText(action) {
+  const quotaCap = billingState.quotas?.[action];
+  const snap = usageState[action];
+  if (!snap || !Number.isFinite(snap.limit) || !Number.isFinite(snap.remaining)) {
+    return `--/${quotaCap || "--"}`;
+  }
+  const used = Math.max(0, snap.limit - snap.remaining);
+  return `${used}/${snap.limit}`;
+}
+
+function renderBillingNav() {
+  const badge = document.getElementById("planBadge");
+  const usageMeter = document.getElementById("usageMeter");
+  const upgradeBtn = document.getElementById("upgradeBtn");
+  const manageBtn = document.getElementById("manageBillingBtn");
+  if (!badge || !usageMeter || !upgradeBtn || !manageBtn) return;
+
+  const isTrial = billingState.status === "trialing";
+  const daysLeft = trialDaysLeft();
+  badge.textContent = isTrial
+    ? daysLeft === null
+      ? "Trial"
+      : `Trial · ${daysLeft}d`
+    : isPremiumPlan()
+      ? "Premium"
+      : "Free";
+  usageMeter.textContent = `OCR ${buildUsageText("ocr")} · Search ${buildUsageText("books")}`;
+
+  const free = !isPremiumPlan();
+  upgradeBtn.classList.toggle("hidden-element", !free);
+  manageBtn.classList.toggle("hidden-element", free);
+
+  const roomBtn = document.getElementById("newRoomBtn");
+  const shareBtn = document.getElementById("shareLibraryBtn");
+  if (roomBtn) roomBtn.textContent = free ? "New room (Premium)" : "New room";
+  if (shareBtn) shareBtn.textContent = free ? "Share (Premium)" : "Share library";
+}
+
+function requirePremiumFeature(featureLabel, featureCode) {
+  if (isPremiumPlan()) return true;
+  showUpgradeModal({
+    reason:
+      featureLabel ||
+      "This feature requires Premium. Start your 7-day free trial.",
+    featureCode,
+  });
+  return false;
+}
+
+async function refreshBillingState() {
+  if (!currentUser?.id || isOfflineActive()) {
+    billingState = {
+      plan: "free",
+      status: null,
+      interval: null,
+      trialEndsAt: null,
+      quotas: { ocr: 10, books: 60 },
+    };
+    renderBillingNav();
+    return;
+  }
+  try {
+    const status = await fetchBillingStatus();
+    billingState = {
+      plan: status.plan || "free",
+      status: status.status || null,
+      interval: status.interval || null,
+      trialEndsAt: status.trialEndsAt || null,
+      quotas: status.quotas || (status.plan === "premium" ? { ocr: 60, books: 300 } : { ocr: 10, books: 60 }),
+    };
+  } catch {
+    billingState.plan = "free";
+  }
+  renderBillingNav();
+}
+
+function downloadTextFile(filename, text, mimeType) {
+  const blob = new Blob([text], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportLibraryAsJson() {
+  const payload = myLibrary.map((book) => ({
+    title: book.title || "",
+    author: book.author || "",
+    shelf_id: book.shelf_id ?? null,
+    cover: book.cover || "",
+    created_at: book.created_at || null,
+  }));
+  downloadTextFile("hilibrary-export.json", JSON.stringify(payload, null, 2), "application/json");
+}
+
+function exportLibraryAsCsv() {
+  const header = ["title", "author", "shelf_id", "cover", "created_at"];
+  const rows = myLibrary.map((book) =>
+    [
+      book.title || "",
+      book.author || "",
+      book.shelf_id ?? "",
+      book.cover || "",
+      book.created_at || "",
+    ]
+      .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+      .join(","),
+  );
+  const csv = [header.join(","), ...rows].join("\n");
+  downloadTextFile("hilibrary-export.csv", csv, "text/csv");
+}
+
+async function maybeRenderPublicShare() {
+  const match = window.location.pathname.match(/^\/share\/([^/]+)$/);
+  if (!match) return false;
+  const token = match[1];
+  const loggedOutView = document.getElementById("loggedOutView");
+  const loggedInView = document.getElementById("loggedInView");
+  if (loggedOutView) loggedOutView.classList.add("hidden-element");
+  if (loggedInView) loggedInView.classList.remove("hidden-element");
+  document.querySelector(".app-nav")?.remove();
+
+  const mapContainer = document.getElementById("libraryView");
+  const uploadView = document.getElementById("uploadView");
+  if (uploadView) uploadView.remove();
+  mapContainer?.classList.remove("hidden-view");
+  mapContainer?.classList.add("active-view");
+
+  try {
+    const response = await fetch(`/api/share/${encodeURIComponent(token)}`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "Invalid share link");
+    const viewport = document.getElementById("mapViewport");
+    const list = document.getElementById("libraryList");
+    if (viewport) viewport.innerHTML = "";
+    if (list) list.innerHTML = "";
+    const booksByShelf = new Map();
+    (data.books || []).forEach((book) => {
+      const key = String(book.shelf_id || "");
+      if (!booksByShelf.has(key)) booksByShelf.set(key, []);
+      booksByShelf.get(key).push(book);
+      if (list) {
+        const li = document.createElement("li");
+        li.className = "library-row";
+        li.textContent = `${book.title || "Untitled"}${book.author ? ` — ${book.author}` : ""}`;
+        list.appendChild(li);
+      }
+    });
+    (data.shelves || []).forEach((shelf, index) => {
+      if (!viewport) return;
+      const card = document.createElement("div");
+      card.className = "shelf-card";
+      card.style.left = `${shelf.map_x ?? index * 340 + 50}px`;
+      card.style.top = `${shelf.map_y ?? 50}px`;
+      card.style.width = `${shelfDisplayWidth(shelf)}px`;
+      card.innerHTML = `
+        <div class="shelf-card-header">
+          <span class="shelf-card-name">${shelf.name || "Untitled Shelf"}</span>
+        </div>
+        <div class="shelf-img-wrap">
+          <div class="empty-state">Read-only shared shelf (${(booksByShelf.get(String(shelf.id)) || []).length} books)</div>
+        </div>
+      `;
+      viewport.appendChild(card);
+    });
+    updateMapEmptyState((data.shelves || []).length);
+  } catch (error) {
+    showToast(error.message || "Could not load shared library.", "error");
+  }
+  return true;
 }
 
 // ==========================================
@@ -339,6 +572,73 @@ function closeModalAndRestore(modal) {
   }
   lastFocusedBeforeModal = null;
 }
+
+let pendingUpgradeFeature = null;
+
+function showUpgradeModal({ reason = "", featureCode = "" } = {}) {
+  const modal = document.getElementById("upgradeModal");
+  if (!modal) return;
+  const msg = modal.querySelector(".modal-message");
+  if (msg) {
+    msg.textContent =
+      reason || "Start your 7-day free trial to unlock Premium features.";
+  }
+  pendingUpgradeFeature = featureCode || null;
+  openModalWithFocus(modal, document.getElementById("upgradeMonthlyBtn"));
+}
+
+function closeUpgradeModal() {
+  const modal = document.getElementById("upgradeModal");
+  if (!modal) return;
+  pendingUpgradeFeature = null;
+  closeModalAndRestore(modal);
+}
+
+async function startCheckout(interval) {
+  if (!requireOnline("Checkout")) return;
+  try {
+    const { url } = await createBillingCheckout(interval);
+    if (url) window.location.assign(url);
+  } catch (error) {
+    showToast(error?.message || "Unable to start checkout.", "error");
+  }
+}
+
+async function openBillingPortal() {
+  if (!requireOnline("Billing portal")) return;
+  try {
+    const { url } = await createBillingPortal();
+    if (url) window.location.assign(url);
+  } catch (error) {
+    showToast(error?.message || "Unable to open billing portal.", "error");
+  }
+}
+
+function setupBillingUi() {
+  const upgradeBtn = document.getElementById("upgradeBtn");
+  const manageBtn = document.getElementById("manageBillingBtn");
+  const modal = document.getElementById("upgradeModal");
+  const monthlyBtn = document.getElementById("upgradeMonthlyBtn");
+  const annualBtn = document.getElementById("upgradeAnnualBtn");
+  const cancelBtn = document.getElementById("upgradeCancelBtn");
+
+  upgradeBtn?.addEventListener("click", () => showUpgradeModal());
+  manageBtn?.addEventListener("click", () => openBillingPortal());
+  monthlyBtn?.addEventListener("click", () => startCheckout("month"));
+  annualBtn?.addEventListener("click", () => startCheckout("year"));
+  cancelBtn?.addEventListener("click", closeUpgradeModal);
+  modal?.addEventListener("click", (e) => {
+    if (e.target === modal) closeUpgradeModal();
+  });
+  modal?.addEventListener("keydown", (e) => {
+    trapFocusInModal(modal, e);
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      closeUpgradeModal();
+    }
+  });
+}
+setupBillingUi();
 
 function confirmDialog({ title = "Please confirm", message = "Are you sure?", confirmLabel = "Delete", cancelLabel = "Cancel" } = {}) {
   const modal = document.getElementById("confirmModal");
@@ -615,16 +915,24 @@ googleAuthBtn?.addEventListener("click", async () => {
 // 4. AUTH STATE & NAVIGATION
 // ==========================================
 async function applyAuthState(session) {
+  if (isPublicShareView) return;
   const loggedOutView = document.getElementById("loggedOutView");
   const loggedInView = document.getElementById("loggedInView");
 
   if (session?.user) {
     currentUser = session.user;
+    if (window.location.search.includes("billing=success")) {
+      try {
+        await supabaseClient.auth.refreshSession();
+      } catch {
+        // ignore refresh errors, we still continue with existing session
+      }
+    }
     setOfflineMode(false);
     loggedOutView.classList.add("hidden-element");
     loggedInView.classList.remove("hidden-element");
     document.getElementById("userEmailDisplay").textContent = currentUser.email;
-    await Promise.all([loadLibraryData(), loadLibraryMap()]);
+    await Promise.all([refreshBillingState(), loadLibraryData(), loadRooms(), loadLibraryMap()]);
     updateScanSteps();
     return;
   }
@@ -638,6 +946,7 @@ async function applyAuthState(session) {
       loggedOutView.classList.add("hidden-element");
       loggedInView.classList.remove("hidden-element");
       document.getElementById("userEmailDisplay").textContent = `${currentUser.email} (offline)`;
+      renderBillingNav();
       await Promise.all([loadLibraryData(), loadLibraryMap()]);
       updateScanSteps();
       return;
@@ -645,7 +954,10 @@ async function applyAuthState(session) {
   }
 
   currentUser = null;
+  myRooms = [];
+  selectedRoomId = "";
   setOfflineMode(false);
+  renderBillingNav();
   loggedOutView.classList.remove("hidden-element");
   loggedInView.classList.add("hidden-element");
 }
@@ -663,9 +975,20 @@ window.addEventListener("offline", () => {
 window.addEventListener("online", () => {
   setOfflineMode(false);
   if (currentUser?.id) {
+    refreshBillingState();
+    loadRooms();
     loadLibraryData();
     loadLibraryMap();
   }
+});
+
+window.addEventListener("hilibrary:rate-limit", (event) => {
+  const next = event?.detail || {};
+  usageState = {
+    ocr: next.ocr || usageState.ocr,
+    books: next.books || usageState.books,
+  };
+  renderBillingNav();
 });
 
 document.getElementById("logoutBtn")?.addEventListener("click", async () => {
@@ -752,6 +1075,9 @@ function hideLoadingOverlay() {
 
 window.addEventListener("DOMContentLoaded", () => {
   setOfflineMode(offlineMode);
+  maybeRenderPublicShare().then((active) => {
+    isPublicShareView = active;
+  });
 });
 
 // ==========================================
@@ -769,6 +1095,7 @@ let currentUploadedFile = null;
 let currentLoadedImage = null;
 let currentDetectedSpines = [];
 let currentUploadedImageHash = null;
+let scanQueue = [];
 
 // Canvas Viewport & Editing State
 let canvasState = {
@@ -1110,8 +1437,7 @@ window.addEventListener("touchmove", moveCanvasDrag, { passive: false });
 window.addEventListener("mouseup", stopCanvasDrag);
 window.addEventListener("touchend", stopCanvasDrag);
 
-imageUpload?.addEventListener("change", async (e) => {
-  const file = e.target.files[0];
+function beginScanForFile(file) {
   if (!file) return;
 
   currentUploadedFile = null;
@@ -1147,14 +1473,34 @@ imageUpload?.addEventListener("change", async (e) => {
     updateScanSteps();
   };
   img.src = URL.createObjectURL(file);
+}
+
+imageUpload?.addEventListener("change", async (e) => {
+  const files = Array.from(e.target.files || []).filter((file) =>
+    String(file.type || "").startsWith("image/"),
+  );
+  if (files.length === 0) return;
+  if (!isPremiumPlan() && files.length > 1) {
+    showUpgradeModal({
+      reason: "Batch scan queue is Premium only. Free users can scan one photo at a time.",
+      featureCode: "batch_scan",
+    });
+  }
+  const allowedFiles = isPremiumPlan() ? files : files.slice(0, 1);
+  scanQueue = allowedFiles.slice(1);
+  beginScanForFile(allowedFiles[0]);
 });
 
 // Empty canvas is the upload target: click, keyboard, and drag & drop.
-function forwardFileToImageUpload(file) {
-  if (!file || !imageUpload) return;
-  if (file.type && !file.type.startsWith("image/")) return;
+function forwardFilesToImageUpload(files) {
+  if (!imageUpload) return;
+  const valid = (Array.isArray(files) ? files : [files]).filter(
+    (file) => file && (!file.type || file.type.startsWith("image/")),
+  );
+  if (!valid.length) return;
+  const limited = isPremiumPlan() ? valid : valid.slice(0, 1);
   const transfer = new DataTransfer();
-  transfer.items.add(file);
+  limited.forEach((file) => transfer.items.add(file));
   imageUpload.files = transfer.files;
   imageUpload.dispatchEvent(new Event("change", { bubbles: true }));
 }
@@ -1190,8 +1536,8 @@ function setupCanvasDropzone() {
   );
   dropzone.addEventListener("drop", (e) => {
     dropzone.classList.remove("drag-over");
-    const file = e.dataTransfer?.files?.[0];
-    if (file) forwardFileToImageUpload(file);
+    const files = Array.from(e.dataTransfer?.files || []);
+    if (files.length) forwardFilesToImageUpload(files);
   });
 }
 setupCanvasDropzone();
@@ -1297,7 +1643,15 @@ function renderDetectedSpines(options = {}) {
 
   searchAllBtn.onclick = () => {
     const searchBtns = container.querySelectorAll(".spine-search-btn");
-    searchBtns.forEach((btn) => btn.click());
+    const buttons = Array.from(searchBtns);
+    const cap = isPremiumPlan() ? buttons.length : Math.min(FREE_SEARCH_ALL_LIMIT, buttons.length);
+    buttons.slice(0, cap).forEach((btn) => btn.click());
+    if (!isPremiumPlan() && buttons.length > FREE_SEARCH_ALL_LIMIT) {
+      showUpgradeModal({
+        reason: `Free plan can search ${FREE_SEARCH_ALL_LIMIT} spines at once. Upgrade for full Search All.`,
+        featureCode: "search_all_batch",
+      });
+    }
   };
 
   skipUnlabeledBtn.onclick = () => {
@@ -1426,6 +1780,12 @@ function renderDetectedSpines(options = {}) {
           },
         });
       } catch (err) {
+        if (err?.code === "PLAN_LIMIT") {
+          showUpgradeModal({
+            reason: err.message || "Book search limit reached. Upgrade for higher limits.",
+            featureCode: "books_rate_limit",
+          });
+        }
         searchResults.innerHTML =
           "<span class='search-status-error'>Search failed.</span>";
       }
@@ -1718,7 +2078,16 @@ applyCropBtn?.addEventListener("click", async () => {
           method: "POST",
           body: formData,
         });
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (data.code === "PLAN_LIMIT") {
+            showUpgradeModal({
+              reason: data.error || "OCR limit reached. Upgrade for more scans.",
+              featureCode: "ocr_limit",
+            });
+          }
+          throw new Error(data.error || "Scan failed");
+        }
         if (data.duplicate) {
           showToast(
             "This image is already in your library! Navigating to its location on the map.",
@@ -1897,7 +2266,15 @@ async function saveShelfToDatabase() {
     if (placeholderText) placeholderText.style.display = "flex";
     if (canvasControls) canvasControls.classList.add("hidden-element");
 
-    loadLibraryData();
+    await loadLibraryData();
+    await loadLibraryMap();
+    if (isPremiumPlan() && scanQueue.length > 0) {
+      const nextFile = scanQueue.shift();
+      if (nextFile) {
+        showToast(`Saved. Loading next photo (${scanQueue.length + 1} left in queue).`, "info");
+        beginScanForFile(nextFile);
+      }
+    }
  } catch (err) {
     console.error("Save failed:", err);
     showToast("An unexpected error occurred while saving.", "error");
@@ -2008,6 +2385,12 @@ async function runBookLookupSearch() {
       },
     });
   } catch (err) {
+    if (err?.code === "PLAN_LIMIT") {
+      showUpgradeModal({
+        reason: err.message || "Book search limit reached. Upgrade for more searches.",
+        featureCode: "books_rate_limit",
+      });
+    }
     results.innerHTML =
       "<span class='search-status-error'>Search failed. Try again.</span>";
   } finally {
@@ -2068,6 +2451,197 @@ function setupBookLookupModal() {
 }
 setupBookLookupModal();
 
+function closeCustomCoverModal() {
+  const modal = document.getElementById("customCoverModal");
+  if (!modal) return;
+  customCoverTarget = null;
+  closeModalAndRestore(modal);
+}
+
+function openCustomCoverModal(book) {
+  const modal = document.getElementById("customCoverModal");
+  const urlInput = document.getElementById("customCoverUrlInput");
+  const fileInput = document.getElementById("customCoverFileInput");
+  if (!modal || !urlInput || !fileInput) return;
+  customCoverTarget = book;
+  urlInput.value = "";
+  fileInput.value = "";
+  openModalWithFocus(modal, urlInput);
+}
+
+async function saveCustomCoverForBook() {
+  if (!customCoverTarget) return;
+  const urlInput = document.getElementById("customCoverUrlInput");
+  const fileInput = document.getElementById("customCoverFileInput");
+  let coverValue = String(urlInput?.value || "").trim();
+
+  if (!coverValue && fileInput?.files?.[0]) {
+    const file = fileInput.files[0];
+    const ext = (file.name.split(".").pop() || "jpg").replace(/[^\w]/g, "");
+    const path = `${currentUser.id}/covers/${customCoverTarget.id}-${Date.now()}.${ext}`;
+    const { error: uploadError } = await supabaseClient.storage
+      .from("shelves")
+      .upload(path, file, { upsert: true });
+    if (uploadError) {
+      showToast("Failed to upload cover image.", "error");
+      return;
+    }
+    coverValue = path;
+  }
+
+  if (!coverValue) {
+    showToast("Provide a URL or upload an image.", "error");
+    return;
+  }
+
+  try {
+    const response = await authenticatedFetch(`/api/books/${customCoverTarget.id}/cover`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cover: coverValue }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (data.code === "FEATURE_LOCKED") {
+        showUpgradeModal({
+          reason: data.error || "Custom covers require Premium.",
+          featureCode: "custom_cover",
+        });
+      }
+      throw new Error(data.error || "Cover update failed");
+    }
+    customCoverTarget.cover = coverValue;
+    const inLibrary = myLibrary.find((item) => item.id === customCoverTarget.id);
+    if (inLibrary) inLibrary.cover = coverValue;
+    closeCustomCoverModal();
+    refreshLibraryList();
+    loadLibraryMap();
+    showToast("Custom cover saved.", "success");
+  } catch (error) {
+    showToast(error.message || "Could not save cover.", "error");
+  }
+}
+
+function setupCustomCoverModal() {
+  const modal = document.getElementById("customCoverModal");
+  document.getElementById("customCoverCancelBtn")?.addEventListener("click", closeCustomCoverModal);
+  document.getElementById("customCoverSaveBtn")?.addEventListener("click", () => {
+    saveCustomCoverForBook();
+  });
+  modal?.addEventListener("click", (e) => {
+    if (e.target === modal) closeCustomCoverModal();
+  });
+  modal?.addEventListener("keydown", (e) => {
+    trapFocusInModal(modal, e);
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      closeCustomCoverModal();
+    }
+  });
+}
+setupCustomCoverModal();
+
+function closeShareModal() {
+  const modal = document.getElementById("shareModal");
+  if (!modal) return;
+  closeModalAndRestore(modal);
+}
+
+async function loadShareLinks() {
+  const list = document.getElementById("shareLinksList");
+  if (!list) return;
+  list.innerHTML = "<li class='manager-list-item'>Loading...</li>";
+  try {
+    const response = await authenticatedFetch("/api/shares");
+    const data = await response.json().catch(() => []);
+    if (!response.ok) {
+      if (data.code === "FEATURE_LOCKED") {
+        showUpgradeModal({
+          reason: data.error || "Share links require Premium.",
+          featureCode: "share_link",
+        });
+        closeShareModal();
+      }
+      throw new Error(data.error || "Failed to load share links");
+    }
+    list.innerHTML = "";
+    (data || []).forEach((item) => {
+      const li = document.createElement("li");
+      li.className = "manager-list-item";
+      const shareUrl = `${window.location.origin}/share/${item.token}`;
+      li.innerHTML = `
+        <span class="manager-shelf-name"></span>
+        <div class="manager-shelf-actions">
+          <button class="modal-edit-btn" type="button">Copy</button>
+          <button class="modal-del-btn" type="button">Revoke</button>
+        </div>
+      `;
+      li.querySelector(".manager-shelf-name").textContent = shareUrl;
+      li.querySelector(".modal-edit-btn").addEventListener("click", async () => {
+        await navigator.clipboard?.writeText(shareUrl);
+        showToast("Share link copied.", "success");
+      });
+      li.querySelector(".modal-del-btn").addEventListener("click", async () => {
+        const responseDelete = await authenticatedFetch(`/api/shares/${item.id}`, {
+          method: "DELETE",
+        });
+        if (responseDelete.ok) {
+          li.remove();
+          showToast("Share link revoked.", "success");
+        }
+      });
+      list.appendChild(li);
+    });
+    if (!list.children.length) {
+      list.innerHTML = "<li class='manager-list-item'>No share links yet.</li>";
+    }
+  } catch (error) {
+    list.innerHTML = "<li class='manager-list-item'>Could not load share links.</li>";
+  }
+}
+
+function setupShareModal() {
+  const openBtn = document.getElementById("shareLibraryBtn");
+  const modal = document.getElementById("shareModal");
+  const createBtn = document.getElementById("createShareBtn");
+  const closeBtn = document.getElementById("shareModalCloseBtn");
+  openBtn?.addEventListener("click", async () => {
+    if (!requirePremiumFeature("Read-only share links are Premium.", "share_link")) return;
+    openModalWithFocus(modal, createBtn);
+    await loadShareLinks();
+  });
+  createBtn?.addEventListener("click", async () => {
+    try {
+      const response = await authenticatedFetch("/api/shares", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ libraryId: selectedRoomId ? Number(selectedRoomId) : null }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to create share");
+      await loadShareLinks();
+      if (data.url) {
+        await navigator.clipboard?.writeText(data.url);
+        showToast("Share link created and copied.", "success");
+      }
+    } catch (error) {
+      showToast(error.message || "Could not create share link.", "error");
+    }
+  });
+  closeBtn?.addEventListener("click", closeShareModal);
+  modal?.addEventListener("click", (e) => {
+    if (e.target === modal) closeShareModal();
+  });
+  modal?.addEventListener("keydown", (e) => {
+    trapFocusInModal(modal, e);
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      closeShareModal();
+    }
+  });
+}
+setupShareModal();
+
 async function loadLibraryData() {
   if (!currentUser?.id) return;
   try {
@@ -2079,6 +2653,12 @@ async function loadLibraryData() {
     if (error) throw error;
     myLibrary = data || [];
     setOfflineMode(false);
+    if (offlineStore) {
+      const coverEntries = listCoverPrefetchEntries().filter((entry) =>
+        /^https?:\/\//i.test(entry.sourceUrl),
+      );
+      offlineStore.prefetchMedia(coverEntries).catch(() => {});
+    }
     await persistOfflineSnapshot();
   } catch (error) {
     if (offlineStore) {
@@ -2094,6 +2674,50 @@ async function loadLibraryData() {
     }
   }
   refreshLibraryList();
+}
+
+function renderRoomFilter() {
+  const roomFilter = document.getElementById("roomFilterSelect");
+  if (!roomFilter) return;
+  const previous = selectedRoomId;
+  roomFilter.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "All rooms";
+  roomFilter.appendChild(all);
+  if (!isPremiumPlan()) {
+    const only = document.createElement("option");
+    only.value = "default";
+    only.textContent = "Default room";
+    roomFilter.appendChild(only);
+  } else {
+    myRooms.forEach((room) => {
+      const option = document.createElement("option");
+      option.value = String(room.id);
+      option.textContent = room.name || "Untitled room";
+      roomFilter.appendChild(option);
+    });
+  }
+  roomFilter.value = previous || "";
+}
+
+async function loadRooms() {
+  if (!currentUser?.id || isOfflineActive()) {
+    myRooms = [];
+    renderRoomFilter();
+    return;
+  }
+  try {
+    const response = await authenticatedFetch("/api/rooms");
+    const data = await response.json().catch(() => []);
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to load rooms");
+    }
+    myRooms = Array.isArray(data) ? data : [];
+  } catch {
+    myRooms = [];
+  }
+  renderRoomFilter();
 }
 
 async function deleteBookFromLibrary(bookId) {
@@ -2154,6 +2778,18 @@ function renderLibraryList(books) {
       openBookLookupModal(book);
     });
 
+    const coverBtn = document.createElement("button");
+    coverBtn.className = "library-lookup-btn";
+    coverBtn.type = "button";
+    coverBtn.textContent = "Cover";
+    coverBtn.title = `Set custom cover for ${book.title}`;
+    coverBtn.setAttribute("aria-label", `Set custom cover for ${book.title}`);
+    coverBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!requirePremiumFeature("Custom cover is Premium-only.", "custom_cover")) return;
+      openCustomCoverModal(book);
+    });
+
     const delBtn = document.createElement("button");
     delBtn.className = "library-delete-btn";
     delBtn.type = "button";
@@ -2192,6 +2828,7 @@ function renderLibraryList(books) {
 
     li.appendChild(titleSpan);
     actions.appendChild(lookupBtn);
+    actions.appendChild(coverBtn);
     actions.appendChild(delBtn);
     li.appendChild(actions);
     list.appendChild(li);
@@ -2200,6 +2837,48 @@ function renderLibraryList(books) {
 
 document.getElementById("searchInput")?.addEventListener("input", () => {
   refreshLibraryList();
+});
+
+document.getElementById("exportCsvBtn")?.addEventListener("click", () => {
+  exportLibraryAsCsv();
+  showToast("CSV export downloaded.", "success");
+});
+
+document.getElementById("exportJsonBtn")?.addEventListener("click", () => {
+  exportLibraryAsJson();
+  showToast("JSON export downloaded.", "success");
+});
+
+document.getElementById("roomFilterSelect")?.addEventListener("change", (e) => {
+  selectedRoomId = e.target.value || "";
+  loadLibraryMap();
+});
+
+document.getElementById("newRoomBtn")?.addEventListener("click", async () => {
+  if (!requirePremiumFeature("Rooms are Premium only.", "rooms")) return;
+  const name = await promptDialog({
+    title: "Create room",
+    hint: "Name your room (for example: Living room).",
+    initialValue: "",
+    label: "Room name",
+  });
+  if (!name) return;
+  try {
+    const response = await authenticatedFetch("/api/rooms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "Failed to create room");
+    await loadRooms();
+    selectedRoomId = String(data.id);
+    renderRoomFilter();
+    await loadLibraryMap();
+    showToast("Room created.", "success");
+  } catch (error) {
+    showToast(error.message || "Could not create room.", "error");
+  }
 });
 
 // ==========================================
@@ -2306,10 +2985,14 @@ async function loadLibraryMap() {
   let shelves = [];
   try {
     if (isOfflineActive()) throw new Error("offline");
-    const response = await supabaseClient
+    const query = supabaseClient
       .from("shelves")
       .select("*, user_books(*)")
       .eq("user_id", currentUser.id);
+    if (isPremiumPlan() && selectedRoomId) {
+      query.eq("library_id", Number(selectedRoomId));
+    }
+    const response = await query;
     if (response.error) throw response.error;
     shelves = response.data || [];
     setOfflineMode(false);
@@ -2317,6 +3000,9 @@ async function loadLibraryMap() {
     if (offlineStore) {
       const snapshot = await offlineStore.getSnapshot(currentUser.id);
       shelves = snapshot?.shelves || [];
+      if (isPremiumPlan() && selectedRoomId) {
+        shelves = shelves.filter((shelf) => String(shelf.library_id || "") === selectedRoomId);
+      }
       if (shelves.length > 0) setOfflineMode(true);
     }
   }
@@ -2365,7 +3051,9 @@ async function loadLibraryMap() {
     }
   }
   if (offlineStore && uniquePaths.length > 0) {
+    const prefetchLimit = isPremiumPlan() ? uniquePaths.length : Math.min(uniquePaths.length, 2);
     const entries = uniquePaths
+      .slice(0, prefetchLimit)
       .map((pathValue) => ({
         cacheKey: mediaCacheKeyForShelfPath(pathValue),
         sourceUrl: signedUrlByPath.get(pathValue) || "",
@@ -2399,6 +3087,7 @@ async function loadLibraryMap() {
           <button class="delete-shelf-btn shelf-icon-btn shelf-icon-btn-delete" type="button" title="Delete Shelf" aria-label="Delete this shelf and all its books">🗑️</button>
         </div>
       </div>
+      <div class="shelf-room-row"></div>
       <div class="shelf-img-wrap">
         <img draggable="false" alt="" class="shelf-img" />
         <svg class="shelf-svg-overlay" aria-hidden="true"></svg>
@@ -2407,6 +3096,40 @@ async function loadLibraryMap() {
     `;
     shelfWrapper.querySelector(".shelf-name").textContent =
       shelf.name || "Untitled Shelf";
+    const shelfRoomRow = shelfWrapper.querySelector(".shelf-room-row");
+    if (isPremiumPlan() && shelfRoomRow) {
+      const select = document.createElement("select");
+      select.className = "auth-input modal-input";
+      select.innerHTML = `<option value="">Unassigned</option>`;
+      myRooms.forEach((room) => {
+        const option = document.createElement("option");
+        option.value = String(room.id);
+        option.textContent = room.name || "Untitled room";
+        if (String(shelf.library_id || "") === String(room.id)) {
+          option.selected = true;
+        }
+        select.appendChild(option);
+      });
+      select.addEventListener("change", async () => {
+        const roomId = select.value ? Number(select.value) : null;
+        if (!roomId) return;
+        try {
+          const response = await authenticatedFetch("/api/rooms/assign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ shelfId: shelf.id, roomId }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "Failed to assign room");
+          shelf.library_id = roomId;
+          showToast("Shelf moved to room.", "success");
+          loadLibraryMap();
+        } catch (error) {
+          showToast(error.message || "Room assignment failed.", "error");
+        }
+      });
+      shelfRoomRow.appendChild(select);
+    }
 
     // Keyboard: arrows nudge the shelf; Enter renames.
     shelfWrapper.addEventListener("keydown", (e) => {
@@ -2506,7 +3229,16 @@ async function loadLibraryMap() {
           method: "POST",
           body: formData,
         });
-        const scanData = await scanRes.json();
+        const scanData = await scanRes.json().catch(() => ({}));
+        if (!scanRes.ok) {
+          if (scanData.code === "PLAN_LIMIT") {
+            showUpgradeModal({
+              reason: scanData.error || "OCR limit reached. Upgrade for more scans.",
+              featureCode: "ocr_limit",
+            });
+          }
+          throw new Error(scanData.error || "Rescan failed");
+        }
 
         currentDismissedTitles = Array.isArray(shelf.dismissed_titles)
           ? shelf.dismissed_titles
@@ -2819,10 +3551,12 @@ function showBookActionPopover(shelfWrapper, book, books) {
   actions.className = "book-popover-actions";
   actions.innerHTML = `
     <button class="popover-search-btn book-popover-search" type="button">Search</button>
+    <button class="popover-cover-btn book-popover-search" type="button">Cover</button>
     <button class="popover-del-btn book-popover-delete" type="button">Delete</button>
     <button class="popover-close-btn book-popover-close" type="button" aria-label="Close book actions">✕</button>
   `;
   actions.querySelector(".popover-search-btn").setAttribute("aria-label", `Search Google Books for ${book.title}`);
+  actions.querySelector(".popover-cover-btn").setAttribute("aria-label", `Set custom cover for ${book.title}`);
   actions.querySelector(".popover-del-btn").setAttribute("aria-label", `Delete ${book.title}`);
 
   meta.appendChild(titleEl);
@@ -2841,6 +3575,11 @@ function showBookActionPopover(shelfWrapper, book, books) {
   actions.querySelector(".popover-search-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     openBookLookupModal(book);
+  });
+  actions.querySelector(".popover-cover-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!requirePremiumFeature("Custom cover is a Premium feature.", "custom_cover")) return;
+    openCustomCoverModal(book);
   });
 
   popover

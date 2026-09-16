@@ -126,6 +126,7 @@ html, body {
 .nav-user {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 15px;
 }
 
@@ -252,6 +253,25 @@ input:focus-visible,
   cursor: pointer;
   font-weight: 600;
   color: #3f3f46;
+}
+
+.plan-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  border: 1px solid #bfdbfe;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.usage-meter {
+  font-size: 0.78rem;
+  color: var(--text-subtle);
 }
 
 /* ==========================================
@@ -903,6 +923,17 @@ input:focus-visible,
   transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
 }
 
+.sidebar-actions-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.sidebar-actions-row .auth-btn,
+.sidebar-actions-row .auth-input {
+  margin: 0;
+}
+
 /* Sidebar Search & List Styles */
 .search-input {
   width: 100%;
@@ -1266,7 +1297,7 @@ input:focus-visible,
 }
 
 .pwa-install-btn {
-  min-height: 40px;
+  min-height: 1rem;
   min-width: 96px;
   border: 1px solid var(--border-strong);
 }
@@ -1918,6 +1949,14 @@ input:focus-visible,
   .nav-user {
     flex: 1;
     justify-content: center;
+    gap: 6px;
+  }
+
+  .plan-badge,
+  .usage-meter,
+  #upgradeBtn,
+  #manageBillingBtn {
+    display: none !important;
   }
 
   .logout-btn {

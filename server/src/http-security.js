@@ -14,6 +14,14 @@ const PLAN_QUOTAS = {
   premium: { ocr: 60, books: 300 },
 };
 
+function normalizePlan(plan) {
+  return String(plan || "")
+    .trim()
+    .toLowerCase() === "premium"
+    ? "premium"
+    : "free";
+}
+
 function getBearerToken(authorizationHeader) {
   if (typeof authorizationHeader !== "string") return null;
 
@@ -62,11 +70,17 @@ function createImageUpload() {
 }
 
 function getUserPlan(user) {
-  const planValue = String(user?.app_metadata?.plan || "")
-    .trim()
-    .toLowerCase();
-  if (planValue === "premium") return "premium";
-  return "free";
+  return normalizePlan(user?.app_metadata?.plan);
+}
+
+function requirePremium(req, res, next) {
+  const plan = getUserPlan(req.user);
+  if (plan === "premium") return next();
+  return res.status(403).json({
+    error: "This feature requires Premium.",
+    code: "FEATURE_LOCKED",
+    plan,
+  });
 }
 
 function createPlanRateLimiter({
@@ -85,7 +99,8 @@ function createPlanRateLimiter({
     standardHeaders: true,
     legacyHeaders: false,
     handler: (req, res) => {
-      res.status(429).json({ error: message });
+      const plan = getUserPlan(req.user);
+      res.status(429).json({ error: message, code: "PLAN_LIMIT", plan });
     },
   });
 }
@@ -121,7 +136,7 @@ function sniffImageMime(buffer) {
 function setSecurityHeaders(req, res, next) {
   res.set({
     "Content-Security-Policy":
-      "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data: blob: https://*.supabase.co https://*.google.com https://*.googleusercontent.com https://*.gstatic.com; connect-src 'self' https://*.supabase.co; worker-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+      "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data: blob: https://*.supabase.co https://*.google.com https://*.googleusercontent.com https://*.gstatic.com; connect-src 'self' https://*.supabase.co https://api.stripe.com; frame-src https://checkout.stripe.com https://billing.stripe.com; worker-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self' https://checkout.stripe.com https://billing.stripe.com",
     "Cross-Origin-Opener-Policy": "same-origin",
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
     "Referrer-Policy": "no-referrer",
@@ -151,9 +166,11 @@ module.exports = {
   MAX_IMAGE_BYTES,
   MAX_IMAGE_PIXELS,
   PLAN_QUOTAS,
+  normalizePlan,
   createPlanRateLimiter,
   createImageUpload,
   createRequireAuth,
+  requirePremium,
   getUserPlan,
   getBearerToken,
   handleUploadError,
