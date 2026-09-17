@@ -17,7 +17,7 @@
     installBtn = document.createElement("button");
     installBtn.id = "pwaInstallBtn";
     installBtn.type = "button";
-    installBtn.className = "logout-btn pwa-install-btn";
+    installBtn.className = "pwa-install-btn";
     installBtn.textContent = "Install";
     installBtn.hidden = true;
     installBtn.addEventListener("click", async () => {

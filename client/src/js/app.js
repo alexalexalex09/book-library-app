@@ -41,6 +41,13 @@ const BOOK_COVER_PLACEHOLDER =
     '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="70"><rect width="100%" height="100%" fill="#e5e7eb"/><text x="50%" y="52%" text-anchor="middle" font-size="9" fill="#71717a">No cover</text></svg>',
   );
 const FREE_SEARCH_ALL_LIMIT = 5;
+const FOLIO_COLORS = {
+  primary: "#8b3a2f",
+  success: "#6f8753",
+  warning: "#9d7138",
+  mapDefaultFill: "rgba(139, 58, 47, 0.2)",
+  mapSelectedFill: "rgba(111, 135, 83, 0.35)",
+};
 
 function isOfflineActive() {
   return offlineMode || !navigator.onLine;
@@ -215,6 +222,61 @@ async function createShelfSignedUrl(path, expiresIn = 3600) {
   return data?.signedUrl || "";
 }
 
+async function renderScanPastShelves(shelves = [], signedUrlByPath = new Map()) {
+  const list = document.getElementById("scanPastShelves");
+  if (!list) return;
+  list.innerHTML = "";
+
+  if (!Array.isArray(shelves) || shelves.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "scan-past-item scan-past-empty";
+    empty.innerHTML = "<span><small>No saved shelves yet.</small></span>";
+    list.appendChild(empty);
+    return;
+  }
+
+  const entries = shelves.slice(0, 8);
+  for (const shelf of entries) {
+    const item = document.createElement("li");
+    item.className = "scan-past-item";
+
+    const img = document.createElement("img");
+    const pathValue = storagePathFromShelfImage(shelf?.image_url);
+    const cacheKey = mediaCacheKeyForShelfPath(pathValue);
+    let imageSrc = signedUrlByPath.get(pathValue) || "";
+    if (!imageSrc && /^https?:\/\//i.test(String(shelf?.image_url || ""))) {
+      imageSrc = shelf.image_url;
+    }
+    if (!imageSrc && offlineStore && cacheKey) {
+      imageSrc = (await offlineStore.getCachedMediaBlobUrl(cacheKey)) || "";
+    }
+    img.src =
+      imageSrc ||
+      "data:image/svg+xml," +
+        encodeURIComponent(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="28"><rect width="100%" height="100%" fill="#efe4d2"/><text x="50%" y="55%" text-anchor="middle" font-size="8" fill="#8f7f67">Shelf</text></svg>',
+        );
+    img.alt = `${shelf?.name || "Shelf"} thumbnail`;
+
+    const text = document.createElement("span");
+    const title = document.createElement("strong");
+    title.textContent = shelf?.name || "Untitled shelf";
+    const count = Array.isArray(shelf?.user_books)
+      ? shelf.user_books.length
+      : Array.isArray(shelf?.detected_spines)
+        ? shelf.detected_spines.length
+        : 0;
+    const meta = document.createElement("small");
+    meta.textContent = `${count} book${count === 1 ? "" : "s"}`;
+
+    text.appendChild(title);
+    text.appendChild(meta);
+    item.appendChild(img);
+    item.appendChild(text);
+    list.appendChild(item);
+  }
+}
+
 function spinesForStorage(spines) {
   return (spines || []).map((spine) => ({
     title: spine.title || "",
@@ -336,6 +398,9 @@ function buildUsageText(action) {
 function renderBillingNav() {
   const badge = document.getElementById("planBadge");
   const usageMeter = document.getElementById("usageMeter");
+  const usageRing = document.getElementById("usageRingProgress");
+  const usageRingValue = document.getElementById("usageRingValue");
+  const accountInitial = document.getElementById("accountInitial");
   const upgradeBtn = document.getElementById("upgradeBtn");
   const manageBtn = document.getElementById("manageBillingBtn");
   if (!badge || !usageMeter || !upgradeBtn || !manageBtn) return;
@@ -349,7 +414,21 @@ function renderBillingNav() {
     : isPremiumPlan()
       ? "Premium"
       : "Free";
-  usageMeter.textContent = `OCR ${buildUsageText("ocr")} · Search ${buildUsageText("books")}`;
+  const ocrUsage = usageState.ocr;
+  const ocrLimit = Number.isFinite(ocrUsage?.limit) ? ocrUsage.limit : billingState.quotas?.ocr || 0;
+  const ocrRemaining = Number.isFinite(ocrUsage?.remaining) ? ocrUsage.remaining : ocrLimit;
+  const ocrUsed = Math.max(0, ocrLimit - ocrRemaining);
+  usageMeter.textContent = `${ocrUsed}/${ocrLimit} scans`;
+  if (usageRing) {
+    const ratio = ocrLimit > 0 ? Math.min(1, ocrUsed / ocrLimit) : 0;
+    const circumference = 62.8;
+    usageRing.style.strokeDashoffset = String(circumference - ratio * circumference);
+  }
+  if (usageRingValue) usageRingValue.textContent = String(ocrUsed);
+  if (accountInitial) {
+    const initial = (currentUser?.email || "A").trim().charAt(0).toUpperCase();
+    accountInitial.textContent = initial || "A";
+  }
 
   const free = !isPremiumPlan();
   upgradeBtn.classList.toggle("hidden-element", !free);
@@ -359,6 +438,37 @@ function renderBillingNav() {
   const shareBtn = document.getElementById("shareLibraryBtn");
   if (roomBtn) roomBtn.textContent = free ? "New room (Premium)" : "New room";
   if (shareBtn) shareBtn.textContent = free ? "Share (Premium)" : "Share library";
+}
+
+function setupAccountMenu() {
+  const menuBtn = document.getElementById("accountMenuBtn");
+  const menu = document.getElementById("accountMenu");
+  if (!menuBtn || !menu) return;
+
+  const closeMenu = () => {
+    menu.classList.add("hidden-element");
+    menuBtn.setAttribute("aria-expanded", "false");
+  };
+
+  const openMenu = () => {
+    menu.classList.remove("hidden-element");
+    menuBtn.setAttribute("aria-expanded", "true");
+  };
+
+  menuBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (menu.classList.contains("hidden-element")) openMenu();
+    else closeMenu();
+  });
+
+  menu.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  window.addEventListener("click", closeMenu);
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeMenu();
+  });
 }
 
 function requirePremiumFeature(featureLabel, featureCode) {
@@ -639,6 +749,7 @@ function setupBillingUi() {
   });
 }
 setupBillingUi();
+setupAccountMenu();
 
 function confirmDialog({ title = "Please confirm", message = "Are you sure?", confirmLabel = "Delete", cancelLabel = "Cancel" } = {}) {
   const modal = document.getElementById("confirmModal");
@@ -1019,17 +1130,54 @@ document.querySelectorAll(".nav-btn[data-target]").forEach((btn) => {
   });
 });
 
-// Scan progress: 1 Upload -> 2 Review spines -> 3 Save shelf
+// Scan progress: 1 Upload -> 2 Review & save
 function updateScanSteps() {
   const stepsEl = document.getElementById("scanSteps");
+  const uploadView = document.getElementById("uploadView");
+  const analyseBtn = document.getElementById("analyseShelfBtn");
+  const sidebarStepNumber = document.getElementById("scanSidebarStepNumber");
+  const sidebarStepName = document.getElementById("scanSidebarStepName");
+  const wizardStepNumber = document.getElementById("scanWizardStepNumber");
+  const wizardStepName = document.getElementById("scanWizardStepName");
+  const wizardStepDescription = document.getElementById("scanWizardStepDescription");
   if (!stepsEl) return;
   const hasImage = Boolean(currentLoadedImage || currentUploadedFile);
   const hasSpines = hasImage && currentDetectedSpines.length > 0;
   const states = {
     upload: hasImage ? "done" : "active",
-    review: !hasImage ? "todo" : hasSpines ? "done" : "active",
-    save: hasSpines ? "active" : "todo",
+    review: !hasImage ? "todo" : "active",
   };
+  if (uploadView) {
+    const stage = !hasImage ? "upload" : "review";
+    uploadView.setAttribute("data-scan-stage", stage);
+    const stageMeta = {
+      upload: {
+        number: "Step 1 of 2",
+        name: "Upload photo",
+        title: "Photograph your shelf",
+        description:
+          "Take a straight-on shot of one shelf with spines facing forward. Decent light, no glare. That's all it takes.",
+      },
+      review: {
+        number: "Step 2 of 2",
+        name: "Review books",
+        title: "Review detected spines",
+        description:
+          "Confirm the detected titles and skip any misreads before saving this shelf.",
+      },
+    }[stage];
+    if (stageMeta) {
+      if (sidebarStepNumber) sidebarStepNumber.textContent = stageMeta.number;
+      if (sidebarStepName) sidebarStepName.textContent = stageMeta.name;
+      if (wizardStepNumber) wizardStepNumber.textContent = stageMeta.number;
+      if (wizardStepName) wizardStepName.textContent = stageMeta.title;
+      if (wizardStepDescription) wizardStepDescription.textContent = stageMeta.description;
+    }
+  }
+  if (analyseBtn) {
+    analyseBtn.disabled = !hasImage;
+    analyseBtn.textContent = hasSpines ? "Ready to Save Shelf" : hasImage ? "Review Spines" : "Analyse shelf";
+  }
   stepsEl.querySelectorAll(".scan-step").forEach((step) => {
     const key = step.getAttribute("data-step");
     step.classList.remove("is-active", "is-done");
@@ -1078,12 +1226,25 @@ const placeholderText = document.getElementById("placeholderText");
 const canvasControls = document.getElementById("canvasControls");
 const zoomSlider = document.getElementById("zoomSlider");
 const resetZoomBtn = document.getElementById("resetZoomBtn");
+const analyseShelfBtn = document.getElementById("analyseShelfBtn");
 
 let currentUploadedFile = null;
 let currentLoadedImage = null;
 let currentDetectedSpines = [];
 let currentUploadedImageHash = null;
 let scanQueue = [];
+
+analyseShelfBtn?.addEventListener("click", () => {
+  if (currentDetectedSpines.length > 0) {
+    saveShelfToDatabase();
+    return;
+  }
+  if (currentLoadedImage) {
+    openCropModalForCurrentImage({ forceRescan: true });
+    return;
+  }
+  imageUpload?.click();
+});
 
 // Canvas Viewport & Editing State
 let canvasState = {
@@ -1250,15 +1411,11 @@ function redrawCanvasOverlays(highlightedIndex = null) {
     const isSelected = index === activeEditingSpineIndex;
     const isHighlighted = isSelected || index === highlightedIndex;
     const strokeColor = isSelected
-      ? "#10b981"
+      ? FOLIO_COLORS.success
       : isHighlighted
-        ? "#f59e0b"
-        : "#3b82f6";
-    const fillColor = isHighlighted
-      ? isSelected
-        ? "rgba(16, 185, 129, 0.25)"
-        : "rgba(245, 158, 11, 0.35)"
-      : null;
+        ? FOLIO_COLORS.warning
+        : FOLIO_COLORS.primary;
+    const fillColor = isHighlighted ? "rgba(139, 58, 47, 0.24)" : null;
     const lineWidth =
       (isHighlighted ? baseThickness * 2 : baseThickness) / canvasState.scale;
 
@@ -1291,7 +1448,7 @@ function redrawCanvasOverlays(highlightedIndex = null) {
           ctx.fillStyle = "#ffffff";
           ctx.fill();
           ctx.lineWidth = 4 / canvasState.scale;
-          ctx.strokeStyle = "#10b981";
+          ctx.strokeStyle = FOLIO_COLORS.success;
           ctx.stroke();
         });
       }
@@ -1582,7 +1739,7 @@ function renderDetectedSpines(options = {}) {
 
   // Step 2 header: review progress within the 1-2-3 flow
   const stepHint = document.createElement("p");
-  stepHint.textContent = "Step 2 of 3 — review each spine, then save the shelf once.";
+  stepHint.textContent = "Step 2 of 2 — review each spine, then save the shelf once.";
   stepHint.className = "spines-step-hint";
   container.appendChild(stepHint);
 
@@ -1786,20 +1943,6 @@ function renderDetectedSpines(options = {}) {
     spinesScroll.appendChild(div);
   });
 
-  // Step 3: one sticky save action for the whole shelf.
-  const stickySave = document.createElement("div");
-  stickySave.className = "spines-sticky-save";
-  const saveBtn = document.createElement("button");
-  saveBtn.textContent = `Save Shelf to Library (${currentDetectedSpines.length})`;
-  saveBtn.className = "auth-btn primary-btn save-shelf-btn";
-  saveBtn.type = "button";
-  saveBtn.onclick = saveShelfToDatabase;
-  const saveCount = document.createElement("span");
-  saveCount.className = "spines-save-count";
-  saveCount.textContent = "Step 3 of 3 — all spines above will be saved together.";
-  stickySave.appendChild(saveBtn);
-  stickySave.appendChild(saveCount);
-  container.appendChild(stickySave);
   if (preserveScroll) spinesScroll.scrollTop = savedScrollTop;
 }
 
@@ -1892,7 +2035,7 @@ function drawCropOverlay() {
     );
 
     // Draw selection stroke border
-    cropCtx.strokeStyle = "#3b82f6";
+    cropCtx.strokeStyle = FOLIO_COLORS.primary;
     cropCtx.lineWidth = 3;
     cropCtx.setLineDash([6, 6]);
     cropCtx.strokeRect(
@@ -2116,12 +2259,16 @@ async function saveShelfToDatabase() {
     return;
   }
 
-  // Update all save buttons to loading state
+  // Update save triggers to loading state
   const saveBtns = document.querySelectorAll(".save-shelf-btn");
-  saveBtns.forEach(btn => {
+  saveBtns.forEach((btn) => {
     btn.disabled = true;
     btn.textContent = "Saving Shelf & Books...";
   });
+  if (analyseShelfBtn) {
+    analyseShelfBtn.disabled = true;
+    analyseShelfBtn.textContent = "Saving Shelf & Books...";
+  }
 
   try {
     const fileName = currentUploadedImageHash
@@ -2267,14 +2414,18 @@ async function saveShelfToDatabase() {
     console.error("Save failed:", err);
     showToast("An unexpected error occurred while saving.", "error");
   } finally {
-    // Restore the single sticky save button
+    // Restore save trigger labels
     const saveBtns = document.querySelectorAll(".save-shelf-btn");
-    saveBtns.forEach(btn => {
+    saveBtns.forEach((btn) => {
       btn.disabled = false;
       btn.textContent = currentDetectedSpines.length > 0
         ? `Save Shelf to Library (${currentDetectedSpines.length})`
         : "Save Shelf to Library";
     });
+    if (analyseShelfBtn && currentDetectedSpines.length === 0) {
+      analyseShelfBtn.disabled = true;
+      analyseShelfBtn.textContent = "Analyse shelf";
+    }
     updateScanSteps();
   }
 }
@@ -2907,8 +3058,8 @@ function deselectAllMapBooks() {
   document.querySelectorAll(".shelf-svg-overlay").forEach((svg) => {
     svg.querySelectorAll("circle").forEach((c) => c.remove());
     svg.querySelectorAll("polygon").forEach((poly) => {
-      poly.setAttribute("fill", "rgba(59, 130, 246, 0.2)");
-      poly.setAttribute("stroke", "#3b82f6");
+      poly.setAttribute("fill", FOLIO_COLORS.mapDefaultFill);
+      poly.setAttribute("stroke", FOLIO_COLORS.primary);
       poly.setAttribute("stroke-width", "2");
     });
   });
@@ -2918,7 +3069,7 @@ function redrawMapFocus(shelfWrapper, focusedEl) {
   if (!shelfWrapper) return;
   shelfWrapper.querySelectorAll("polygon").forEach((poly) => {
     if (poly === focusedEl) poly.setAttribute("stroke-width", "4");
-    else if (poly.getAttribute("stroke") === "#10b981") poly.setAttribute("stroke-width", "3");
+    else if (poly.getAttribute("stroke") === FOLIO_COLORS.success) poly.setAttribute("stroke-width", "3");
     else poly.setAttribute("stroke-width", "2");
   });
 }
@@ -2959,7 +3110,7 @@ function zoomToShelfOnMap(shelfId) {
   mapViewport.style.transition = "transform 0.4s ease-in-out";
   mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
 
-  shelfWrapper.style.border = "2px solid #10b981";
+  shelfWrapper.style.border = `2px solid ${FOLIO_COLORS.success}`;
   setTimeout(() => {
     mapViewport.style.transition = "none";
     shelfWrapper.style.border = "1px solid #e4e4e7";
@@ -3049,6 +3200,8 @@ async function loadLibraryMap() {
       .filter((entry) => entry.cacheKey && entry.sourceUrl);
     offlineStore.prefetchMedia(entries).catch(() => {});
   }
+
+  await renderScanPastShelves(shelfList, signedUrlByPath);
 
   shelfList.forEach((shelf, index) => {
     const startX = shelf.map_x ?? index * 350 + 50;
@@ -3637,9 +3790,9 @@ function renderShelfSvgOverlays(
     polyEl.setAttribute("points", pointsAttr);
     polyEl.setAttribute(
       "fill",
-      isSelected ? "rgba(16, 185, 129, 0.35)" : "rgba(59, 130, 246, 0.2)",
+      isSelected ? FOLIO_COLORS.mapSelectedFill : FOLIO_COLORS.mapDefaultFill,
     );
-    polyEl.setAttribute("stroke", isSelected ? "#10b981" : "#3b82f6");
+    polyEl.setAttribute("stroke", isSelected ? FOLIO_COLORS.success : FOLIO_COLORS.primary);
     polyEl.setAttribute("stroke-width", isSelected ? "3" : "2");
     polyEl.style.cursor = "pointer";
     polyEl.style.pointerEvents = "auto";
@@ -3679,7 +3832,7 @@ function renderShelfSvgOverlays(
         circle.setAttribute("cy", pt.y * renderedHeight);
         circle.setAttribute("r", "8");
         circle.setAttribute("fill", "#ffffff");
-        circle.setAttribute("stroke", "#10b981");
+        circle.setAttribute("stroke", FOLIO_COLORS.success);
         circle.setAttribute("stroke-width", "3");
         circle.style.cursor = "grab";
         circle.style.pointerEvents = "auto";
