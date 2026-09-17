@@ -401,6 +401,8 @@ function renderBillingNav() {
   const usageRing = document.getElementById("usageRingProgress");
   const usageRingValue = document.getElementById("usageRingValue");
   const accountInitial = document.getElementById("accountInitial");
+  const accountScansRemaining = document.getElementById("accountScansRemaining");
+  const accountUpgradeLink = document.getElementById("accountUpgradeLink");
   const upgradeBtn = document.getElementById("upgradeBtn");
   const manageBtn = document.getElementById("manageBillingBtn");
   if (!badge || !usageMeter || !upgradeBtn || !manageBtn) return;
@@ -419,6 +421,9 @@ function renderBillingNav() {
   const ocrRemaining = Number.isFinite(ocrUsage?.remaining) ? ocrUsage.remaining : ocrLimit;
   const ocrUsed = Math.max(0, ocrLimit - ocrRemaining);
   usageMeter.textContent = `${ocrUsed}/${ocrLimit} scans`;
+  if (accountScansRemaining) {
+    accountScansRemaining.textContent = `Scans remaining: ${Math.max(0, ocrRemaining)}`;
+  }
   if (usageRing) {
     const ratio = ocrLimit > 0 ? Math.min(1, ocrUsed / ocrLimit) : 0;
     const circumference = 62.8;
@@ -432,6 +437,7 @@ function renderBillingNav() {
 
   const free = !isPremiumPlan();
   upgradeBtn.classList.toggle("hidden-element", !free);
+  accountUpgradeLink?.classList.toggle("hidden-element", !free);
   manageBtn.classList.toggle("hidden-element", free);
 
   const roomBtn = document.getElementById("newRoomBtn");
@@ -726,6 +732,7 @@ async function openBillingPortal() {
 
 function setupBillingUi() {
   const upgradeBtn = document.getElementById("upgradeBtn");
+  const upgradeLink = document.getElementById("accountUpgradeLink");
   const manageBtn = document.getElementById("manageBillingBtn");
   const modal = document.getElementById("upgradeModal");
   const monthlyBtn = document.getElementById("upgradeMonthlyBtn");
@@ -733,6 +740,7 @@ function setupBillingUi() {
   const cancelBtn = document.getElementById("upgradeCancelBtn");
 
   upgradeBtn?.addEventListener("click", () => showUpgradeModal());
+  upgradeLink?.addEventListener("click", () => showUpgradeModal());
   manageBtn?.addEventListener("click", () => openBillingPortal());
   monthlyBtn?.addEventListener("click", () => startCheckout("month"));
   annualBtn?.addEventListener("click", () => startCheckout("year"));
@@ -1188,7 +1196,7 @@ function updateScanSteps() {
   });
 }
 
-function showLoadingOverlay(message = "Analyzing bookshelf image with AI...") {
+function showLoadingOverlay(message = "Scanning Books...") {
   let overlay = document.getElementById("loadingOverlay");
   if (!overlay) {
     overlay = document.createElement("div");
@@ -1738,10 +1746,6 @@ function renderDetectedSpines(options = {}) {
   redrawCanvasOverlays(null);
 
   // Step 2 header: review progress within the 1-2-3 flow
-  const stepHint = document.createElement("p");
-  stepHint.textContent = "Step 2 of 2 — review each spine, then save the shelf once.";
-  stepHint.className = "spines-step-hint";
-  container.appendChild(stepHint);
 
   // Toolbar
   const header = document.createElement("div");
@@ -2168,7 +2172,7 @@ applyCropBtn?.addEventListener("click", async () => {
   );
 
   closeCropModal();
-  showLoadingOverlay("Cropping image & re-running AI scan...");
+  showLoadingOverlay("Scanning books...");
 
   offCanvas.toBlob(
     async (blob) => {

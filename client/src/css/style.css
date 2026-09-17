@@ -307,7 +307,7 @@ input:focus-visible,
 .auth-input {
   width: 100%;
   padding: 10px 14px;
-  margin-bottom: 12px;
+  margin-bottom: 0px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   font-size: 0.95rem;
@@ -327,7 +327,7 @@ input:focus-visible,
   cursor: pointer;
   border: none;
   transition: opacity 0.2s;
-  margin: 1em 0em;
+  margin-top: 5px;
 }
 
 .primary-btn {
@@ -886,7 +886,7 @@ input:focus-visible,
 }
 
 .sidebar-header {
-  padding: 12px 16px;
+  padding: 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -917,7 +917,7 @@ input:focus-visible,
 }
 
 .sidebar-content {
-  padding: 0 16px 16px;
+  padding: 25px 16px 16px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -2068,13 +2068,13 @@ input:focus-visible,
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    line-height: 1.2;
+    line-height: 1;
   }
 
   .spines-batch-actions .maximize-spines-btn.spine-icon-btn {
     height: auto;
     width: auto;
-    min-width: 0;
+    min-width: 7em;
   }
 
   .nav-brand, 
@@ -2094,7 +2094,7 @@ input:focus-visible,
     right: 12px;
     left: 12px;
     width: auto;
-    border-radius: 16px 16px 0 0;
+    border-radius: 16px;
     z-index: 900;
     box-shadow: 0 -4px 15px rgba(0, 0, 0, 0.1);
   }
@@ -2103,18 +2103,6 @@ input:focus-visible,
     cursor: pointer;
     position: relative;
     padding-top: 18px;
-  }
-
-  .sheet-handle {
-    display: block;
-    position: absolute;
-    top: 7px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 44px;
-    height: 4px;
-    border-radius: 999px;
-    background: #cbd5e1;
   }
   
   /* Collapsible State Handled by app.js */
@@ -2403,6 +2391,29 @@ body {
   color: var(--text);
 }
 
+.account-menu-meta {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-subtle);
+  padding: 4px 2px 6px;
+}
+
+.account-menu-link {
+  width: fit-content;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: underline;
+  padding: 0 2px 4px;
+  cursor: pointer;
+}
+
+.account-menu-link.hidden-element {
+  display: none !important;
+}
+
 .nav-user-email {
   margin: 0;
   color: var(--text-subtle);
@@ -2658,12 +2669,12 @@ body {
   background: var(--surface-muted);
   border: 2px dashed var(--border-strong);
   border-radius: 10px;
-  min-height: 330px;
+  min-height: 27vh;
   max-height: none;
 }
 
 #shelfCanvas {
-  max-height: 500px;
+  max-height: 25vh;
 }
 
 .canvas-container.drag-over {
@@ -2743,7 +2754,7 @@ body {
   margin-top: 0;
   border: 1px solid var(--border);
   border-radius: 10px;
-  max-height: 520px;
+  max-height: 35vh;
 }
 
 #uploadView[data-scan-stage="upload"] #pendingContainer {

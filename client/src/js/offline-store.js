@@ -83,6 +83,19 @@
     return new Request(new URL(cacheKey, global.location.origin).toString());
   }
 
+  function isAllowedCacheFetchHost(sourceUrl) {
+    try {
+      const parsed = new URL(sourceUrl, global.location.origin);
+      const host = parsed.host.toLowerCase();
+      const origin = parsed.origin.toLowerCase();
+      const pageOrigin = global.location.origin.toLowerCase();
+      if (origin === pageOrigin) return true;
+      return host.endsWith(".supabase.co");
+    } catch {
+      return false;
+    }
+  }
+
   async function getCachedMediaBlobUrl(cacheKey) {
     if (!cacheKey || !("caches" in global)) return "";
     const cache = await caches.open(MEDIA_CACHE);
@@ -94,6 +107,16 @@
 
   async function cacheMediaFromUrl(cacheKey, sourceUrl) {
     if (!cacheKey || !sourceUrl || !("caches" in global)) return "";
+    const sourceHost = (() => {
+      try {
+        return new URL(sourceUrl).host;
+      } catch {
+        return "invalid";
+      }
+    })();
+    if (!isAllowedCacheFetchHost(sourceUrl)) {
+      return "";
+    }
     const response = await fetch(sourceUrl);
     if (!response.ok) throw new Error(`Failed to fetch media (${response.status})`);
     const cache = await caches.open(MEDIA_CACHE);
@@ -116,7 +139,8 @@
 
   async function prefetchMedia(entries) {
     if (!Array.isArray(entries) || entries.length === 0) return;
-    for (const entry of entries) {
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
       const key = entry?.cacheKey;
       const url = entry?.sourceUrl;
       if (!key || !url) continue;

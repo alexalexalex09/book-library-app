@@ -36,7 +36,6 @@
   }
 
   window.addEventListener("beforeinstallprompt", (event) => {
-    event.preventDefault();
     deferredInstallPrompt = event;
     const button = ensureInstallButton();
     if (button) button.hidden = false;
