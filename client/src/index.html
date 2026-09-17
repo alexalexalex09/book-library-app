@@ -7,7 +7,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>HiLibrary</title>
+  <title>TomeHound</title>
+  <meta name="apple-mobile-web-app-title" content="TomeHound">
   
   <!-- CSS Stylesheet -->
   <link rel="stylesheet" href="css/style.css?v=13">
@@ -34,9 +35,9 @@
       <div class="auth-card">
         <div class="auth-header">
           <div class="brand-lockup">
-            <img src="/img/logo.svg" alt="HiLibrary Icon" class="brand-lockup-logo" />
+            <img src="/img/logo.svg" alt="TomeHound Icon" class="brand-lockup-logo" />
             <span class="brand-lockup-word">
-              <strong class="brand-lockup-hi">Hi</strong><span class="brand-lockup-library">Library</span>
+              <strong class="brand-lockup-hi">Tome</strong><span class="brand-lockup-library">Hound</span>
             </span>
           </div>
           <p>Your physical library, digitally enhanced.</p>
@@ -81,9 +82,9 @@
     <!-- Top Navigation -->
     <nav class="app-nav">
       <div class="nav-brand">
-        <img src="/img/HiLibraryLogo.svg" alt="HiLibrary logo" class="brand-logo nav-brand-logo" />
+        <img src="/img/HiLibraryLogo.svg" alt="TomeHound logo" class="brand-logo nav-brand-logo" />
         <span class="nav-brand-word">
-          <strong class="brand-lockup-hi">Hi</strong><span class="brand-lockup-library">Library</span>
+          <strong class="brand-lockup-hi">Tome</strong><span class="brand-lockup-library">Hound</span>
         </span>
       </div>
       <div class="nav-links">
@@ -176,38 +177,28 @@
 
             <div class="scan-wizard-body">
               <div class="scan-main-panel">
-                <label class="auth-btn primary-btn upload-label-btn">
-                  <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-                  <span>Upload Image</span>
-                  <input type="file" id="imageUpload" accept="image/*" class="visually-hidden-input" multiple />
-                </label>
-
                 <div class="canvas-container" id="canvasDropzone">
-            <button id="cropCanvasBtn" class="crop-canvas-btn" title="Crop Image" aria-label="Crop Image">
-              <img src="img/noun_Crop_1935400.svg" alt="Crop" class="crop-icon" />
-            </button>
-
-            <div id="placeholderText" class="dropzone-empty-state clickable-dropzone" role="button" tabindex="0" aria-label="Upload a shelf photo. Activate to choose an image, or drag and drop an image here.">
-              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="dropzone-icon" aria-hidden="true">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                <polyline points="21 15 16 10 5 21"></polyline>
-              </svg>
-              <h3>Upload a shelf photo</h3>
-              <p>Click anywhere here or drag &amp; drop an image to begin mapping spines</p>
-              <span class="dropzone-cta">
-                <span class="auth-btn primary-btn dropzone-cta-btn">Choose image</span>
-                <span class="dropzone-hint">JPG or PNG, or drag &amp; drop</span>
-              </span>
-            </div>
+                  <div id="placeholderText" class="dropzone-empty-state clickable-dropzone" role="button" tabindex="0" aria-label="Upload a shelf photo. Activate to choose an image, or drag and drop an image here.">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="dropzone-icon" aria-hidden="true">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                      <polyline points="21 15 16 10 5 21"></polyline>
+                    </svg>
+                    <h3>Upload a shelf photo</h3>
+                    <p>Click anywhere here or drag &amp; drop an image to begin mapping spines</p>
+                    <span class="dropzone-cta">
+                      <span class="auth-btn primary-btn dropzone-cta-btn">Choose image</span>
+                      <span class="dropzone-hint">JPG or PNG, or drag &amp; drop</span>
+                    </span>
+                  </div>
             
-            <canvas id="shelfCanvas" class="canvas-hidden"></canvas>
+                  <canvas id="shelfCanvas" class="canvas-hidden"></canvas>
 
-            <div id="canvasControls" class="canvas-controls-bar hidden-element">
-              <label for="zoomSlider">Zoom:</label>
-              <input type="range" id="zoomSlider" class="zoom-range" min="1" max="4" step="0.1" value="1" />
-              <button id="resetZoomBtn" class="zoom-reset-btn" type="button">Reset</button>
-            </div>
+                  <div id="canvasControls" class="canvas-controls-bar hidden-element">
+                    <label for="zoomSlider">Zoom:</label>
+                    <input type="range" id="zoomSlider" class="zoom-range" min="1" max="4" step="0.1" value="1" />
+                    <button id="resetZoomBtn" class="zoom-reset-btn" type="button">Reset</button>
+                  </div>
                 </div>
 
                 <div class="scan-footer-row">
@@ -375,14 +366,32 @@
   </div>
 
   <div id="upgradeModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="upgradeModalTitle">
-    <div class="modal-content modal-dialog" role="document">
+    <div class="modal-content modal-dialog upgrade-modal-dialog" role="document">
       <h2 id="upgradeModalTitle" class="modal-title">Choose your Premium plan</h2>
       <p class="modal-message">Start a 7-day free trial. Cancel anytime.</p>
-      <div class="sidebar-actions-row">
-        <button id="upgradeMonthlyBtn" class="auth-btn primary-btn modal-btn" type="button">Monthly · Then $5/mo</button>
+      <div class="upgrade-summary" aria-label="Free and Premium comparison">
+        <div class="upgrade-plan-col">
+          <h3 class="upgrade-plan-title">Free <span id="freePlanCurrentLabel" class="upgrade-current-plan hidden-element">(Your plan)</span></h3>
+          <ul class="upgrade-plan-list">
+            <li>10 OCR scans per month</li>
+            <li>60 book searches per month</li>
+            <li>Basic scan and map tools</li>
+          </ul>
+        </div>
+        <div class="upgrade-plan-col upgrade-plan-col-premium">
+          <h3 class="upgrade-plan-title">Premium <span id="premiumPlanCurrentLabel" class="upgrade-current-plan hidden-element">(Your plan)</span></h3>
+          <ul class="upgrade-plan-list">
+            <li>60 OCR scans per month</li>
+            <li>300 book searches per month</li>
+            <li>Rooms, sharing, custom covers, and priority tools</li>
+          </ul>
+        </div>
       </div>
       <div class="sidebar-actions-row">
-        <button id="upgradeAnnualBtn" class="auth-btn primary-btn modal-btn" type="button">Annual · Then $50/yr</button>
+        <button id="upgradeMonthlyBtn" class="auth-btn primary-btn modal-btn" type="button">Monthly · 7 day free trial then $5/mo</button>
+      </div>
+      <div class="sidebar-actions-row">
+        <button id="upgradeAnnualBtn" class="auth-btn primary-btn modal-btn" type="button">Annual · 7 day free trial then $50/yr</button>
       </div>
       <div class="modal-actions">
         <button id="upgradeCancelBtn" class="auth-btn secondary-btn modal-btn" type="button">Close</button>

@@ -69,7 +69,6 @@ html, body {
 }
 
 .view-section {
-  min-height: 100dvh;
   padding-top: 80px; /* Room for top nav on desktop */
   padding-bottom: 40px;
   box-sizing: border-box;
@@ -929,6 +928,7 @@ input:focus-visible,
   display: flex;
   gap: 8px;
   align-items: center;
+  margin: 6px 0px;
 }
 
 .sidebar-actions-row .auth-btn,
@@ -1121,6 +1121,57 @@ input:focus-visible,
 
 .modal-dialog {
   gap: 4px;
+}
+
+.upgrade-modal-dialog {
+  max-width: min(640px, calc(100vw - 32px));
+}
+
+.upgrade-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 4px 0 10px;
+}
+
+.upgrade-plan-col {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px 12px;
+}
+
+.upgrade-plan-col-premium {
+  border-color: rgba(139, 58, 47, 0.35);
+  background: rgba(139, 58, 47, 0.06);
+}
+
+.upgrade-plan-title {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.upgrade-current-plan {
+  display: inline-block;
+  margin-left: 6px;
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--primary);
+  letter-spacing: 0;
+}
+
+.upgrade-plan-list {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+  line-height: 1.4;
 }
 
 .icon-btn {
@@ -2903,6 +2954,10 @@ body {
 @media (max-width: 768px) {
   .scan-folio-sidebar {
     display: none;
+  }
+
+  .upgrade-summary {
+    grid-template-columns: 1fr;
   }
 
   .main-content {

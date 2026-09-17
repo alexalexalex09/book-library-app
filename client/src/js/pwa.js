@@ -55,7 +55,7 @@
       const hint = document.createElement("div");
       hint.className = "pwa-ios-hint";
       hint.innerHTML =
-        "<span>Install HiLibrary: tap Share, then Add to Home Screen.</span><button type='button' class='pwa-ios-hint-close' aria-label='Dismiss install hint'>Dismiss</button>";
+        "<span>Install TomeHound: tap Share, then Add to Home Screen.</span><button type='button' class='pwa-ios-hint-close' aria-label='Dismiss install hint'>Dismiss</button>";
       hint
         .querySelector(".pwa-ios-hint-close")
         ?.addEventListener("click", () => {

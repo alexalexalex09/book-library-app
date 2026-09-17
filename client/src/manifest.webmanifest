@@ -1,6 +1,6 @@
 {
-  "name": "HiLibrary",
-  "short_name": "HiLibrary",
+  "name": "TomeHound",
+  "short_name": "TomeHound",
   "description": "Your physical library, digitally enhanced.",
   "start_url": "/",
   "scope": "/",

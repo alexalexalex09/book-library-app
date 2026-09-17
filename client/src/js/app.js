@@ -439,6 +439,7 @@ function renderBillingNav() {
   upgradeBtn.classList.toggle("hidden-element", !free);
   accountUpgradeLink?.classList.toggle("hidden-element", !free);
   manageBtn.classList.toggle("hidden-element", free);
+  markCurrentPlanInUpgradeModal();
 
   const roomBtn = document.getElementById("newRoomBtn");
   const shareBtn = document.getElementById("shareLibraryBtn");
@@ -535,7 +536,7 @@ function exportLibraryAsJson() {
     cover: book.cover || "",
     created_at: book.created_at || null,
   }));
-  downloadTextFile("hilibrary-export.json", JSON.stringify(payload, null, 2), "application/json");
+  downloadTextFile("tomehound-export.json", JSON.stringify(payload, null, 2), "application/json");
 }
 
 function exportLibraryAsCsv() {
@@ -552,7 +553,7 @@ function exportLibraryAsCsv() {
       .join(","),
   );
   const csv = [header.join(","), ...rows].join("\n");
-  downloadTextFile("hilibrary-export.csv", csv, "text/csv");
+  downloadTextFile("tomehound-export.csv", csv, "text/csv");
 }
 
 async function maybeRenderPublicShare() {
@@ -609,6 +610,7 @@ async function maybeRenderPublicShare() {
       viewport.appendChild(card);
     });
     updateMapEmptyState((data.shelves || []).length);
+    requestAnimationFrame(() => fitMapToShelves({ persist: false }));
   } catch (error) {
     showToast(error.message || "Could not load shared library.", "error");
   }
@@ -691,6 +693,15 @@ function closeModalAndRestore(modal) {
 
 let pendingUpgradeFeature = null;
 
+function markCurrentPlanInUpgradeModal() {
+  const freeLabel = document.getElementById("freePlanCurrentLabel");
+  const premiumLabel = document.getElementById("premiumPlanCurrentLabel");
+  if (!freeLabel || !premiumLabel) return;
+  const premium = isPremiumPlan();
+  freeLabel.classList.toggle("hidden-element", premium);
+  premiumLabel.classList.toggle("hidden-element", !premium);
+}
+
 function showUpgradeModal({ reason = "", featureCode = "" } = {}) {
   const modal = document.getElementById("upgradeModal");
   if (!modal) return;
@@ -699,6 +710,7 @@ function showUpgradeModal({ reason = "", featureCode = "" } = {}) {
     msg.textContent =
       reason || "Start your 7-day free trial to unlock Premium features.";
   }
+  markCurrentPlanInUpgradeModal();
   pendingUpgradeFeature = featureCode || null;
   openModalWithFocus(modal, document.getElementById("upgradeMonthlyBtn"));
 }
@@ -3043,6 +3055,49 @@ let mapState = {
   pinchCenterX: 0,
   pinchCenterY: 0,
 };
+const MAP_VIEW_STORAGE_KEY = "hilibrary-map-view";
+let mapViewSaveTimer = null;
+
+function persistMapView(mode) {
+  try {
+    window.clearTimeout(mapViewSaveTimer);
+    const payload =
+      mode === "fit"
+        ? { mode: "fit" }
+        : { mode: "custom", x: mapState.x, y: mapState.y, scale: mapState.scale };
+    window.localStorage?.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify(payload));
+  } catch (err) {
+    /* storage unavailable */
+  }
+}
+
+function persistMapViewCustomSoon() {
+  window.clearTimeout(mapViewSaveTimer);
+  mapViewSaveTimer = window.setTimeout(() => persistMapView("custom"), 150);
+}
+
+function readSavedMapView() {
+  try {
+    const raw = window.localStorage?.getItem(MAP_VIEW_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.mode === "fit") return { mode: "fit" };
+    const x = Number(parsed?.x);
+    const y = Number(parsed?.y);
+    const scale = Number(parsed?.scale);
+    if (
+      parsed?.mode === "custom" &&
+      Number.isFinite(x) &&
+      Number.isFinite(y) &&
+      Number.isFinite(scale)
+    ) {
+      return { mode: "custom", x, y, scale };
+    }
+  } catch (err) {
+    /* storage unavailable */
+  }
+  return null;
+}
 let activeShelfDrag = null;
 let activeShelfResize = null;
 let activeMapEditPoint = null;
@@ -3113,6 +3168,7 @@ function zoomToShelfOnMap(shelfId) {
 
   mapViewport.style.transition = "transform 0.4s ease-in-out";
   mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
+  persistMapView("custom");
 
   shelfWrapper.style.border = `2px solid ${FOLIO_COLORS.success}`;
   setTimeout(() => {
@@ -3556,6 +3612,7 @@ async function loadLibraryMap() {
 
   updateMapEmptyState((shelves || []).length);
   await persistOfflineSnapshot();
+  requestAnimationFrame(() => applyDefaultMapView());
 }
 
 function updateMapEmptyState(shelfCount) {
@@ -3572,6 +3629,19 @@ function applyMapTransform() {
   mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
 }
 
+function applyDefaultMapView() {
+  if (!infiniteMap || infiniteMap.offsetWidth === 0) return;
+  const saved = readSavedMapView();
+  if (saved?.mode === "custom") {
+    mapState.x = saved.x;
+    mapState.y = saved.y;
+    mapState.scale = Math.min(Math.max(0.1, saved.scale), 5);
+    applyMapTransform();
+    return;
+  }
+  fitMapToShelves({ persist: false });
+}
+
 function zoomMapByFactor(factor) {
   if (!infiniteMap) return;
   const rect = infiniteMap.getBoundingClientRect();
@@ -3582,9 +3652,10 @@ function zoomMapByFactor(factor) {
   mapState.y = centerY - (centerY - mapState.y) * (newScale / mapState.scale);
   mapState.scale = newScale;
   applyMapTransform();
+  persistMapViewCustomSoon();
 }
 
-function fitMapToShelves() {
+function fitMapToShelves({ persist = true } = {}) {
   if (!infiniteMap) return;
   const shelves = Array.from(mapViewport?.querySelectorAll("[data-shelf-id]") || []);
   if (shelves.length === 0) return;
@@ -3611,6 +3682,7 @@ function fitMapToShelves() {
   mapState.x = rect.width / 2 - (minX + (maxX - minX) / 2) * fitScale;
   mapState.y = rect.height / 2 - (minY + (maxY - minY) / 2) * fitScale;
   applyMapTransform();
+  if (persist) persistMapView("fit");
 }
 
 function setupMapDiscoverability() {
@@ -3667,7 +3739,10 @@ function setupMapDiscoverability() {
     else handled = false;
     if (!handled) return;
     e.preventDefault();
-    if (e.key.startsWith("Arrow")) applyMapTransform();
+    if (e.key.startsWith("Arrow")) {
+      applyMapTransform();
+      persistMapViewCustomSoon();
+    }
   });
   infiniteMap?.addEventListener("focus", () => infiniteMap.classList.add("kb-focus"));
   infiniteMap?.addEventListener("blur", () => infiniteMap.classList.remove("kb-focus"));
@@ -4072,11 +4147,13 @@ const handleEnd = async () => {
 
   if (mapState.isPinching) {
     mapState.isPinching = false;
+    persistMapView("custom");
   }
 
   if (mapState.isDragging) {
     mapState.isDragging = false;
     infiniteMap.style.cursor = "grab";
+    persistMapView("custom");
   }
 };
 window.addEventListener("mouseup", handleEnd);
@@ -4099,6 +4176,7 @@ infiniteMap?.addEventListener(
     mapState.scale = newScale;
 
     mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
+    persistMapViewCustomSoon();
   },
   { passive: false },
 );
@@ -4167,6 +4245,7 @@ function zoomToBookOnMap(book, { showHandles = false, books } = {}) {
 
   mapViewport.style.transition = "transform 0.4s ease-in-out";
   mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
+  persistMapView("custom");
 
   setTimeout(() => {
     mapViewport.style.transition = "none";
