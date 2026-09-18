@@ -30,6 +30,7 @@ const {
   setSecurityHeaders,
 } = require("./http-security");
 const { createBillingRouter } = require("./billing");
+const { resolveSharedLibraryBookScope } = require("./share-library");
 
 sharp.cache(false);
 
@@ -826,12 +827,18 @@ app.get("/api/share/:token", async (req, res) => {
     const { data: shelves, error: shelvesError } = await shelvesQuery;
     if (shelvesError) throw shelvesError;
 
-    const shelfIds = (shelves || []).map((s) => s.id);
+    const { restrictToShelfIds, shelfIds } = resolveSharedLibraryBookScope(
+      share,
+      shelves,
+    );
+    if (restrictToShelfIds && shelfIds.length === 0) {
+      return res.json({ shelves: shelves || [], books: [] });
+    }
     const booksQuery = supabase
       .from("user_books")
       .select("id,shelf_id,title,author,cover,bounding_box,polygon,created_at")
       .eq("user_id", share.user_id);
-    if (shelfIds.length > 0) booksQuery.in("shelf_id", shelfIds);
+    if (restrictToShelfIds) booksQuery.in("shelf_id", shelfIds);
     const { data: books, error: booksError } = await booksQuery;
     if (booksError) throw booksError;
     return res.json({ shelves: shelves || [], books: books || [] });
