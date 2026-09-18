@@ -1,4 +1,4 @@
--- HiLibrary — Supabase schema (from scratch)
+-- ShelfMapper — Supabase schema (from scratch)
 -- Paste into the Supabase SQL Editor and run.
 -- Auth (auth.users) is created by Supabase; this script only adds app tables,
 -- RLS, and the public `shelves` storage bucket.

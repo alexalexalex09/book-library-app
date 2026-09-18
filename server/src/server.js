@@ -37,6 +37,34 @@ const app = express();
 app.disable("x-powered-by");
 app.use(setSecurityHeaders);
 
+// Canonical host redirect: old production hosts → shelfmapper.com
+const CANONICAL_ORIGIN = String(
+  process.env.CANONICAL_ORIGIN || process.env.APP_BASE_URL || "",
+)
+  .trim()
+  .replace(/\/$/, "");
+const LEGACY_HOSTS = new Set(
+  String(process.env.LEGACY_HOSTS || "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean),
+);
+if (LEGACY_HOSTS.size === 0) {
+  LEGACY_HOSTS.add("book-library-app-z48o.onrender.com");
+  LEGACY_HOSTS.add("hilibrary.alexscottbecker.com");
+}
+app.use((req, res, next) => {
+  if (!CANONICAL_ORIGIN || !CANONICAL_ORIGIN.startsWith("https://")) return next();
+  const host = String(req.hostname || req.get("host") || "")
+    .toLowerCase()
+    .split(":")[0];
+  if (!host || !LEGACY_HOSTS.has(host)) return next();
+  // Keep Stripe webhooks reachable on legacy hosts until cutover completes.
+  if (req.path === "/api/billing/webhook") return next();
+  const target = `${CANONICAL_ORIGIN}${req.originalUrl || "/"}`;
+  return res.redirect(301, target);
+});
+
 const allowedOrigin = process.env.CORS_ORIGIN?.trim();
 app.use(
   cors({

@@ -1,4 +1,4 @@
--- HiLibrary storage hardening (run on existing projects)
+-- ShelfMapper storage hardening (run on existing projects)
 -- Makes the shelves bucket private and limits object reads/writes to owner folder.
 
 insert into storage.buckets (id, name, public)

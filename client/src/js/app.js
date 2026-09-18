@@ -536,7 +536,7 @@ function exportLibraryAsJson() {
     cover: book.cover || "",
     created_at: book.created_at || null,
   }));
-  downloadTextFile("tomehound-export.json", JSON.stringify(payload, null, 2), "application/json");
+  downloadTextFile("shelfmapper-export.json", JSON.stringify(payload, null, 2), "application/json");
 }
 
 function exportLibraryAsCsv() {
@@ -553,7 +553,7 @@ function exportLibraryAsCsv() {
       .join(","),
   );
   const csv = [header.join(","), ...rows].join("\n");
-  downloadTextFile("tomehound-export.csv", csv, "text/csv");
+  downloadTextFile("shelfmapper-export.csv", csv, "text/csv");
 }
 
 async function maybeRenderPublicShare() {

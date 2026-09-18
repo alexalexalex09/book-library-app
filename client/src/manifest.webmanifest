@@ -1,6 +1,6 @@
 {
-  "name": "TomeHound",
-  "short_name": "TomeHound",
+  "name": "ShelfMapper",
+  "short_name": "ShelfMapper",
   "description": "Your physical library, digitally enhanced.",
   "start_url": "/",
   "scope": "/",

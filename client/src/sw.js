@@ -1,5 +1,5 @@
-const SHELL_CACHE = "hilibrary-shell-v2";
-const RUNTIME_CACHE = "hilibrary-runtime-v2";
+const SHELL_CACHE = "shelfmapper-shell-v1";
+const RUNTIME_CACHE = "shelfmapper-runtime-v1";
 
 const APP_SHELL_URLS = [
   "/",
@@ -10,7 +10,7 @@ const APP_SHELL_URLS = [
   "/js/app.js",
   "/js/offline-store.js",
   "/js/pwa.js",
-  "/img/logo.svg",
+  "/img/ShelfMapperLogo.svg",
   "/img/noun_Crop_1935400.svg",
   "/img/logo-180.png",
   "/img/logo-192.png",

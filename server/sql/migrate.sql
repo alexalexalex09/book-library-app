@@ -1,4 +1,4 @@
--- HiLibrary — migrate an existing (close) Supabase database
+-- ShelfMapper — migrate an existing (close) Supabase database
 -- Safe to re-run. Adds missing tables/columns/indexes/RLS/storage.
 -- Does not drop leftover columns (e.g. image_hash, cover_url after copy).
 
