@@ -2063,13 +2063,15 @@ input:focus-visible,
 
   .nav-links {
     gap: 6px;
-    flex: 1;
+    flex: 1 1 auto;
     justify-content: space-around;
+    min-width: 0;
   }
 
   .nav-user {
-    flex: 1;
-    justify-content: center;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    margin-left: auto;
     gap: 6px;
   }
 
@@ -2548,16 +2550,20 @@ body {
   .auth-card {
     display: none;
     position: fixed;
-    left: 12px;
-    right: 12px;
-    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-    top: auto;
-    max-height: min(88dvh, 640px);
+    left: max(12px, env(safe-area-inset-left, 0px));
+    right: max(12px, env(safe-area-inset-right, 0px));
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+    width: auto;
+    max-width: none;
+    max-height: min(88dvh, calc(100dvh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
     overflow: auto;
+    overflow-x: hidden;
     z-index: 40;
     margin: 0;
     padding: 22px 18px 18px;
-    animation: guestAuthRise 0.28s ease;
+    box-sizing: border-box;
+    animation: guestAuthDrop 0.28s ease;
   }
 
   .auth-wrapper.auth-open .auth-card {
@@ -2608,10 +2614,10 @@ body {
   }
 }
 
-@keyframes guestAuthRise {
+@keyframes guestAuthDrop {
   from {
     opacity: 0;
-    transform: translateY(18px);
+    transform: translateY(-18px);
   }
   to {
     opacity: 1;
@@ -3367,6 +3373,8 @@ body.guest-auth-open {
     margin: 0;
     border-radius: 12px 12px 0 0;
     padding: 8px 10px;
+    justify-content: space-between;
+    gap: 8px;
   }
 
   .nav-brand {
@@ -3378,8 +3386,15 @@ body.guest-auth-open {
   }
 
   .nav-links {
-    flex: 1;
-    justify-content: space-between;
+    flex: 1 1 auto;
+    justify-content: space-around;
+    min-width: 0;
+  }
+
+  .nav-user {
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    margin-left: auto;
   }
 
   .nav-btn {
