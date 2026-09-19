@@ -18,6 +18,7 @@ let billingState = {
   status: null,
   interval: null,
   trialEndsAt: null,
+  renewalNotice: null,
   quotas: { ocr: 10, books: 60 },
 };
 let usageState = {
@@ -440,11 +441,80 @@ function renderBillingNav() {
   accountUpgradeLink?.classList.toggle("hidden-element", !free);
   manageBtn.classList.toggle("hidden-element", free);
   markCurrentPlanInUpgradeModal();
+  renderRenewalBanner();
 
   const roomBtn = document.getElementById("newRoomBtn");
   const shareBtn = document.getElementById("shareLibraryBtn");
   if (roomBtn) roomBtn.textContent = free ? "New room (Premium)" : "New room";
   if (shareBtn) shareBtn.textContent = free ? "Share (Premium)" : "Share library";
+}
+
+function formatRenewalAmount(notice) {
+  const cents = Number(notice?.amountDueCents);
+  if (!Number.isFinite(cents)) return null;
+  const currency = String(notice?.currency || "USD").toUpperCase();
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+    }).format(cents / 100);
+  } catch {
+    return `$${(cents / 100).toFixed(2)}`;
+  }
+}
+
+function formatRenewalDate(notice) {
+  if (!notice?.renewAt) return null;
+  const date = new Date(notice.renewAt);
+  if (!Number.isFinite(date.getTime())) return null;
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function renewalBannerDismissKey(notice) {
+  return `shelfmapper_renewal_dismiss_${notice?.invoiceId || notice?.renewAt || "none"}`;
+}
+
+function renderRenewalBanner() {
+  const banner = document.getElementById("renewalBanner");
+  const textEl = document.getElementById("renewalBannerText");
+  if (!banner || !textEl) return;
+
+  const notice = billingState.renewalNotice;
+  const hasNotice =
+    isPremiumPlan() &&
+    notice &&
+    (notice.renewAt || Number.isFinite(Number(notice.amountDueCents)));
+
+  if (!hasNotice) {
+    banner.classList.add("hidden-element");
+    return;
+  }
+
+  try {
+    if (window.sessionStorage?.getItem(renewalBannerDismissKey(notice)) === "1") {
+      banner.classList.add("hidden-element");
+      return;
+    }
+  } catch {
+    // ignore
+  }
+
+  const amount = formatRenewalAmount(notice);
+  const when = formatRenewalDate(notice);
+  if (amount && when) {
+    textEl.textContent = `Your Premium plan renews on ${when} for ${amount}.`;
+  } else if (when) {
+    textEl.textContent = `Your Premium plan renews on ${when}.`;
+  } else if (amount) {
+    textEl.textContent = `Your Premium plan renews soon for ${amount}.`;
+  } else {
+    textEl.textContent = "Your Premium plan renews soon.";
+  }
+  banner.classList.remove("hidden-element");
 }
 
 function setupAccountMenu() {
@@ -496,6 +566,7 @@ async function refreshBillingState() {
       status: null,
       interval: null,
       trialEndsAt: null,
+      renewalNotice: null,
       quotas: { ocr: 10, books: 60 },
     };
     renderBillingNav();
@@ -508,10 +579,12 @@ async function refreshBillingState() {
       status: status.status || null,
       interval: status.interval || null,
       trialEndsAt: status.trialEndsAt || null,
+      renewalNotice: status.renewalNotice || null,
       quotas: status.quotas || (status.plan === "premium" ? { ocr: 60, books: 300 } : { ocr: 10, books: 60 }),
     };
   } catch {
     billingState.plan = "free";
+    billingState.renewalNotice = null;
   }
   renderBillingNav();
 }
@@ -767,9 +840,152 @@ function setupBillingUi() {
       closeUpgradeModal();
     }
   });
+
+  document.getElementById("renewalBannerManageBtn")?.addEventListener("click", () => {
+    openBillingPortal();
+  });
+  document.getElementById("renewalBannerDismissBtn")?.addEventListener("click", () => {
+    const notice = billingState.renewalNotice;
+    try {
+      if (notice) window.sessionStorage?.setItem(renewalBannerDismissKey(notice), "1");
+    } catch {
+      // ignore
+    }
+    document.getElementById("renewalBanner")?.classList.add("hidden-element");
+  });
 }
 setupBillingUi();
 setupAccountMenu();
+setupLegalAcceptanceUi();
+
+const Legal = window.ShelfMapperLegal || null;
+let legalAcceptResolver = null;
+let legalAcceptModalOpen = false;
+
+function userNeedsLegalAcceptance(user) {
+  if (!Legal || !user) return false;
+  return !Legal.userHasCurrentLegalAcceptance(user);
+}
+
+async function persistLegalAcceptance(metadata) {
+  const payload = metadata || Legal?.buildLegalAcceptanceMetadata();
+  if (!payload) throw new Error("Legal versions unavailable");
+  const { data, error } = await supabaseClient.auth.updateUser({ data: payload });
+  if (error) throw error;
+  if (data?.user) currentUser = data.user;
+  return data?.user || currentUser;
+}
+
+async function applyPendingOAuthLegalAcceptance(user) {
+  if (!Legal || !user || Legal.userHasCurrentLegalAcceptance(user)) return user;
+  const pending = Legal.consumePendingLegalAcceptance();
+  if (!pending) return user;
+  try {
+    return (await persistLegalAcceptance(pending)) || user;
+  } catch (error) {
+    console.warn("Failed to apply pending legal acceptance:", error?.message || error);
+    return user;
+  }
+}
+
+function closeLegalAcceptModal() {
+  const modal = document.getElementById("legalAcceptModal");
+  if (!modal) return;
+  legalAcceptModalOpen = false;
+  modal.classList.add("hidden-view");
+  const checkbox = document.getElementById("legalAcceptCheckbox");
+  if (checkbox) checkbox.checked = false;
+}
+
+function showLegalAcceptModal({ isUpdate = false } = {}) {
+  const modal = document.getElementById("legalAcceptModal");
+  if (!modal || !Legal) return;
+  const title = document.getElementById("legalAcceptTitle");
+  const message = document.getElementById("legalAcceptMessage");
+  const termsVer = document.getElementById("legalAcceptTermsVersion");
+  const privacyVer = document.getElementById("legalAcceptPrivacyVersion");
+  if (title) {
+    title.textContent = isUpdate ? "Updated terms" : "Agree to continue";
+  }
+  if (message) {
+    message.textContent = isUpdate
+      ? "We've updated our Terms of Service and/or Privacy Policy. Please review and accept to keep using ShelfMapper."
+      : "Please review and accept the Terms of Service and Privacy Policy to continue using ShelfMapper.";
+  }
+  if (termsVer) termsVer.textContent = `Version ${Legal.CURRENT_TERMS_VERSION}`;
+  if (privacyVer) privacyVer.textContent = `Version ${Legal.CURRENT_PRIVACY_VERSION}`;
+  legalAcceptModalOpen = true;
+  openModalWithFocus(modal, document.getElementById("legalAcceptCheckbox"));
+}
+
+function promptLegalAcceptance({ isUpdate = false } = {}) {
+  return new Promise((resolve) => {
+    legalAcceptResolver = resolve;
+    showLegalAcceptModal({ isUpdate });
+  });
+}
+
+async function ensureLegalAcceptance(user) {
+  if (!user || isOfflineActive() || !Legal) return user;
+  let nextUser = await applyPendingOAuthLegalAcceptance(user);
+  if (!userNeedsLegalAcceptance(nextUser)) return nextUser;
+
+  const prior = Legal.getLegalAcceptanceFromUser(nextUser);
+  const isUpdate = Boolean(prior.termsVersion || prior.privacyVersion);
+  const accepted = await promptLegalAcceptance({ isUpdate });
+  if (!accepted) return null;
+  return currentUser || nextUser;
+}
+
+function setupLegalAcceptanceUi() {
+  const modal = document.getElementById("legalAcceptModal");
+  const confirmBtn = document.getElementById("legalAcceptConfirmBtn");
+  const declineBtn = document.getElementById("legalAcceptDeclineBtn");
+  const checkbox = document.getElementById("legalAcceptCheckbox");
+  if (!modal) return;
+
+  confirmBtn?.addEventListener("click", async () => {
+    if (!checkbox?.checked) {
+      showToast("Please check the box to accept the Terms and Privacy Policy.", "error");
+      checkbox?.focus();
+      return;
+    }
+    confirmBtn.disabled = true;
+    declineBtn && (declineBtn.disabled = true);
+    try {
+      await persistLegalAcceptance();
+      closeLegalAcceptModal();
+      const resolve = legalAcceptResolver;
+      legalAcceptResolver = null;
+      resolve?.(true);
+    } catch (error) {
+      showToast(error?.message || "Unable to save acceptance. Try again.", "error");
+    } finally {
+      confirmBtn.disabled = false;
+      if (declineBtn) declineBtn.disabled = false;
+    }
+  });
+
+  declineBtn?.addEventListener("click", async () => {
+    closeLegalAcceptModal();
+    const resolve = legalAcceptResolver;
+    legalAcceptResolver = null;
+    resolve?.(false);
+    try {
+      await supabaseClient.auth.signOut();
+    } catch {
+      // ignore
+    }
+  });
+
+  modal.addEventListener("keydown", (e) => {
+    trapFocusInModal(modal, e);
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+}
 
 function confirmDialog({ title = "Please confirm", message = "Are you sure?", confirmLabel = "Delete", cancelLabel = "Cancel" } = {}) {
   const modal = document.getElementById("confirmModal");
@@ -883,13 +1099,16 @@ function loadHighResBackground() {
   const bgElement = document.querySelector(".auth-background");
   if (!bgElement) return;
 
-  const highResUrl = "../img/anna-hunko-ajE5goOGzZc-unsplash.jpg";
+  const previewUrl = "/img/anna-hunko-ajE5goOGzZc-unsplash-preview.jpg";
+  const highResUrl = "/img/anna-hunko-ajE5goOGzZc-unsplash.jpg";
+  bgElement.style.backgroundImage =
+    `linear-gradient(105deg, rgba(44, 31, 14, 0.55) 0%, rgba(44, 31, 14, 0.28) 42%, rgba(44, 31, 14, 0.18) 100%), url('${previewUrl}')`;
+
   const imgLoader = new Image();
-
   imgLoader.onload = () => {
-    bgElement.style.backgroundImage = `url('${highResUrl}')`;
+    bgElement.style.backgroundImage =
+      `linear-gradient(105deg, rgba(44, 31, 14, 0.55) 0%, rgba(44, 31, 14, 0.28) 42%, rgba(44, 31, 14, 0.18) 100%), url('${highResUrl}')`;
   };
-
   imgLoader.src = highResUrl;
 }
 loadHighResBackground();
@@ -910,6 +1129,73 @@ const passwordError = document.getElementById("passwordError");
 const googleAuthBtn = document.getElementById("googleAuthBtn");
 const googleAuthBtnText = document.getElementById("googleAuthBtnText");
 const authProviderError = document.getElementById("authProviderError");
+const loggedOutViewEl = document.getElementById("loggedOutView");
+const guestNavLoginBtn = document.getElementById("guestNavLoginBtn");
+const pitchStartBtn = document.getElementById("pitchStartBtn");
+const authPanelCloseBtn = document.getElementById("authPanelCloseBtn");
+const authTermsRow = document.getElementById("authTermsRow");
+const authTermsCheckbox = document.getElementById("authTermsCheckbox");
+
+function setAuthTermsVisible(visible) {
+  if (!authTermsRow || !authTermsCheckbox) return;
+  authTermsRow.classList.toggle("hidden-element", !visible);
+  if (!visible) {
+    authTermsCheckbox.checked = false;
+    authTermsCheckbox.removeAttribute("required");
+  } else {
+    authTermsCheckbox.setAttribute("required", "true");
+  }
+}
+
+function requireAuthTermsAccepted() {
+  if (!authTermsCheckbox?.checked) {
+    showToast("Please agree to the Terms of Service and Privacy Policy to continue.", "error");
+    authTermsCheckbox?.focus();
+    return false;
+  }
+  return true;
+}
+
+authTermsRow?.querySelectorAll("a").forEach((link) => {
+  link.addEventListener("click", (e) => e.stopPropagation());
+});
+
+function isMobileAuthLayout() {
+  return window.matchMedia("(max-width: 860px)").matches;
+}
+
+function openGuestAuth({ signUp = false } = {}) {
+  if (signUp && !isSignUpMode) authToggleBtn?.click();
+  if (!signUp && isSignUpMode) authToggleBtn?.click();
+  if (!isMobileAuthLayout()) {
+    document.getElementById("authPanel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    emailInput?.focus();
+    return;
+  }
+  loggedOutViewEl?.classList.add("auth-open");
+  document.body.classList.add("guest-auth-open");
+  const panel = document.getElementById("authPanel");
+  if (panel) panel.setAttribute("aria-modal", "true");
+  window.setTimeout(() => emailInput?.focus(), 50);
+}
+
+function closeGuestAuth() {
+  loggedOutViewEl?.classList.remove("auth-open");
+  document.body.classList.remove("guest-auth-open");
+  const panel = document.getElementById("authPanel");
+  if (panel) panel.setAttribute("aria-modal", "false");
+}
+
+guestNavLoginBtn?.addEventListener("click", () => openGuestAuth({ signUp: false }));
+pitchStartBtn?.addEventListener("click", () => openGuestAuth({ signUp: true }));
+authPanelCloseBtn?.addEventListener("click", () => closeGuestAuth());
+document.getElementById("authBackdrop")?.addEventListener("click", () => closeGuestAuth());
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeGuestAuth();
+});
+window.addEventListener("resize", () => {
+  if (!isMobileAuthLayout()) closeGuestAuth();
+});
 
 if (passwordInput) {
   passwordInput.removeAttribute("minlength");
@@ -938,6 +1224,7 @@ authToggleBtn?.addEventListener("click", () => {
   passwordError.classList.add("hidden-element");
   confirmPasswordInput.value = "";
   passwordInput.value = "";
+  const authPanelTitle = document.getElementById("authPanelTitle");
 
   if (isSignUpMode) {
     confirmPasswordInput.classList.remove("hidden-element");
@@ -947,6 +1234,8 @@ authToggleBtn?.addEventListener("click", () => {
     authActionBtn.textContent = "Create Account";
     authToggleText.textContent = "Already have an account?";
     authToggleBtn.textContent = "Log in here";
+    if (authPanelTitle) authPanelTitle.textContent = "Create account";
+    setAuthTermsVisible(true);
   } else {
     confirmPasswordInput.classList.add("hidden-element");
     confirmPasswordInput.removeAttribute("required");
@@ -955,6 +1244,8 @@ authToggleBtn?.addEventListener("click", () => {
     authActionBtn.textContent = "Log In";
     authToggleText.textContent = "Don't have an account?";
     authToggleBtn.textContent = "Sign up here";
+    if (authPanelTitle) authPanelTitle.textContent = "Log in";
+    setAuthTermsVisible(false);
   }
 });
 
@@ -976,13 +1267,16 @@ authForm?.addEventListener("submit", async (e) => {
         return;
       }
       if (password !== confirmPassword) return;
+      if (!requireAuthTermsAccepted()) return;
       const emailRedirectTo = `${window.location.origin}${window.location.pathname}`;
+      const legalMeta = Legal?.buildLegalAcceptanceMetadata() || {};
 
       const { error } = await supabaseClient.auth.signUp({
         email,
         password,
         options: {
           emailRedirectTo,
+          data: legalMeta,
         },
       });
       if (error) {
@@ -1007,6 +1301,9 @@ authForm?.addEventListener("submit", async (e) => {
 });
 
 googleAuthBtn?.addEventListener("click", async () => {
+  if (isSignUpMode && !requireAuthTermsAccepted()) return;
+  if (isSignUpMode) Legal?.storePendingLegalAcceptance();
+
   const originalText = googleAuthBtnText.textContent;
   googleAuthBtn.disabled = true;
   googleAuthBtnText.textContent = "Connecting...";
@@ -1051,10 +1348,23 @@ async function applyAuthState(session) {
     loggedOutView.classList.add("hidden-element");
     loggedInView.classList.remove("hidden-element");
     document.getElementById("userEmailDisplay").textContent = currentUser.email;
+
+    const acceptedUser = await ensureLegalAcceptance(currentUser);
+    if (!acceptedUser) {
+      loggedInView.classList.add("hidden-element");
+      loggedOutView.classList.remove("hidden-element");
+      return;
+    }
+    currentUser = acceptedUser;
+    document.getElementById("userEmailDisplay").textContent = currentUser.email;
+
     await Promise.all([refreshBillingState(), loadLibraryData(), loadRooms(), loadLibraryMap()]);
     updateScanSteps();
     return;
   }
+
+  closeLegalAcceptModal();
+  document.getElementById("renewalBanner")?.classList.add("hidden-element");
 
   if (offlineStore && !navigator.onLine) {
     const lastUser = await offlineStore.getLastUser();
@@ -1082,6 +1392,10 @@ async function applyAuthState(session) {
 }
 
 supabaseClient.auth.onAuthStateChange((event, session) => {
+  if (event === "USER_UPDATED" && legalAcceptModalOpen) {
+    if (session?.user) currentUser = session.user;
+    return;
+  }
   applyAuthState(session).catch((error) => {
     console.error("Failed to apply auth state:", error);
   });

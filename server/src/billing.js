@@ -30,6 +30,7 @@ function readBillingStatusFromUser(user, quotas) {
     interval: metadata.stripe_subscription_id ? interval : null,
     trialEndsAt: metadata.trial_ends_at || null,
     stripeCustomerId: metadata.stripe_customer_id || null,
+    renewalNotice: metadata.renewal_notice || null,
     quotas: quotas[plan] || quotas.free,
   };
 }
@@ -54,6 +55,7 @@ function createBillingRouter({
     ? new Stripe(stripeSecret, { apiVersion: "2025-08-27.basil" })
     : null;
   const router = express.Router();
+  let portalConfigurationId = null;
 
   function ensureBillingConfigured(res) {
     if (billingConfigured) return true;
@@ -77,6 +79,88 @@ function createBillingRouter({
       app_metadata: nextMetadata,
     });
     if (updateError) throw new Error(updateError.message);
+  }
+
+  /**
+   * Portal config enables online cancel (click-to-cancel parity with signup).
+   * Stripe Dashboard → Settings → Customer emails should also enable
+   * "Upcoming invoice" / renewal reminder emails to match Terms §7.
+   */
+  async function getOrCreatePortalConfigurationId() {
+    if (portalConfigurationId) return portalConfigurationId;
+    const existing = await stripe.billingPortal.configurations.list({
+      limit: 10,
+      active: true,
+    });
+    const match = (existing.data || []).find(
+      (cfg) => cfg?.features?.subscription_cancel?.enabled,
+    );
+    if (match?.id) {
+      portalConfigurationId = match.id;
+      return portalConfigurationId;
+    }
+    const created = await stripe.billingPortal.configurations.create({
+      business_profile: {
+        headline: "Manage your ShelfMapper subscription",
+        privacy_policy_url: `${appBaseUrl}/privacy.html`,
+        terms_of_service_url: `${appBaseUrl}/terms.html`,
+      },
+      features: {
+        customer_update: {
+          enabled: true,
+          allowed_updates: ["email"],
+        },
+        invoice_history: { enabled: true },
+        payment_method_update: { enabled: true },
+        subscription_cancel: {
+          enabled: true,
+          mode: "at_period_end",
+          proration_behavior: "none",
+        },
+      },
+    });
+    portalConfigurationId = created.id;
+    return portalConfigurationId;
+  }
+
+  async function findUserIdForStripeCustomer(customerId) {
+    if (!customerId) return null;
+    try {
+      const customer = await stripe.customers.retrieve(customerId);
+      const fromMeta = customer?.metadata?.supabase_user_id;
+      if (fromMeta) return fromMeta;
+    } catch {
+      // fall through
+    }
+    return null;
+  }
+
+  async function syncRenewalNoticeFromInvoice(invoice) {
+    const customerId =
+      typeof invoice?.customer === "string" ? invoice.customer : invoice?.customer?.id;
+    const userId = await findUserIdForStripeCustomer(customerId);
+    if (!userId) return;
+    const amountDue =
+      typeof invoice?.amount_due === "number" ? invoice.amount_due : null;
+    const currency = String(invoice?.currency || "usd").toUpperCase();
+    const renewAtUnix =
+      invoice?.next_payment_attempt ||
+      invoice?.lines?.data?.[0]?.period?.end ||
+      null;
+    await updateUserBillingMetadata(userId, {
+      renewal_notice: {
+        amountDueCents: amountDue,
+        currency,
+        renewAt: renewAtUnix ? new Date(renewAtUnix * 1000).toISOString() : null,
+        invoiceId: invoice?.id || null,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  async function clearRenewalNoticeForUser(userId) {
+    if (!userId) return;
+    await updateUserBillingMetadata(userId, { renewal_notice: null });
   }
 
   async function syncSubscriptionToSupabase(subscription) {
@@ -157,6 +241,12 @@ function createBillingRouter({
           supabase_user_id: user.id,
           interval,
         },
+        custom_text: {
+          submit: {
+            message:
+              "After any free trial, billing renews automatically until you cancel. We send a renewal reminder before each charge. Cancel anytime via Manage billing.",
+          },
+        },
         subscription_data: {
           metadata: { supabase_user_id: user.id, interval },
           ...(hasUsedTrial ? {} : { trial_period_days: trialDays }),
@@ -173,12 +263,23 @@ function createBillingRouter({
     try {
       if (!ensureBillingConfigured(res)) return;
       const customerId = await getOrCreateCustomerForUser(req.user);
+      let configuration;
+      try {
+        configuration = await getOrCreatePortalConfigurationId();
+      } catch (configError) {
+        console.warn(
+          "Billing portal configuration unavailable, using Stripe default:",
+          configError?.message || configError,
+        );
+      }
       const session = await stripe.billingPortal.sessions.create({
         customer: customerId,
         return_url: appBaseUrl,
+        ...(configuration ? { configuration } : {}),
       });
       return res.json({ url: session.url });
     } catch (error) {
+      console.error("Billing portal error:", error?.message || error);
       return res.status(500).json({ error: "Failed to create billing portal session" });
     }
   });
@@ -221,10 +322,33 @@ function createBillingRouter({
         event.type === "customer.subscription.deleted" ||
         event.type === "customer.subscription.created"
       ) {
-        await syncSubscriptionToSupabase(event.data.object);
+        const subscription = event.data.object;
+        await syncSubscriptionToSupabase(subscription);
+        if (
+          event.type === "customer.subscription.deleted" ||
+          subscription?.status === "canceled"
+        ) {
+          const userId = subscription?.metadata?.supabase_user_id;
+          await clearRenewalNoticeForUser(userId);
+        }
+      } else if (event.type === "invoice.upcoming") {
+        // Pre-renewal notice for in-app banner (pair with Stripe Customer emails in Dashboard).
+        await syncRenewalNoticeFromInvoice(event.data.object);
+      } else if (
+        event.type === "invoice.paid" ||
+        event.type === "invoice.payment_succeeded"
+      ) {
+        const invoice = event.data.object;
+        const customerId =
+          typeof invoice?.customer === "string" ? invoice.customer : invoice?.customer?.id;
+        const userId =
+          invoice?.subscription_details?.metadata?.supabase_user_id ||
+          (await findUserIdForStripeCustomer(customerId));
+        await clearRenewalNoticeForUser(userId);
       }
       return res.json({ received: true });
     } catch (error) {
+      console.error("Webhook processing failed:", error?.message || error);
       return res.status(500).json({ error: "Webhook processing failed" });
     }
   }

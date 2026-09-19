@@ -1349,6 +1349,74 @@ input:focus-visible,
   font-size: 0.84rem;
 }
 
+.renewal-banner {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2090;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--surface, #f7f1e8);
+  color: var(--ink, #2c1f0e);
+  border: 1px solid var(--border, #d6c7b3);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 8px 12px;
+  width: min(92vw, 640px);
+  font-size: 0.84rem;
+}
+
+.renewal-banner.hidden-element {
+  display: none;
+}
+
+.renewal-banner-btn {
+  border: 1px solid var(--border, #d6c7b3);
+  background: #fff;
+  color: inherit;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.renewal-banner-dismiss {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.legal-accept-links {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.legal-accept-links a {
+  color: var(--accent, #8b3a2f);
+  font-weight: 600;
+}
+
+.legal-accept-version {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted, #6b5c4c);
+}
+
+.legal-accept-checkbox-row {
+  margin-bottom: 16px;
+}
+
 .pwa-install-btn {
   min-height: 1rem;
   min-width: 96px;
@@ -2133,7 +2201,8 @@ input:focus-visible,
     display: none !important;
   }
 
-  .offline-banner {
+  .offline-banner,
+  .renewal-banner {
     top: 12px;
   }
 
@@ -2189,7 +2258,16 @@ body {
 }
 
 .brand-lockup-logo {
-  display: none;
+  display: block;
+  height: 96px;
+  width: auto;
+  margin: 0 auto 10px;
+}
+
+.auth-header .brand-lockup {
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
 }
 
 .nav-brand-logo {
@@ -2217,9 +2295,160 @@ body {
 }
 
 .auth-background {
-  background:
-    linear-gradient(160deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 40%),
-    radial-gradient(120% 100% at 100% 0%, #f4ecda 0%, #f9f3e8 55%, #faf5ec 100%);
+  background-color: #2c1f0e;
+  background-image:
+    linear-gradient(105deg, rgba(44, 31, 14, 0.55) 0%, rgba(44, 31, 14, 0.28) 42%, rgba(44, 31, 14, 0.18) 100%),
+    url("/img/anna-hunko-ajE5goOGzZc-unsplash.jpg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.guest-nav {
+  display: none;
+}
+
+.guest-layout {
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 400px);
+  gap: 28px;
+  align-items: center;
+  padding: 28px 20px;
+}
+
+.pitch-card {
+  text-align: left;
+  padding: 28px 30px;
+  background: rgba(255, 252, 246, 0.94);
+  border: 1px solid rgba(224, 213, 197, 0.95);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(10px);
+}
+
+.pitch-logo {
+  display: block;
+  height: 88px;
+  width: auto;
+  margin-bottom: 12px;
+}
+
+.pitch-brand {
+  margin: 0 0 14px;
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 3vw, 2.4rem);
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+
+.pitch-headline {
+  margin: 0 0 12px;
+  font-family: var(--font-display);
+  font-size: clamp(1.55rem, 2.6vw, 2.15rem);
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+  max-width: 18ch;
+}
+
+.pitch-support {
+  margin: 0 0 22px;
+  max-width: 36ch;
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+
+.pitch-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+}
+
+.pitch-cta {
+  width: auto;
+  min-width: 148px;
+  margin-top: 0;
+}
+
+.pitch-aside {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: 0.9rem;
+}
+
+.auth-panel-title {
+  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-size: 1.55rem;
+  font-weight: 700;
+  color: var(--text);
+  text-align: center;
+}
+
+.auth-form {
+  margin-top: 0.75em;
+}
+
+.auth-legal-links {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.auth-legal-links a {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  text-decoration: none;
+}
+
+.auth-legal-links a:hover,
+.auth-legal-links a:focus-visible {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.auth-terms-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 12px 0 4px;
+  text-align: left;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.auth-terms-row.hidden-element {
+  display: none !important;
+}
+
+.auth-terms-row input {
+  margin-top: 3px;
+  flex-shrink: 0;
+  accent-color: var(--primary);
+}
+
+.auth-terms-row a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.auth-panel-close {
+  display: none;
+}
+
+.auth-backdrop {
+  display: none;
 }
 
 .auth-card {
@@ -2227,6 +2456,171 @@ body {
   border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: var(--shadow-md);
+  position: relative;
+}
+
+@media (max-width: 860px) {
+  .guest-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    padding: 10px 14px;
+    padding-top: calc(10px + env(safe-area-inset-top, 0px));
+    background: rgba(250, 245, 236, 0.92);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(10px);
+  }
+
+  .guest-nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .guest-nav-logo {
+    height: 28px;
+    width: auto;
+    flex-shrink: 0;
+  }
+
+  .guest-nav-brand .nav-brand-word {
+    font-size: 1.15rem;
+  }
+
+  .guest-nav-login-btn {
+    width: auto;
+    margin-top: 0;
+    padding: 8px 14px;
+    font-size: 0.9rem;
+  }
+
+  .guest-layout {
+    display: block;
+    max-width: none;
+    min-height: calc(100dvh - 58px - env(safe-area-inset-top, 0px));
+    padding: 28px 18px 40px;
+  }
+
+  .pitch-card {
+    max-width: 420px;
+    margin: 0 auto;
+    text-align: center;
+    padding: 24px 20px 26px;
+  }
+
+  .pitch-logo {
+    height: 112px;
+    margin: 0 auto 14px;
+  }
+
+  .pitch-brand {
+    font-size: 2.1rem;
+  }
+
+  .pitch-headline {
+    max-width: none;
+    font-size: 1.7rem;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .pitch-support {
+    max-width: 34ch;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .pitch-cta-row {
+    justify-content: center;
+    flex-direction: column;
+  }
+
+  .pitch-cta {
+    width: 100%;
+    max-width: 280px;
+  }
+
+  .auth-card {
+    display: none;
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    top: auto;
+    max-height: min(88dvh, 640px);
+    overflow: auto;
+    z-index: 40;
+    margin: 0;
+    padding: 22px 18px 18px;
+    animation: guestAuthRise 0.28s ease;
+  }
+
+  .auth-wrapper.auth-open .auth-card {
+    display: block;
+  }
+
+  .auth-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    border: none;
+    padding: 0;
+    margin: 0;
+    background: rgba(44, 31, 14, 0.45);
+    cursor: pointer;
+  }
+
+  .auth-wrapper.auth-open .auth-backdrop {
+    display: block;
+  }
+
+  .auth-panel-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    cursor: pointer;
+  }
+
+  .auth-panel-close:hover,
+  .auth-panel-close:focus-visible {
+    background: var(--primary-soft);
+    color: var(--text);
+  }
+
+  .auth-header .brand-lockup-logo {
+    height: 64px;
+  }
+}
+
+@keyframes guestAuthRise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+body.guest-auth-open {
+  overflow: hidden;
 }
 
 .auth-header p {

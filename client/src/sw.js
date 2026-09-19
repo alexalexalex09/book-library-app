@@ -8,6 +8,7 @@ const APP_SHELL_URLS = [
   "/css/style.css",
   "/js/api.js",
   "/js/app.js",
+  "/js/legal.js",
   "/js/offline-store.js",
   "/js/pwa.js",
   "/img/ShelfMapperLogo.svg",

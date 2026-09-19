@@ -4,6 +4,10 @@ const {
   getPlanFromSubscriptionStatus,
   normalizeInterval,
 } = require("../src/billing");
+const {
+  CURRENT_TERMS_VERSION,
+  CURRENT_PRIVACY_VERSION,
+} = require("../src/legal");
 
 describe("getPlanFromSubscriptionStatus", () => {
   it("maps trialing and active to premium", () => {
@@ -27,5 +31,13 @@ describe("normalizeInterval", () => {
   it("rejects invalid intervals", () => {
     assert.equal(normalizeInterval("weekly"), null);
     assert.equal(normalizeInterval(""), null);
+  });
+});
+
+describe("legal versions", () => {
+  it("exports current terms and privacy version ids", () => {
+    assert.match(CURRENT_TERMS_VERSION, /^\d{4}\.\d{2}\.\d{2}/);
+    assert.match(CURRENT_PRIVACY_VERSION, /^\d{4}\.\d{2}\.\d{2}/);
+    assert.equal(CURRENT_TERMS_VERSION, CURRENT_PRIVACY_VERSION);
   });
 });
