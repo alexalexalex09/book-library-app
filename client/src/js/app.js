@@ -1249,6 +1249,33 @@ authToggleBtn?.addEventListener("click", () => {
   }
 });
 
+function getAuthRedirectTo() {
+  const pageOrigin = String(window.location.origin || "").replace(/\/$/, "");
+  const configured = String(
+    window.__SHELFMAPPER_PUBLIC__?.appOrigin || "",
+  ).replace(/\/$/, "");
+
+  let origin = pageOrigin;
+  if (configured) {
+    try {
+      const configuredHost = new URL(configured).hostname.toLowerCase();
+      const pageHost = String(window.location.hostname || "").toLowerCase();
+      const hostsMatch =
+        configuredHost === pageHost ||
+        configuredHost === `www.${pageHost}` ||
+        pageHost === `www.${configuredHost}`;
+      // Prefer the server-configured canonical origin when we're already on that host
+      // (avoids http/https or www mismatches). Keep page origin for local dev.
+      if (hostsMatch) origin = configured;
+    } catch {
+      // keep pageOrigin
+    }
+  }
+
+  if (!origin) origin = configured || "http://localhost:3000";
+  return `${origin}/`;
+}
+
 authForm?.addEventListener("submit", async (e) => {
   e.preventDefault();
 
@@ -1268,7 +1295,7 @@ authForm?.addEventListener("submit", async (e) => {
       }
       if (password !== confirmPassword) return;
       if (!requireAuthTermsAccepted()) return;
-      const emailRedirectTo = `${window.location.origin}${window.location.pathname}`;
+      const emailRedirectTo = getAuthRedirectTo();
       const legalMeta = Legal?.buildLegalAcceptanceMetadata() || {};
 
       const { error } = await supabaseClient.auth.signUp({
@@ -1311,7 +1338,7 @@ googleAuthBtn?.addEventListener("click", async () => {
   authProviderError.textContent = "";
 
   try {
-    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const redirectTo = getAuthRedirectTo();
     const { error } = await supabaseClient.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo },

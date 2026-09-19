@@ -74,8 +74,36 @@ app.use(
 );
 
 const clientPath = path.join(__dirname, "../../client/src");
+
+function getPublicAppOrigin() {
+  const raw = String(
+    process.env.CANONICAL_ORIGIN || process.env.APP_BASE_URL || "",
+  )
+    .trim()
+    .replace(/\/$/, "");
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+  return "";
+}
+
+function sendIndexHtml(res) {
+  const indexPath = path.join(clientPath, "index.html");
+  let html = fs.readFileSync(indexPath, "utf8");
+  const payload = JSON.stringify({
+    appOrigin: getPublicAppOrigin() || null,
+  });
+  const inject = `<script>window.__SHELFMAPPER_PUBLIC__=${payload};</script>`;
+  html = html.includes("</head>")
+    ? html.replace("</head>", `${inject}</head>`)
+    : `${inject}${html}`;
+  res.setHeader("Cache-Control", "no-cache");
+  res.type("html").send(html);
+}
+
+app.get(["/", "/index.html"], (req, res) => sendIndexHtml(res));
+
 app.use(
   express.static(clientPath, {
+    index: false,
     setHeaders(res, filePath) {
       if (filePath.endsWith("sw.js") || filePath.endsWith("manifest.webmanifest")) {
         res.setHeader("Cache-Control", "no-cache");
@@ -948,7 +976,13 @@ Output format JSON array:
   }
 }
 
-app.use((req, res) => res.sendFile(path.join(clientPath, "index.html")));
+app.get("/api/public-config", (req, res) => {
+  res.json({
+    appOrigin: getPublicAppOrigin() || null,
+  });
+});
+
+app.use((req, res) => sendIndexHtml(res));
 app.use(handleUploadError);
 app.use((error, req, res, next) => {
   console.error("Unhandled request error:", error);
