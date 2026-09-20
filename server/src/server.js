@@ -88,16 +88,22 @@ function getPublicAppOrigin() {
 function sendIndexHtml(res) {
   const indexPath = path.join(clientPath, "index.html");
   let html = fs.readFileSync(indexPath, "utf8");
-  const payload = JSON.stringify({
-    appOrigin: getPublicAppOrigin() || null,
-  });
-  const inject = `<script>window.__SHELFMAPPER_PUBLIC__=${payload};</script>`;
+  // External script only — inline scripts are blocked by CSP script-src.
+  const inject = `<script src="/api/public-config.js"></script>`;
   html = html.includes("</head>")
     ? html.replace("</head>", `${inject}</head>`)
     : `${inject}${html}`;
   res.setHeader("Cache-Control", "no-cache");
   res.type("html").send(html);
 }
+
+app.get("/api/public-config.js", (req, res) => {
+  const payload = JSON.stringify({
+    appOrigin: getPublicAppOrigin() || null,
+  });
+  res.setHeader("Cache-Control", "no-cache");
+  res.type("application/javascript").send(`window.__SHELFMAPPER_PUBLIC__=${payload};`);
+});
 
 app.get(["/", "/index.html"], (req, res) => sendIndexHtml(res));
 
