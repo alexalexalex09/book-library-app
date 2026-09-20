@@ -557,6 +557,8 @@ input:focus-visible,
   top: 12px;
   left: 12px;
   z-index: 20;
+  width: auto;
+  margin-top: 0;
   background: #ffffff;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
@@ -653,6 +655,8 @@ input:focus-visible,
 }
 
 .spines-scroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -692,6 +696,7 @@ input:focus-visible,
   width: 100vw;
   height: calc(100dvh - 80px);
   position: relative;
+  z-index: 1; /* contain map-controls / map-hint stacking under the library sidebar */
   overflow: hidden;
   background-color: #eef2f7;
   background-image:
@@ -890,8 +895,27 @@ input:focus-visible,
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid #e2e8f0;
-  cursor: default;
+  cursor: pointer;
   gap: 12px;
+}
+
+#mobileLibraryToggle {
+  width: 100%;
+  margin: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+#mobileLibraryToggle:focus-visible {
+  outline: 2px solid var(--primary, #8b3a2f);
+  outline-offset: -2px;
 }
 
 .sidebar-title {
@@ -905,6 +929,10 @@ input:focus-visible,
 
 .sidebar-heading {
   margin: 0;
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text, #2c1f0e);
 }
 
 .sidebar-search {
@@ -922,6 +950,24 @@ input:focus-visible,
   flex-direction: column;
   gap: 12px;
   transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
+}
+
+/* Collapsible library sheet — used on mobile drawer and desktop floating card */
+.sidebar-content.collapsed {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+  overflow: hidden;
+  border: none;
+}
+
+.sidebar-header.collapsed {
+  border-bottom-color: transparent;
+}
+
+.sidebar-header.collapsed .toggle-icon {
+  transform: rotate(180deg);
 }
 
 .sidebar-actions-row {
@@ -2213,38 +2259,29 @@ input:focus-visible,
     top: 12px;
   }
 
-  /* Mobile Library Sidebar Drawer */
+  /* Mobile Library Sidebar Drawer — above bottom .app-nav (z-index 1000) */
 #libraryView .sidebar {
     position: fixed; /* Locks the drawer to the screen, not the page */
     top: auto;
-    bottom: calc(80px + env(safe-area-inset-bottom, 0px)); 
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
     right: 12px;
     left: 12px;
     width: auto;
     border-radius: 16px;
-    z-index: 900;
+    z-index: 1100;
     box-shadow: 0 -4px 15px rgba(0, 0, 0, 0.1);
+    pointer-events: auto;
   }
   
-  .sidebar-header {
+  .sidebar-header,
+  #mobileLibraryToggle {
     cursor: pointer;
     position: relative;
     padding-top: 18px;
+    pointer-events: auto;
   }
   
-  /* Collapsible State Handled by app.js */
-  .sidebar-content.collapsed {
-    max-height: 0;
-    padding-top: 0;
-    padding-bottom: 0;
-    opacity: 0;
-    overflow: hidden;
-    border: none;
-  }
-  
-  .sidebar-header.collapsed .toggle-icon {
-    transform: rotate(180deg);
-  }
+  /* Collapsible rules are global; keep mobile chevron affordance */
 }
 
 @media (display-mode: standalone) and (max-width: 768px) {
@@ -2894,6 +2931,7 @@ body.guest-auth-open {
 
 #uploadView {
   padding-top: 0;
+  padding-bottom: 0;
 }
 
 .scan-shell {
@@ -3102,7 +3140,7 @@ body.guest-auth-open {
 
 .scan-wizard-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 250px;
+  grid-template-columns: minmax(0, 1fr) 320px;
   gap: 18px;
 }
 
@@ -3114,6 +3152,8 @@ body.guest-auth-open {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
+  height: 100%;
 }
 
 .upload-label-btn {
@@ -3125,11 +3165,13 @@ body.guest-auth-open {
   background: var(--surface-muted);
   border: 2px dashed var(--border-strong);
   border-radius: 10px;
+  width: 100%;
   min-height: 27vh;
   max-height: none;
 }
 
 #shelfCanvas {
+  max-width: 100%;
   max-height: 25vh;
 }
 
@@ -3170,14 +3212,7 @@ body.guest-auth-open {
   padding-top: 12px;
 }
 
-.scan-crop-btn {
-  width: auto;
-  min-width: 140px;
-  margin: 0;
-}
-
 .crop-canvas-btn {
-  margin-left: 8px;
   padding: 4px 10px;
   font-size: 0.8rem;
 }
@@ -3225,6 +3260,40 @@ body.guest-auth-open {
   border: 1px solid var(--border);
   border-radius: 10px;
   max-height: 35vh;
+}
+
+@media (min-width: 961px) {
+  .scan-wizard-body {
+    align-items: stretch;
+  }
+
+  /* Upload: photo-first; tips stay a readable sidebar */
+  #uploadView[data-scan-stage="upload"] .scan-wizard-body {
+    grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.7fr);
+  }
+
+  #uploadView[data-scan-stage="upload"] .canvas-container {
+    min-height: min(480px, calc(100dvh - 280px));
+  }
+
+  /* Review: give matching list room; canvas fills the photo column */
+  #uploadView[data-scan-stage="review"] .scan-wizard-body {
+    grid-template-columns: minmax(0, 1fr) minmax(380px, 1.05fr);
+  }
+
+  #uploadView[data-scan-stage="review"] .canvas-container {
+    min-height: min(520px, calc(100dvh - 240px));
+  }
+
+  #uploadView[data-scan-stage="review"] #shelfCanvas {
+    max-height: calc(100dvh - 260px);
+  }
+
+  #pendingContainer {
+    flex: 1;
+    min-height: 420px;
+    max-height: calc(100dvh - 220px);
+  }
 }
 
 #uploadView[data-scan-stage="upload"] #pendingContainer {

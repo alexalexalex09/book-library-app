@@ -1192,7 +1192,15 @@ function confirmDialog({ title = "Please confirm", message = "Are you sure?", co
   });
 }
 
-function promptDialog({ title = "Rename", hint = "", initialValue = "", confirmLabel = "Save", cancelLabel = "Cancel", label = "Name" } = {}) {
+function promptDialog({
+  title = "Rename",
+  hint = "",
+  initialValue = "",
+  confirmLabel = "Save",
+  cancelLabel = "Cancel",
+  label = "Name",
+  allowEmpty = false,
+} = {}) {
   const modal = document.getElementById("promptModal");
   const titleEl = document.getElementById("promptModalTitle");
   const hintEl = document.getElementById("promptModalHint");
@@ -1232,12 +1240,7 @@ function promptDialog({ title = "Rename", hint = "", initialValue = "", confirmL
       modal.removeEventListener("keydown", onKey);
       modal.removeEventListener("click", onOverlay);
       closeModalAndRestore(modal);
-      if (typeof result === "string") {
-        const trimmed = result.trim();
-        resolve(trimmed === "" ? null : trimmed);
-      } else {
-        resolve(result);
-      }
+      resolve(normalizePromptResult(result, { allowEmpty }));
     }
     okBtn.textContent = confirmLabel;
     cancelBtn.textContent = cancelLabel;
@@ -1657,7 +1660,6 @@ function updateScanSteps() {
   const stepsEl = document.getElementById("scanSteps");
   const uploadView = document.getElementById("uploadView");
   const saveBtn = document.getElementById("saveShelfBtn");
-  const cropBtn = document.getElementById("cropShelfBtn");
   const cropCanvasBtnEl = document.getElementById("cropCanvasBtn");
   const sidebarStepNumber = document.getElementById("scanSidebarStepNumber");
   const sidebarStepName = document.getElementById("scanSidebarStepName");
@@ -1703,9 +1705,6 @@ function updateScanSteps() {
     saveBtn.textContent = hasSpines
       ? `Save shelf (${currentDetectedSpines.length})`
       : "Save shelf";
-  }
-  if (cropBtn) {
-    cropBtn.disabled = !hasImage;
   }
   if (cropCanvasBtnEl) {
     cropCanvasBtnEl.disabled = !hasImage;
@@ -1759,20 +1758,22 @@ const canvasControls = document.getElementById("canvasControls");
 const zoomSlider = document.getElementById("zoomSlider");
 const resetZoomBtn = document.getElementById("resetZoomBtn");
 const saveShelfBtn = document.getElementById("saveShelfBtn");
-const cropShelfBtn = document.getElementById("cropShelfBtn");
+const cropCanvasBtn = document.getElementById("cropCanvasBtn");
+
+function setCanvasChromeVisible(visible) {
+  canvasControls?.classList.toggle("hidden-element", !visible);
+  cropCanvasBtn?.classList.toggle("hidden-element", !visible);
+}
 
 let currentUploadedFile = null;
 let currentLoadedImage = null;
 let currentDetectedSpines = [];
 let currentUploadedImageHash = null;
+let pendingSavedShelfId = null;
 let scanQueue = [];
 
 saveShelfBtn?.addEventListener("click", () => {
   saveShelfToDatabase();
-});
-
-cropShelfBtn?.addEventListener("click", () => {
-  openCropModalForCurrentImage({ forceRescan: true });
 });
 
 // Canvas Viewport & Editing State
@@ -2117,10 +2118,11 @@ function beginScanForFile(file) {
   currentUploadedFile = null;
   currentDetectedSpines = [];
   currentUploadedImageHash = null;
+  pendingSavedShelfId = null;
   currentDismissedTitles = [];
   placeholderText.style.display = "none";
   shelfCanvas.style.display = "block";
-  canvasControls.classList.remove("hidden-element");
+  setCanvasChromeVisible(true);
   document.getElementById("pendingContainer").innerHTML =
     "<p class='scan-loading-text'>Preparing photo...</p>";
   updateScanSteps();
@@ -2563,7 +2565,6 @@ function renderDetectedSpines(options = {}) {
 // ==========================================
 // CROP DIALOG ENGINE
 // ==========================================
-const cropCanvasBtn = document.getElementById("cropCanvasBtn");
 const cropModal = document.getElementById("cropModal");
 const cropCanvas = document.getElementById("cropCanvas");
 const cropCtx = cropCanvas?.getContext("2d");
@@ -2640,17 +2641,87 @@ async function runShelfOcr(file, { forceRescan = false } = {}) {
   }
 }
 
+function isAlreadyExistsError(error) {
+  if (!error) return false;
+  const status = error.statusCode ?? error.status ?? error.code;
+  const msg = String(error.message || error.error || "");
+  return (
+    status === 409 ||
+    status === "409" ||
+    status === "23505" ||
+    /already exists|duplicate|unique/i.test(msg)
+  );
+}
+
+function buildUserBookRows(spines, { userId, shelfId, imagePath }) {
+  return (spines || []).map((spine) => ({
+    user_id: userId,
+    shelf_id: shelfId,
+    title: spine.title?.trim() || "Untitled Book",
+    author: spine.author || null,
+    bounding_box: spine.box || spine.boundingBox || null,
+    polygon: spine.polygon || null,
+    cover: toHttpsUrl(spine.thumbnail) || null,
+    shelf_image_url: imagePath,
+  }));
+}
+
+async function insertUserBooks(payload) {
+  let rows = payload;
+  let { error } = await supabaseClient.from("user_books").insert(rows);
+  if (error && /author/i.test(error.message)) {
+    rows = rows.map(({ author, ...rest }) => rest);
+    ({ error } = await supabaseClient.from("user_books").insert(rows));
+  }
+  if (error && /cover_url|'cover'/i.test(error.message)) {
+    rows = rows.map(({ cover, ...rest }) => rest);
+    ({ error } = await supabaseClient.from("user_books").insert(rows));
+  }
+  if (error && /polygon/i.test(error.message)) {
+    rows = rows.map(({ polygon, ...rest }) => rest);
+    ({ error } = await supabaseClient.from("user_books").insert(rows));
+  }
+  return error || null;
+}
+
+async function saveBooksForShelf(shelfId, imagePath) {
+  const { data: existingBooks, error: existingError } = await supabaseClient
+    .from("user_books")
+    .select("id")
+    .eq("shelf_id", shelfId)
+    .eq("user_id", currentUser.id);
+  if (existingError) return existingError;
+
+  if ((existingBooks || []).length > 0) {
+    const { error: deleteError } = await supabaseClient
+      .from("user_books")
+      .delete()
+      .eq("shelf_id", shelfId)
+      .eq("user_id", currentUser.id);
+    if (deleteError) return deleteError;
+  }
+
+  return insertUserBooks(
+    buildUserBookRows(currentDetectedSpines, {
+      userId: currentUser.id,
+      shelfId,
+      imagePath,
+    }),
+  );
+}
+
 function resetScanWorkspace() {
   currentUploadedFile = null;
   currentLoadedImage = null;
   currentDetectedSpines = [];
   currentUploadedImageHash = null;
+  pendingSavedShelfId = null;
   currentDismissedTitles = [];
 
   if (ctx && shelfCanvas) ctx.clearRect(0, 0, shelfCanvas.width, shelfCanvas.height);
   if (shelfCanvas) shelfCanvas.style.display = "none";
   if (placeholderText) placeholderText.style.display = "flex";
-  if (canvasControls) canvasControls.classList.add("hidden-element");
+  setCanvasChromeVisible(false);
   if (imageUpload) imageUpload.value = "";
   document.getElementById("pendingContainer").innerHTML =
     "<p class='empty-state'>Upload a new image to continue.</p>";
@@ -2901,39 +2972,66 @@ async function saveShelfToDatabase() {
     label: "Shelf name",
     confirmLabel: "Save shelf",
     cancelLabel: "Cancel",
+    allowEmpty: true,
   });
-  if (shelfName === null) return; // cancelled
-  const resolvedName = String(shelfName || "").trim() || "Untitled Shelf";
+  const resolvedName = resolveShelfName(shelfName);
+  if (resolvedName === null) return; // cancelled
 
   const saveBtns = document.querySelectorAll(".save-shelf-btn");
   saveBtns.forEach((btn) => {
     btn.disabled = true;
     btn.textContent = "Saving Shelf & Books...";
   });
-  if (cropShelfBtn) cropShelfBtn.disabled = true;
+  if (cropCanvasBtn) cropCanvasBtn.disabled = true;
 
   try {
-    const fileName = currentUploadedImageHash
-      ? `${currentUser.id}/${currentUploadedImageHash}.jpg`
-      : `${currentUser.id}/${Date.now()}.jpg`;
+    let existingShelf = null;
+    if (pendingSavedShelfId) {
+      const { data } = await supabaseClient
+        .from("shelves")
+        .select("id, user_id, image_url")
+        .eq("id", pendingSavedShelfId)
+        .eq("user_id", currentUser.id)
+        .maybeSingle();
+      existingShelf = data || null;
+    }
+
+    const fileName =
+      existingShelf?.image_url ||
+      (currentUploadedImageHash
+        ? `${currentUser.id}/${currentUploadedImageHash}.jpg`
+        : `${currentUser.id}/${Date.now()}.jpg`);
     const imagePath = fileName;
 
     const { error: uploadError } = await supabaseClient.storage
       .from("shelves")
       .upload(fileName, currentUploadedFile, {
-        upsert: Boolean(currentUploadedImageHash),
+        upsert: Boolean(
+          currentUploadedImageHash || existingShelf || pendingSavedShelfId,
+        ),
       });
 
-    if (uploadError) {
+    if (uploadError && !isAlreadyExistsError(uploadError)) {
       showToast("Failed to upload shelf image: " + uploadError.message, "error");
       return;
     }
 
-    const { data: existingShelf } = await supabaseClient
-      .from("shelves")
-      .select("id, user_id")
-      .eq("image_url", imagePath)
-      .maybeSingle();
+    if (!existingShelf) {
+      const { data } = await supabaseClient
+        .from("shelves")
+        .select("id, user_id, image_url")
+        .eq("image_url", imagePath)
+        .maybeSingle();
+      existingShelf = data || null;
+    }
+
+    const spinePayload = {
+      name: resolvedName,
+      detected_spines: spinesForStorage(currentDetectedSpines),
+      dismissed_titles: currentDismissedTitles,
+    };
+
+    let shelfId = null;
 
     if (existingShelf) {
       if (existingShelf.user_id !== currentUser.id) {
@@ -2942,93 +3040,74 @@ async function saveShelfToDatabase() {
       }
       const { error: updateError } = await supabaseClient
         .from("shelves")
-        .update({
-          name: resolvedName,
-          detected_spines: spinesForStorage(currentDetectedSpines),
-          dismissed_titles: currentDismissedTitles,
-        })
+        .update(spinePayload)
         .eq("id", existingShelf.id)
         .eq("user_id", currentUser.id);
       if (updateError) {
         showToast("Failed to update shelf: " + updateError.message, "error");
         return;
       }
-      showToast("Updated shelf in your library.", "success");
-      resetScanWorkspace();
-      await loadLibraryData();
-      await navigateToShelfOnMap(existingShelf.id);
-      return;
+      shelfId = existingShelf.id;
+    } else {
+      const { data: shelfData, error: shelfError } = await supabaseClient
+        .from("shelves")
+        .insert({
+          user_id: currentUser.id,
+          image_url: imagePath,
+          map_width: DEFAULT_SHELF_CARD_WIDTH,
+          map_scale: 1,
+          ...spinePayload,
+        })
+        .select()
+        .single();
+
+      if (shelfError) {
+        if (isAlreadyExistsError(shelfError)) {
+          const { data: raced } = await supabaseClient
+            .from("shelves")
+            .select("id, user_id")
+            .eq("image_url", imagePath)
+            .maybeSingle();
+          if (raced && raced.user_id === currentUser.id) {
+            const { error: updateError } = await supabaseClient
+              .from("shelves")
+              .update(spinePayload)
+              .eq("id", raced.id)
+              .eq("user_id", currentUser.id);
+            if (updateError) {
+              showToast("Failed to update shelf: " + updateError.message, "error");
+              return;
+            }
+            shelfId = raced.id;
+          } else {
+            showToast("Failed to save shelf record: " + shelfError.message, "error");
+            return;
+          }
+        } else {
+          showToast("Failed to save shelf record: " + shelfError.message, "error");
+          return;
+        }
+      } else {
+        shelfId = shelfData.id;
+      }
     }
 
-    const { data: shelfData, error: shelfError } = await supabaseClient
-      .from("shelves")
-      .insert({
-        user_id: currentUser.id,
-        name: resolvedName,
-        image_url: imagePath,
-        detected_spines: spinesForStorage(currentDetectedSpines),
-        dismissed_titles: currentDismissedTitles,
-        map_width: DEFAULT_SHELF_CARD_WIDTH,
-        map_scale: 1,
-      })
-      .select()
-      .single();
-
-    if (shelfError) {
-      showToast("Failed to save shelf record: " + shelfError.message, "error");
-      return;
-    }
-
-    const booksToInsert = currentDetectedSpines.map((spine) => ({
-      user_id: currentUser.id,
-      shelf_id: shelfData.id,
-      title: spine.title?.trim() || "Untitled Book",
-      author: spine.author || null,
-      bounding_box: spine.box || spine.boundingBox || null,
-      polygon: spine.polygon || null,
-      cover: toHttpsUrl(spine.thumbnail) || null,
-      shelf_image_url: imagePath,
-    }));
-
-    let payload = booksToInsert;
-    let { error: booksError } = await supabaseClient
-      .from("user_books")
-      .insert(payload);
-
-    if (booksError && /author/i.test(booksError.message)) {
-      payload = payload.map(({ author, ...rest }) => rest);
-      const retry = await supabaseClient.from("user_books").insert(payload);
-      booksError = retry.error;
-    }
-
-    if (booksError && /cover_url|'cover'/i.test(booksError.message)) {
-      payload = payload.map(({ cover, ...rest }) => rest);
-      const retry = await supabaseClient.from("user_books").insert(payload);
-      booksError = retry.error;
-    }
-
-    if (booksError && /polygon/i.test(booksError.message)) {
-      payload = payload.map(({ polygon, ...rest }) => rest);
-      const retry = await supabaseClient.from("user_books").insert(payload);
-      booksError = retry.error;
-    }
-
+    pendingSavedShelfId = shelfId;
+    const booksError = await saveBooksForShelf(shelfId, imagePath);
     if (booksError) {
       console.error("Failed to insert user_books:", booksError);
       showToast(
-        "Shelf created, but books failed to save. Fix the issue and tap Save again.",
+        "Shelf saved, but books failed to save. Tap Save again to retry the books.",
         "error",
       );
-      // Keep workspace so the user can retry without re-scanning.
       return;
     }
 
-    showToast(
-      `Saved "${resolvedName}" with ${booksToInsert.length} book(s).`,
-      "success",
-    );
+    const savedShelfId = shelfId;
+    const bookCount = currentDetectedSpines.length;
+    pendingSavedShelfId = null;
+    showToast(`Saved "${resolvedName}" with ${bookCount} book(s).`, "success");
 
-    const savedShelfId = shelfData.id;
     const queueNext =
       isPremiumPlan() && scanQueue.length > 0 ? scanQueue.shift() : null;
 
@@ -4027,6 +4106,7 @@ async function loadLibraryMap() {
           });
 
           currentUploadedFile = file;
+          pendingSavedShelfId = shelf.id;
           currentDismissedTitles = Array.isArray(shelf.dismissed_titles)
             ? shelf.dismissed_titles
                 .map((title) => String(title || "").trim())
@@ -4034,7 +4114,7 @@ async function loadLibraryMap() {
             : [];
           placeholderText.style.display = "none";
           shelfCanvas.style.display = "block";
-          canvasControls.classList.remove("hidden-element");
+          setCanvasChromeVisible(true);
           updateScanSteps();
 
           await new Promise((resolve, reject) => {
@@ -5001,13 +5081,21 @@ function setMobileSheetCollapsed(collapsed) {
   mobileLibraryToggle.setAttribute("aria-expanded", String(!collapsed));
 }
 
+let wasMobileLibraryLayout = window.innerWidth <= 768;
+
 function applyDefaultMobileSheetState() {
-  if (window.innerWidth <= 768) setMobileSheetCollapsed(true);
-  else setMobileSheetCollapsed(false);
+  const isMobile = window.innerWidth <= 768;
+  // Only reset when crossing the breakpoint — mobile URL-bar / dvh resizes
+  // must not collapse an expanded sheet.
+  if (isMobile === wasMobileLibraryLayout) return;
+  wasMobileLibraryLayout = isMobile;
+  setMobileSheetCollapsed(isMobile);
 }
 
-function toggleMobileSheet() {
-  if (window.innerWidth > 768 || !mobileLibraryContent) return;
+function toggleMobileSheet(e) {
+  if (!mobileLibraryContent) return;
+  e?.preventDefault?.();
+  e?.stopPropagation?.();
   setMobileSheetCollapsed(!mobileLibraryContent.classList.contains("collapsed"));
 }
 
@@ -5015,8 +5103,8 @@ mobileLibraryToggle?.addEventListener("click", toggleMobileSheet);
 mobileLibraryToggle?.addEventListener("keydown", (e) => {
   if (e.key === "Enter" || e.key === " ") {
     e.preventDefault();
-    toggleMobileSheet();
+    toggleMobileSheet(e);
   }
 });
 window.addEventListener("resize", applyDefaultMobileSheetState);
-applyDefaultMobileSheetState();
+setMobileSheetCollapsed(wasMobileLibraryLayout);

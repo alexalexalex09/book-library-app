@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="ShelfMapper">
   
   <!-- CSS Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=22">
+  <link rel="stylesheet" href="css/style.css?v=28">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500;1,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -237,16 +237,16 @@
             
                   <canvas id="shelfCanvas" class="canvas-hidden"></canvas>
 
+                  <button id="cropCanvasBtn" class="auth-btn secondary-btn crop-canvas-btn hidden-element" type="button">Crop &amp; re-scan</button>
+
                   <div id="canvasControls" class="canvas-controls-bar hidden-element">
                     <label for="zoomSlider">Zoom:</label>
                     <input type="range" id="zoomSlider" class="zoom-range" min="1" max="4" step="0.1" value="1" />
                     <button id="resetZoomBtn" class="zoom-reset-btn" type="button">Reset</button>
-                    <button id="cropCanvasBtn" class="auth-btn secondary-btn crop-canvas-btn" type="button">Crop &amp; re-scan</button>
                   </div>
                 </div>
 
                 <div class="scan-footer-row">
-                  <button id="cropShelfBtn" class="auth-btn secondary-btn scan-crop-btn" type="button" disabled>Crop &amp; re-scan</button>
                   <button id="saveShelfBtn" class="auth-btn primary-btn scan-analyse-btn save-shelf-btn" type="button" disabled>Save shelf</button>
                 </div>
               </div>
@@ -310,10 +310,10 @@
           </div>
         </div>
         <aside class="sidebar">
-          <div class="sidebar-header" id="mobileLibraryToggle" role="button" tabindex="0" aria-expanded="false" aria-controls="mobileLibraryContent">
-            <h2 class="sidebar-heading">My Library</h2>
-            <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
-          </div>
+          <button type="button" class="sidebar-header" id="mobileLibraryToggle" aria-expanded="false" aria-controls="mobileLibraryContent">
+            <span class="sidebar-heading">My Library</span>
+            <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
           <div class="sidebar-content" id="mobileLibraryContent">
             <div class="sidebar-actions-row">
               <button id="exportCsvBtn" class="auth-btn secondary-btn modal-btn" type="button">Export CSV</button>
@@ -510,7 +510,8 @@
   <script src="js/offline-store.js?v=14"></script>
   <script src="js/pwa.js?v=2"></script>
   <script src="js/legal.js?v=1"></script>
+  <script src="js/prompt-utils.js?v=1"></script>
   <script src="js/api.js"></script>
-  <script src="js/app.js?v=20"></script>
+  <script src="js/app.js?v=25"></script>
 </body>
 </html>
