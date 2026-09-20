@@ -7,6 +7,7 @@ const APP_SHELL_URLS = [
   "/manifest.webmanifest",
   "/css/style.css",
   "/js/api.js",
+  "/js/shelf-save.js",
   "/js/app.js",
   "/js/legal.js",
   "/js/offline-store.js",
