@@ -219,7 +219,7 @@
 
             <div class="scan-wizard-body">
               <div class="scan-main-panel">
-                <input type="file" id="imageUpload" accept="image/*" class="visually-hidden-input" multiple />
+                <input type="file" id="imageUpload" accept="image/*" capture="environment" class="visually-hidden-input" multiple />
                 <div class="canvas-container" id="canvasDropzone">
                   <div id="placeholderText" class="dropzone-empty-state clickable-dropzone" role="button" tabindex="0" aria-label="Upload a shelf photo. Activate to choose an image, or drag and drop an image here.">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="dropzone-icon" aria-hidden="true">
@@ -241,11 +241,13 @@
                     <label for="zoomSlider">Zoom:</label>
                     <input type="range" id="zoomSlider" class="zoom-range" min="1" max="4" step="0.1" value="1" />
                     <button id="resetZoomBtn" class="zoom-reset-btn" type="button">Reset</button>
+                    <button id="cropCanvasBtn" class="auth-btn secondary-btn crop-canvas-btn" type="button">Crop &amp; re-scan</button>
                   </div>
                 </div>
 
                 <div class="scan-footer-row">
-                  <button id="analyseShelfBtn" class="auth-btn primary-btn scan-analyse-btn" type="button" disabled>Analyse shelf</button>
+                  <button id="cropShelfBtn" class="auth-btn secondary-btn scan-crop-btn" type="button" disabled>Crop &amp; re-scan</button>
+                  <button id="saveShelfBtn" class="auth-btn primary-btn scan-analyse-btn save-shelf-btn" type="button" disabled>Save shelf</button>
                 </div>
               </div>
 
@@ -416,16 +418,16 @@
         <div class="upgrade-plan-col">
           <h3 class="upgrade-plan-title">Free <span id="freePlanCurrentLabel" class="upgrade-current-plan hidden-element">(Your plan)</span></h3>
           <ul class="upgrade-plan-list">
-            <li>10 OCR scans per month</li>
-            <li>60 book searches per month</li>
+            <li>10 OCR scans per 15 minutes</li>
+            <li>60 book searches per minute</li>
             <li>Basic scan and map tools</li>
           </ul>
         </div>
         <div class="upgrade-plan-col upgrade-plan-col-premium">
           <h3 class="upgrade-plan-title">Premium <span id="premiumPlanCurrentLabel" class="upgrade-current-plan hidden-element">(Your plan)</span></h3>
           <ul class="upgrade-plan-list">
-            <li>60 OCR scans per month</li>
-            <li>300 book searches per month</li>
+            <li>60 OCR scans per 15 minutes</li>
+            <li>300 book searches per minute</li>
             <li>Rooms, sharing, custom covers, and priority tools</li>
           </ul>
         </div>

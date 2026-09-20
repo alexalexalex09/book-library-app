@@ -33,7 +33,11 @@ let lastShelvesSnapshot = [];
 let offlineMode = !navigator.onLine;
 const offlineStore = window.HiLibraryOffline || null;
 
-const SEARCH_RESULT_LIMIT = 3;
+const SEARCH_RESULT_LIMIT = 5;
+const FREE_SEARCH_ALL_LIMIT = 5;
+const SEARCH_CONCURRENCY = 3;
+const AUTO_CONFIRM_SCORE = 0.72;
+const SUGGEST_SCORE = 0.45;
 const DEFAULT_SHELF_CARD_WIDTH = 300;
 const MIN_SHELF_CARD_WIDTH = 160;
 const BOOK_COVER_PLACEHOLDER =
@@ -41,7 +45,6 @@ const BOOK_COVER_PLACEHOLDER =
   encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="70"><rect width="100%" height="100%" fill="#e5e7eb"/><text x="50%" y="52%" text-anchor="middle" font-size="9" fill="#71717a">No cover</text></svg>',
   );
-const FREE_SEARCH_ALL_LIMIT = 5;
 const FOLIO_COLORS = {
   primary: "#8b3a2f",
   success: "#6f8753",
@@ -287,6 +290,8 @@ function spinesForStorage(spines) {
     confirmedTitle: spine.confirmedTitle || null,
     author: spine.author || null,
     thumbnail: toHttpsUrl(spine.thumbnail) || null,
+    volumeId: spine.volumeId || null,
+    isbn: spine.isbn || null,
   }));
 }
 
@@ -311,10 +316,19 @@ function parseBookSearchItems(data) {
   if (!Array.isArray(data?.items) || data.items.length === 0) return [];
   return data.items.slice(0, SEARCH_RESULT_LIMIT).map((item) => {
     const vol = item.volumeInfo || {};
+    const ids = vol.industryIdentifiers || [];
+    const isbn =
+      ids.find((x) => x.type === "ISBN_13")?.identifier ||
+      ids.find((x) => x.type === "ISBN_10")?.identifier ||
+      null;
     return {
       title: vol.title || "Unknown Title",
       authors: vol.authors ? vol.authors.join(", ") : "Unknown Author",
       thumbnail: coverUrlFromVolume(vol),
+      year: vol.publishedDate ? String(vol.publishedDate).slice(0, 4) : null,
+      isbn,
+      volumeId: item.id || null,
+      matchScore: Number.isFinite(item.matchScore) ? item.matchScore : null,
     };
   });
 }
@@ -342,6 +356,19 @@ function renderBookSearchCards(container, books, { confirmLabel, onConfirm }) {
     authorEl.className = "book-result-author";
     authorEl.textContent = `By ${book.authors}`;
 
+    infoCol.appendChild(titleEl);
+    infoCol.appendChild(authorEl);
+
+    const metaParts = [];
+    if (book.year) metaParts.push(book.year);
+    if (book.isbn) metaParts.push(`ISBN ${book.isbn}`);
+    if (metaParts.length) {
+      const metaEl = document.createElement("span");
+      metaEl.className = "book-result-meta";
+      metaEl.textContent = metaParts.join(" · ");
+      infoCol.appendChild(metaEl);
+    }
+
     const confirmBtn = document.createElement("button");
     confirmBtn.textContent = confirmLabel;
     confirmBtn.className = "book-confirm-btn";
@@ -349,8 +376,6 @@ function renderBookSearchCards(container, books, { confirmLabel, onConfirm }) {
     confirmBtn.setAttribute("aria-label", `${confirmLabel} ${book.title}`);
     confirmBtn.addEventListener("click", () => onConfirm(book));
 
-    infoCol.appendChild(titleEl);
-    infoCol.appendChild(authorEl);
     infoCol.appendChild(confirmBtn);
 
     card.appendChild(createBookCoverImage(book.thumbnail));
@@ -359,10 +384,54 @@ function renderBookSearchCards(container, books, { confirmLabel, onConfirm }) {
   });
 }
 
-async function searchBooksByQuery(query) {
-  const res = await authenticatedFetch(
-    `/api/books?q=${encodeURIComponent(query)}`,
-  );
+function isSearchableSpineTitle(title) {
+  const cleaned = String(title || "").trim().toLowerCase();
+  return Boolean(cleaned) && cleaned !== "unlabeled spine";
+}
+
+function applyCatalogMatchToSpine(spine, book, titleInput, cardEl, resultsEl) {
+  confirmSpineWithBook(spine, book);
+  if (titleInput) titleInput.value = book.title;
+  cardEl?.classList.add("is-confirmed");
+  if (resultsEl) {
+    resultsEl.innerHTML = "";
+    const selectedRow = document.createElement("div");
+    selectedRow.className = "spine-confirmed-row";
+    if (spine.thumbnail) {
+      selectedRow.appendChild(createBookCoverImage(spine.thumbnail));
+    }
+    const info = document.createElement("div");
+    info.className = "book-result-info";
+    const selectedTitle = document.createElement("strong");
+    selectedTitle.className = "book-result-title";
+    selectedTitle.textContent = spine.title || "Untitled Book";
+    info.appendChild(selectedTitle);
+    if (spine.author) {
+      const selectedAuthor = document.createElement("span");
+      selectedAuthor.className = "book-result-author";
+      selectedAuthor.textContent = `By ${spine.author}`;
+      info.appendChild(selectedAuthor);
+    }
+    const badge = document.createElement("span");
+    badge.className = "spine-confirmed-badge";
+    badge.textContent = "Confirmed";
+    info.appendChild(badge);
+    selectedRow.appendChild(info);
+    resultsEl.appendChild(selectedRow);
+  }
+  showToast(`"${book.title}" confirmed.`, "success");
+}
+
+async function searchBooksByQuery(query, author = "") {
+  const title = String(query || "").trim();
+  const authorText = String(author || "").trim();
+  if (!isSearchableSpineTitle(title) && !authorText) {
+    return [];
+  }
+  const params = new URLSearchParams();
+  if (title) params.set("q", title);
+  if (authorText) params.set("author", authorText);
+  const res = await authenticatedFetch(`/api/books?${params.toString()}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const error = new Error(data.error || `Search failed (${res.status})`);
@@ -371,6 +440,98 @@ async function searchBooksByQuery(query) {
     throw error;
   }
   return parseBookSearchItems(data);
+}
+
+async function mapPool(items, concurrency, workerFn) {
+  const list = Array.from(items || []);
+  if (!list.length) return [];
+  const results = new Array(list.length);
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, list.length) },
+    async () => {
+      while (cursor < list.length) {
+        const index = cursor;
+        cursor += 1;
+        results[index] = await workerFn(list[index], index);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+function confirmSpineWithBook(spine, book) {
+  spine.title = book.title;
+  spine.confirmed = true;
+  spine.confirmedTitle = book.title;
+  spine.author = book.authors;
+  spine.thumbnail = book.thumbnail;
+  spine.volumeId = book.volumeId || null;
+  spine.isbn = book.isbn || null;
+  delete spine.bestMatch;
+  delete spine.suggestedMatches;
+}
+
+async function autoMatchDetectedSpines({
+  onlyUnconfirmed = true,
+  notifyLimit = true,
+} = {}) {
+  if (!requireOnline("Book search", false)) return { matched: 0, limited: false };
+
+  let targets = currentDetectedSpines.filter((spine) => {
+    if (!isSearchableSpineTitle(spine.title)) return false;
+    if (onlyUnconfirmed && spine.confirmed) return false;
+    return true;
+  });
+
+  const totalSearchable = targets.length;
+  if (!isPremiumPlan() && targets.length > FREE_SEARCH_ALL_LIMIT) {
+    targets = targets.slice(0, FREE_SEARCH_ALL_LIMIT);
+  }
+  if (!targets.length) return { matched: 0, limited: false };
+
+  let hitLimit = false;
+  let matched = 0;
+
+  await mapPool(targets, SEARCH_CONCURRENCY, async (spine) => {
+    if (hitLimit) return;
+    try {
+      const books = await searchBooksByQuery(spine.title, spine.author || "");
+      const best = books[0];
+      if (!best) return;
+      const score = Number.isFinite(best.matchScore) ? best.matchScore : 0;
+      if (score >= AUTO_CONFIRM_SCORE) {
+        confirmSpineWithBook(spine, best);
+        matched += 1;
+      } else if (score >= SUGGEST_SCORE) {
+        spine.bestMatch = best;
+        spine.suggestedMatches = books;
+      }
+    } catch (err) {
+      if (err?.code === "PLAN_LIMIT") hitLimit = true;
+    }
+  });
+
+  renderDetectedSpines();
+
+  if (
+    notifyLimit &&
+    !isPremiumPlan() &&
+    totalSearchable > FREE_SEARCH_ALL_LIMIT
+  ) {
+    showUpgradeModal({
+      reason: `Free plan can match ${FREE_SEARCH_ALL_LIMIT} spines at once. Upgrade for full Match remaining.`,
+      featureCode: "search_all_batch",
+    });
+  } else if (notifyLimit && hitLimit) {
+    showUpgradeModal({
+      reason: "Book search limit reached. Upgrade for higher limits.",
+      featureCode: "books_rate_limit",
+    });
+  }
+
+  return { matched, limited: hitLimit };
 }
 
 function isPremiumPlan() {
@@ -1495,7 +1656,9 @@ document.querySelectorAll(".nav-btn[data-target]").forEach((btn) => {
 function updateScanSteps() {
   const stepsEl = document.getElementById("scanSteps");
   const uploadView = document.getElementById("uploadView");
-  const analyseBtn = document.getElementById("analyseShelfBtn");
+  const saveBtn = document.getElementById("saveShelfBtn");
+  const cropBtn = document.getElementById("cropShelfBtn");
+  const cropCanvasBtnEl = document.getElementById("cropCanvasBtn");
   const sidebarStepNumber = document.getElementById("scanSidebarStepNumber");
   const sidebarStepName = document.getElementById("scanSidebarStepName");
   const wizardStepNumber = document.getElementById("scanWizardStepNumber");
@@ -1535,9 +1698,17 @@ function updateScanSteps() {
       if (wizardStepDescription) wizardStepDescription.textContent = stageMeta.description;
     }
   }
-  if (analyseBtn) {
-    analyseBtn.disabled = !hasImage;
-    analyseBtn.textContent = hasSpines ? "Ready to Save Shelf" : hasImage ? "Review Spines" : "Analyse shelf";
+  if (saveBtn) {
+    saveBtn.disabled = !hasSpines;
+    saveBtn.textContent = hasSpines
+      ? `Save shelf (${currentDetectedSpines.length})`
+      : "Save shelf";
+  }
+  if (cropBtn) {
+    cropBtn.disabled = !hasImage;
+  }
+  if (cropCanvasBtnEl) {
+    cropCanvasBtnEl.disabled = !hasImage;
   }
   stepsEl.querySelectorAll(".scan-step").forEach((step) => {
     const key = step.getAttribute("data-step");
@@ -1587,7 +1758,8 @@ const placeholderText = document.getElementById("placeholderText");
 const canvasControls = document.getElementById("canvasControls");
 const zoomSlider = document.getElementById("zoomSlider");
 const resetZoomBtn = document.getElementById("resetZoomBtn");
-const analyseShelfBtn = document.getElementById("analyseShelfBtn");
+const saveShelfBtn = document.getElementById("saveShelfBtn");
+const cropShelfBtn = document.getElementById("cropShelfBtn");
 
 let currentUploadedFile = null;
 let currentLoadedImage = null;
@@ -1595,16 +1767,12 @@ let currentDetectedSpines = [];
 let currentUploadedImageHash = null;
 let scanQueue = [];
 
-analyseShelfBtn?.addEventListener("click", () => {
-  if (currentDetectedSpines.length > 0) {
-    saveShelfToDatabase();
-    return;
-  }
-  if (currentLoadedImage) {
-    openCropModalForCurrentImage({ forceRescan: true });
-    return;
-  }
-  imageUpload?.click();
+saveShelfBtn?.addEventListener("click", () => {
+  saveShelfToDatabase();
+});
+
+cropShelfBtn?.addEventListener("click", () => {
+  openCropModalForCurrentImage({ forceRescan: true });
 });
 
 // Canvas Viewport & Editing State
@@ -1954,7 +2122,7 @@ function beginScanForFile(file) {
   shelfCanvas.style.display = "block";
   canvasControls.classList.remove("hidden-element");
   document.getElementById("pendingContainer").innerHTML =
-    "<p class='scan-loading-text'>Crop your image to begin scanning...</p>";
+    "<p class='scan-loading-text'>Preparing photo...</p>";
   updateScanSteps();
 
   canvasState = {
@@ -1968,17 +2136,73 @@ function beginScanForFile(file) {
   activeEditingSpineIndex = null;
   if (zoomSlider) zoomSlider.value = "1";
 
-  const img = new Image();
-  img.onload = () => {
-    shelfCanvas.width = img.width;
-    shelfCanvas.height = img.height;
-    currentLoadedImage = img;
-    redrawCanvasOverlays(null);
-    pendingInitialCrop = true;
-    openCropModalForCurrentImage({ forceRescan: false });
-    updateScanSteps();
-  };
-  img.src = URL.createObjectURL(file);
+  prepareImageFileForUpload(file)
+    .then((prepared) => {
+      currentUploadedFile = prepared;
+      document.getElementById("pendingContainer").innerHTML =
+        "<p class='scan-loading-text'>Scanning shelf...</p>";
+      const img = new Image();
+      img.onload = () => {
+        shelfCanvas.width = img.width;
+        shelfCanvas.height = img.height;
+        currentLoadedImage = img;
+        redrawCanvasOverlays(null);
+        updateScanSteps();
+        runShelfOcr(prepared, { forceRescan: false });
+      };
+      img.onerror = () => {
+        showToast("Could not load that image. Try another file.", "error");
+        resetScanWorkspace();
+      };
+      img.src = URL.createObjectURL(prepared);
+    })
+    .catch((err) => {
+      console.error("Image prepare failed:", err);
+      showToast("Could not prepare that image.", "error");
+      resetScanWorkspace();
+    });
+}
+
+const OCR_MAX_EDGE = 2000;
+const OCR_JPEG_QUALITY = 0.85;
+
+async function prepareImageFileForUpload(file) {
+  if (!file || !String(file.type || "").startsWith("image/")) return file;
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("Image decode failed"));
+      el.src = objectUrl;
+    });
+
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    if (!w || !h) return file;
+
+    const longest = Math.max(w, h);
+    const scale = longest > OCR_MAX_EDGE ? OCR_MAX_EDGE / longest : 1;
+    // Skip recompress for already-small JPEGs
+    if (scale >= 1 && file.type === "image/jpeg" && file.size < 1_500_000) {
+      return file;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    const ctx2 = canvas.getContext("2d");
+    ctx2.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", OCR_JPEG_QUALITY),
+    );
+    if (!blob) return file;
+    return new File([blob], "shelf_upload.jpg", { type: "image/jpeg" });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 imageUpload?.addEventListener("change", async (e) => {
@@ -2104,9 +2328,10 @@ function renderDetectedSpines(options = {}) {
   const header = document.createElement("div");
   header.className = "spines-toolbar";
 
+  const confirmedCount = currentDetectedSpines.filter((s) => s.confirmed).length;
   const titleEl = document.createElement("strong");
   titleEl.className = "spines-title";
-  titleEl.textContent = `Detected Spines (${currentDetectedSpines.length})`;
+  titleEl.textContent = `Matched ${confirmedCount} / ${currentDetectedSpines.length}`;
 
   const batchActions = document.createElement("div");
   batchActions.className = "spines-batch-actions";
@@ -2132,10 +2357,10 @@ function renderDetectedSpines(options = {}) {
   };
 
   const searchAllBtn = document.createElement("button");
-  searchAllBtn.textContent = "Search All";
+  searchAllBtn.textContent = "Match remaining";
   searchAllBtn.className = "auth-btn primary-btn spine-batch-btn";
   searchAllBtn.type = "button";
-  searchAllBtn.setAttribute("aria-label", "Search all detected spines in Google Books");
+  searchAllBtn.setAttribute("aria-label", "Match remaining spines in Google Books");
 
   const skipUnlabeledBtn = document.createElement("button");
   skipUnlabeledBtn.textContent = "Skip Unlabeled";
@@ -2143,16 +2368,22 @@ function renderDetectedSpines(options = {}) {
   skipUnlabeledBtn.type = "button";
   skipUnlabeledBtn.setAttribute("aria-label", "Remove unlabeled spines from the list");
 
-  searchAllBtn.onclick = () => {
-    const searchBtns = container.querySelectorAll(".spine-search-btn");
-    const buttons = Array.from(searchBtns);
-    const cap = isPremiumPlan() ? buttons.length : Math.min(FREE_SEARCH_ALL_LIMIT, buttons.length);
-    buttons.slice(0, cap).forEach((btn) => btn.click());
-    if (!isPremiumPlan() && buttons.length > FREE_SEARCH_ALL_LIMIT) {
-      showUpgradeModal({
-        reason: `Free plan can search ${FREE_SEARCH_ALL_LIMIT} spines at once. Upgrade for full Search All.`,
-        featureCode: "search_all_batch",
+  searchAllBtn.onclick = async () => {
+    if (!requireOnline("Book search")) return;
+    searchAllBtn.disabled = true;
+    searchAllBtn.textContent = "Matching...";
+    try {
+      const { matched } = await autoMatchDetectedSpines({
+        onlyUnconfirmed: true,
+        notifyLimit: true,
       });
+      if (matched > 0) {
+        showToast(`Matched ${matched} book(s).`, "success");
+      } else {
+        showToast("No high-confidence matches found. Try editing titles.", "info");
+      }
+    } finally {
+      // renderDetectedSpines rebuilds the button; no need to restore
     }
   };
 
@@ -2235,6 +2466,36 @@ function renderDetectedSpines(options = {}) {
     const actionRow = document.createElement("div");
     actionRow.className = "spine-actions";
 
+    const searchResults = document.createElement("div");
+    searchResults.className = "search-results-col";
+
+    if (!spine.confirmed && spine.bestMatch) {
+      const hint = document.createElement("span");
+      hint.className = "search-status";
+      hint.textContent = `Suggested: ${spine.bestMatch.title}`;
+      searchResults.appendChild(hint);
+
+      const useBestBtn = document.createElement("button");
+      useBestBtn.textContent = "Use best match";
+      useBestBtn.className = "auth-btn primary-btn spine-btn spine-btn-primary";
+      useBestBtn.type = "button";
+      useBestBtn.setAttribute(
+        "aria-label",
+        `Use best match ${spine.bestMatch.title} for spine ${index + 1}`,
+      );
+      useBestBtn.onclick = () => {
+        applyCatalogMatchToSpine(
+          spine,
+          spine.bestMatch,
+          titleInput,
+          div,
+          searchResults,
+        );
+        renderDetectedSpines({ preserveScroll: true });
+      };
+      actionRow.appendChild(useBestBtn);
+    }
+
     const searchBtn = document.createElement("button");
     searchBtn.textContent = "Search Book";
     searchBtn.className = "auth-btn primary-btn spine-search-btn spine-btn spine-btn-primary";
@@ -2257,28 +2518,24 @@ function renderDetectedSpines(options = {}) {
     actionRow.appendChild(searchBtn);
     actionRow.appendChild(skipBtn);
 
-    const searchResults = document.createElement("div");
-    searchResults.className = "search-results-col";
-
     searchBtn.onclick = async () => {
       if (!requireOnline("Book search")) return;
+      if (!isSearchableSpineTitle(titleInput.value)) {
+        searchResults.innerHTML =
+          "<span class='search-status-error'>Enter a title to search.</span>";
+        return;
+      }
       searchResults.innerHTML =
         "<span class='search-status'>Searching Google Books...</span>";
       try {
-        const books = await searchBooksByQuery(titleInput.value);
+        const books = await searchBooksByQuery(
+          titleInput.value,
+          spine.author || "",
+        );
         renderBookSearchCards(searchResults, books, {
           confirmLabel: "Use this book",
           onConfirm: (book) => {
-            titleInput.value = book.title;
-            spine.title = book.title;
-            spine.confirmed = true;
-            spine.confirmedTitle = book.title;
-            spine.author = book.authors;
-            spine.thumbnail = book.thumbnail;
-            div.classList.add("is-confirmed");
-            searchResults.innerHTML = "";
-            renderConfirmedBookRow(searchResults, spine);
-            showToast(`"${book.title}" confirmed.`, "success");
+            applyCatalogMatchToSpine(spine, book, titleInput, div, searchResults);
           },
         });
       } catch (err) {
@@ -2316,8 +2573,72 @@ const applyCropBtn = document.getElementById("applyCropBtn");
 let cropSelection = null; // { x, y, w, h } in image pixels
 let isCropping = false;
 let cropStart = { x: 0, y: 0 };
-let pendingInitialCrop = false;
 let cropShouldForceRescan = true;
+
+async function handleOcrResponse(data) {
+  if (data.duplicate) {
+    showToast(
+      "This image is already in your library! Navigating to its location on the map.",
+      "info",
+    );
+    resetScanWorkspace();
+    const mapNavBtn = document.querySelector(
+      '.nav-btn[data-target="libraryView"]',
+    );
+    if (mapNavBtn) mapNavBtn.click();
+    setTimeout(() => {
+      zoomToShelfOnMap(data.shelf.id);
+    }, 350);
+    return true;
+  }
+  currentDetectedSpines = data.spines || [];
+  currentUploadedImageHash = data.imageHash || null;
+  renderDetectedSpines();
+  if (currentDetectedSpines.some((s) => isSearchableSpineTitle(s.title))) {
+    showToast("Matching titles in Google Books...", "info");
+    const { matched } = await autoMatchDetectedSpines({ notifyLimit: false });
+    if (matched > 0) {
+      showToast(`Auto-matched ${matched} book(s).`, "success");
+    }
+  }
+  return false;
+}
+
+async function runShelfOcr(file, { forceRescan = false } = {}) {
+  if (!file) return;
+  if (!requireOnline("Shelf scanning")) return;
+
+  showLoadingOverlay("Scanning shelf...");
+  const formData = new FormData();
+  formData.append("image", file);
+  if (forceRescan) formData.append("force_rescan", "true");
+
+  try {
+    const response = await authenticatedFetch("/api/ocr", {
+      method: "POST",
+      body: formData,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (data.code === "PLAN_LIMIT") {
+        showUpgradeModal({
+          reason: data.error || "OCR limit reached. Upgrade for more scans.",
+          featureCode: "ocr_limit",
+        });
+      }
+      throw new Error(data.error || "Scan failed");
+    }
+    await handleOcrResponse(data);
+  } catch (err) {
+    console.error("Shelf scan failed:", err);
+    showToast(err.message || "Scan failed. Try again.", "error");
+    document.getElementById("pendingContainer").innerHTML =
+      "<p class='empty-state'>Scan failed. Crop &amp; re-scan, or upload another photo.</p>";
+  } finally {
+    hideLoadingOverlay();
+    updateScanSteps();
+  }
+}
 
 function resetScanWorkspace() {
   currentUploadedFile = null;
@@ -2406,7 +2727,6 @@ function drawCropOverlay() {
 }
 
 cropCanvasBtn?.addEventListener("click", () => {
-  pendingInitialCrop = false;
   openCropModalForCurrentImage({ forceRescan: true });
 });
 
@@ -2491,12 +2811,6 @@ window.addEventListener("mouseup", stopCrop);
 window.addEventListener("touchend", stopCrop);
 
 cancelCropBtn?.addEventListener("click", () => {
-  if (pendingInitialCrop) {
-    pendingInitialCrop = false;
-    closeCropModal();
-    resetScanWorkspace();
-    return;
-  }
   closeCropModal();
 });
 
@@ -2506,7 +2820,6 @@ applyCropBtn?.addEventListener("click", async () => {
     return;
   }
 
-  // Draw cropped image region to offscreen canvas
   const offCanvas = document.createElement("canvas");
   offCanvas.width = cropSelection.w;
   offCanvas.height = cropSelection.h;
@@ -2525,20 +2838,22 @@ applyCropBtn?.addEventListener("click", async () => {
   );
 
   closeCropModal();
-  showLoadingOverlay("Scanning books...");
 
   offCanvas.toBlob(
     async (blob) => {
-      if (!blob) return hideLoadingOverlay();
+      if (!blob) {
+        showToast("Could not crop image.", "error");
+        return;
+      }
 
       const croppedFile = new File([blob], "cropped_shelf.jpg", {
         type: "image/jpeg",
       });
       const shouldForceRescan = cropShouldForceRescan;
-      pendingInitialCrop = false;
+      cropShouldForceRescan = true;
       currentUploadedFile = croppedFile;
+      currentDetectedSpines = [];
 
-      // Load cropped preview onto workspace canvas
       const img = new Image();
       img.onload = () => {
         shelfCanvas.width = img.width;
@@ -2549,57 +2864,9 @@ applyCropBtn?.addEventListener("click", async () => {
       };
       img.src = URL.createObjectURL(croppedFile);
 
-      // Trigger API OCR on cropped image
-      const formData = new FormData();
-      formData.append("image", croppedFile);
-      if (shouldForceRescan) {
-        formData.append("force_rescan", "true");
-      }
-      cropShouldForceRescan = true;
-
-      try {
-        if (!requireOnline("Shelf scanning")) {
-          hideLoadingOverlay();
-          return;
-        }
-        const response = await authenticatedFetch("/api/ocr", {
-          method: "POST",
-          body: formData,
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          if (data.code === "PLAN_LIMIT") {
-            showUpgradeModal({
-              reason: data.error || "OCR limit reached. Upgrade for more scans.",
-              featureCode: "ocr_limit",
-            });
-          }
-          throw new Error(data.error || "Scan failed");
-        }
-        if (data.duplicate) {
-          showToast(
-            "This image is already in your library! Navigating to its location on the map.",
-            "info",
-          );
-          resetScanWorkspace();
-          const mapNavBtn = document.querySelector(
-            '.nav-btn[data-target="libraryView"]',
-          );
-          if (mapNavBtn) mapNavBtn.click();
-          setTimeout(() => {
-            zoomToShelfOnMap(data.shelf.id);
-          }, 350);
-          return;
-        }
-        currentDetectedSpines = data.spines || [];
-        currentUploadedImageHash = data.imageHash || null;
-        renderDetectedSpines();
-      } catch (err) {
-        console.error("Cropped scan failed:", err);
-        showToast("Scan failed on cropped image.", "error");
-      } finally {
-        hideLoadingOverlay();
-      }
+      document.getElementById("pendingContainer").innerHTML =
+        "<p class='scan-loading-text'>Scanning shelf...</p>";
+      await runShelfOcr(croppedFile, { forceRescan: shouldForceRescan });
     },
     "image/jpeg",
     0.95,
@@ -2609,6 +2876,17 @@ applyCropBtn?.addEventListener("click", async () => {
 // ==========================================
 // 6. DATABASE SAVING & LOADING
 // ==========================================
+async function navigateToShelfOnMap(shelfId) {
+  const mapNavBtn = document.querySelector(
+    '.nav-btn[data-target="libraryView"]',
+  );
+  if (mapNavBtn) mapNavBtn.click();
+  await loadLibraryMap();
+  if (shelfId) {
+    setTimeout(() => zoomToShelfOnMap(shelfId), 350);
+  }
+}
+
 async function saveShelfToDatabase() {
   if (!requireOnline("Saving shelves")) return;
   if (!currentUploadedFile || currentDetectedSpines.length === 0) {
@@ -2616,16 +2894,23 @@ async function saveShelfToDatabase() {
     return;
   }
 
-  // Update save triggers to loading state
+  const shelfName = await promptDialog({
+    title: "Name this shelf",
+    hint: "Optional — leave blank for Untitled Shelf.",
+    initialValue: "",
+    label: "Shelf name",
+    confirmLabel: "Save shelf",
+    cancelLabel: "Cancel",
+  });
+  if (shelfName === null) return; // cancelled
+  const resolvedName = String(shelfName || "").trim() || "Untitled Shelf";
+
   const saveBtns = document.querySelectorAll(".save-shelf-btn");
   saveBtns.forEach((btn) => {
     btn.disabled = true;
     btn.textContent = "Saving Shelf & Books...";
   });
-  if (analyseShelfBtn) {
-    analyseShelfBtn.disabled = true;
-    analyseShelfBtn.textContent = "Saving Shelf & Books...";
-  }
+  if (cropShelfBtn) cropShelfBtn.disabled = true;
 
   try {
     const fileName = currentUploadedImageHash
@@ -2633,12 +2918,11 @@ async function saveShelfToDatabase() {
       : `${currentUser.id}/${Date.now()}.jpg`;
     const imagePath = fileName;
 
-    const { data: uploadData, error: uploadError } =
-      await supabaseClient.storage
-        .from("shelves")
-        .upload(fileName, currentUploadedFile, {
-          upsert: Boolean(currentUploadedImageHash),
-        });
+    const { error: uploadError } = await supabaseClient.storage
+      .from("shelves")
+      .upload(fileName, currentUploadedFile, {
+        upsert: Boolean(currentUploadedImageHash),
+      });
 
     if (uploadError) {
       showToast("Failed to upload shelf image: " + uploadError.message, "error");
@@ -2659,6 +2943,7 @@ async function saveShelfToDatabase() {
       const { error: updateError } = await supabaseClient
         .from("shelves")
         .update({
+          name: resolvedName,
           detected_spines: spinesForStorage(currentDetectedSpines),
           dismissed_titles: currentDismissedTitles,
         })
@@ -2668,21 +2953,10 @@ async function saveShelfToDatabase() {
         showToast("Failed to update shelf: " + updateError.message, "error");
         return;
       }
-      showToast("This image is already in your library.", "info");
-      currentDetectedSpines = [];
-      currentDismissedTitles = [];
-      currentUploadedFile = null;
-      currentLoadedImage = null;
-      currentUploadedImageHash = null;
-      document.getElementById("pendingContainer").innerHTML =
-        "<p class='empty-state'>Upload a new image to continue.</p>";
-      if (ctx && shelfCanvas) {
-        ctx.clearRect(0, 0, shelfCanvas.width, shelfCanvas.height);
-        shelfCanvas.style.display = "none";
-      }
-      if (placeholderText) placeholderText.style.display = "flex";
-      if (canvasControls) canvasControls.classList.add("hidden-element");
-      loadLibraryData();
+      showToast("Updated shelf in your library.", "success");
+      resetScanWorkspace();
+      await loadLibraryData();
+      await navigateToShelfOnMap(existingShelf.id);
       return;
     }
 
@@ -2690,6 +2964,7 @@ async function saveShelfToDatabase() {
       .from("shelves")
       .insert({
         user_id: currentUser.id,
+        name: resolvedName,
         image_url: imagePath,
         detected_spines: spinesForStorage(currentDetectedSpines),
         dismissed_titles: currentDismissedTitles,
@@ -2708,6 +2983,7 @@ async function saveShelfToDatabase() {
       user_id: currentUser.id,
       shelf_id: shelfData.id,
       title: spine.title?.trim() || "Untitled Book",
+      author: spine.author || null,
       bounding_box: spine.box || spine.boundingBox || null,
       polygon: spine.polygon || null,
       cover: toHttpsUrl(spine.thumbnail) || null,
@@ -2718,6 +2994,12 @@ async function saveShelfToDatabase() {
     let { error: booksError } = await supabaseClient
       .from("user_books")
       .insert(payload);
+
+    if (booksError && /author/i.test(booksError.message)) {
+      payload = payload.map(({ author, ...rest }) => rest);
+      const retry = await supabaseClient.from("user_books").insert(payload);
+      booksError = retry.error;
+    }
 
     if (booksError && /cover_url|'cover'/i.test(booksError.message)) {
       payload = payload.map(({ cover, ...rest }) => rest);
@@ -2733,56 +3015,39 @@ async function saveShelfToDatabase() {
 
     if (booksError) {
       console.error("Failed to insert user_books:", booksError);
-      showToast("Shelf created, but books failed to save: " + booksError.message, "error");
+      showToast(
+        "Shelf created, but books failed to save. Fix the issue and tap Save again.",
+        "error",
+      );
+      // Keep workspace so the user can retry without re-scanning.
       return;
     }
 
     showToast(
-      `Successfully saved shelf and ${booksToInsert.length} book(s) to your library!`,
+      `Saved "${resolvedName}" with ${booksToInsert.length} book(s).`,
       "success",
     );
 
-    currentDetectedSpines = [];
-    currentDismissedTitles = [];
-    currentUploadedFile = null;
-    currentLoadedImage = null;
-    currentUploadedImageHash = null;
+    const savedShelfId = shelfData.id;
+    const queueNext =
+      isPremiumPlan() && scanQueue.length > 0 ? scanQueue.shift() : null;
 
-    document.getElementById("pendingContainer").innerHTML =
-      "<p class='empty-state'>Upload a new image to continue.</p>";
-
-    if (ctx && shelfCanvas) {
-      ctx.clearRect(0, 0, shelfCanvas.width, shelfCanvas.height);
-      shelfCanvas.style.display = "none";
-    }
-    if (placeholderText) placeholderText.style.display = "flex";
-    if (canvasControls) canvasControls.classList.add("hidden-element");
-
+    resetScanWorkspace();
     await loadLibraryData();
-    await loadLibraryMap();
-    if (isPremiumPlan() && scanQueue.length > 0) {
-      const nextFile = scanQueue.shift();
-      if (nextFile) {
-        showToast(`Saved. Loading next photo (${scanQueue.length + 1} left in queue).`, "info");
-        beginScanForFile(nextFile);
-      }
+
+    if (queueNext) {
+      showToast(
+        `Saved. Loading next photo (${scanQueue.length + 1} left in queue).`,
+        "info",
+      );
+      beginScanForFile(queueNext);
+    } else {
+      await navigateToShelfOnMap(savedShelfId);
     }
- } catch (err) {
+  } catch (err) {
     console.error("Save failed:", err);
     showToast("An unexpected error occurred while saving.", "error");
   } finally {
-    // Restore save trigger labels
-    const saveBtns = document.querySelectorAll(".save-shelf-btn");
-    saveBtns.forEach((btn) => {
-      btn.disabled = false;
-      btn.textContent = currentDetectedSpines.length > 0
-        ? `Save Shelf to Library (${currentDetectedSpines.length})`
-        : "Save Shelf to Library";
-    });
-    if (analyseShelfBtn && currentDetectedSpines.length === 0) {
-      analyseShelfBtn.disabled = true;
-      analyseShelfBtn.textContent = "Analyse shelf";
-    }
     updateScanSteps();
   }
 }
@@ -2809,6 +3074,7 @@ async function applyCatalogMatchToLibraryBook(book, match) {
   if (!requireOnline("Book updates")) return false;
   const updates = { title: match.title };
   if (match.thumbnail) updates.cover = match.thumbnail;
+  if (match.authors) updates.author = match.authors;
 
   let { error } = await supabaseClient
     .from("user_books")
@@ -2816,10 +3082,20 @@ async function applyCatalogMatchToLibraryBook(book, match) {
     .eq("id", book.id)
     .eq("user_id", currentUser.id);
 
+  if (error && /author/i.test(error.message)) {
+    const { author, ...withoutAuthor } = updates;
+    const retry = await supabaseClient
+      .from("user_books")
+      .update(withoutAuthor)
+      .eq("id", book.id)
+      .eq("user_id", currentUser.id);
+    error = retry.error;
+  }
+
   if (error && /cover_url|'cover'/i.test(error.message)) {
     const retry = await supabaseClient
       .from("user_books")
-      .update({ title: match.title })
+      .update({ title: match.title, ...(match.authors ? { author: match.authors } : {}) })
       .eq("id", book.id)
       .eq("user_id", currentUser.id);
     error = retry.error;
@@ -2832,10 +3108,12 @@ async function applyCatalogMatchToLibraryBook(book, match) {
 
   book.title = match.title;
   if (match.thumbnail) book.cover = match.thumbnail;
+  if (match.authors) book.author = match.authors;
   const stored = myLibrary.find((entry) => entry.id === book.id);
   if (stored) {
     stored.title = match.title;
     if (match.thumbnail) stored.cover = match.thumbnail;
+    if (match.authors) stored.author = match.authors;
   }
 
   refreshLibraryList();
@@ -3726,73 +4004,65 @@ async function loadLibraryMap() {
           "<p class='scan-loading-text'>Fetching shelf image for re-scan...</p>";
         updateScanSteps();
 
-        const shelfImagePath = storagePathFromShelfImage(shelf.image_url);
-        const shelfMediaCacheKey = mediaCacheKeyForShelfPath(shelfImagePath);
-        const signedShelfImageUrl =
-          signedUrlByPath.get(shelfImagePath) ||
-          (await createShelfSignedUrl(shelfImagePath));
-        if (!signedShelfImageUrl) {
-          showToast("Could not access shelf image for re-scan.", "error");
-          return;
-        }
-        const sourceUrl = offlineStore
-          ? await offlineStore.getOrCacheMediaBlobUrl(
-              shelfMediaCacheKey,
-              signedShelfImageUrl,
-            )
-          : signedShelfImageUrl;
-        const response = await fetch(sourceUrl || signedShelfImageUrl);
-        const blob = await response.blob();
-        const file = new File([blob], "rescan_shelf.jpg", {
-          type: "image/jpeg",
-        });
-
-        currentUploadedFile = file;
-        placeholderText.style.display = "none";
-        shelfCanvas.style.display = "block";
-        canvasControls.classList.remove("hidden-element");
-        updateScanSteps();
-
-        const img = new Image();
-        img.onload = () => {
-          shelfCanvas.width = img.width;
-          shelfCanvas.height = img.height;
-          currentLoadedImage = img;
-          redrawCanvasOverlays(null);
-          updateScanSteps();
-        };
-        img.src = URL.createObjectURL(file);
-
-        const formData = new FormData();
-        formData.append("image", file);
-        formData.append("force_rescan", "true");
-
-        const scanRes = await authenticatedFetch("/api/ocr", {
-          method: "POST",
-          body: formData,
-        });
-        const scanData = await scanRes.json().catch(() => ({}));
-        if (!scanRes.ok) {
-          if (scanData.code === "PLAN_LIMIT") {
-            showUpgradeModal({
-              reason: scanData.error || "OCR limit reached. Upgrade for more scans.",
-              featureCode: "ocr_limit",
-            });
+        try {
+          const shelfImagePath = storagePathFromShelfImage(shelf.image_url);
+          const shelfMediaCacheKey = mediaCacheKeyForShelfPath(shelfImagePath);
+          const signedShelfImageUrl =
+            signedUrlByPath.get(shelfImagePath) ||
+            (await createShelfSignedUrl(shelfImagePath));
+          if (!signedShelfImageUrl) {
+            showToast("Could not access shelf image for re-scan.", "error");
+            return;
           }
-          throw new Error(scanData.error || "Rescan failed");
-        }
+          const sourceUrl = offlineStore
+            ? await offlineStore.getOrCacheMediaBlobUrl(
+                shelfMediaCacheKey,
+                signedShelfImageUrl,
+              )
+            : signedShelfImageUrl;
+          const response = await fetch(sourceUrl || signedShelfImageUrl);
+          const blob = await response.blob();
+          const file = new File([blob], "rescan_shelf.jpg", {
+            type: "image/jpeg",
+          });
 
-        currentDismissedTitles = Array.isArray(shelf.dismissed_titles)
-          ? shelf.dismissed_titles
-              .map((title) => String(title || "").trim())
-              .filter(Boolean)
-          : [];
-        currentDetectedSpines = applyDismissedTitles(
-          scanData.spines || [],
-          currentDismissedTitles,
-        );
-        currentUploadedImageHash = scanData.imageHash || null;
-        renderDetectedSpines();
+          currentUploadedFile = file;
+          currentDismissedTitles = Array.isArray(shelf.dismissed_titles)
+            ? shelf.dismissed_titles
+                .map((title) => String(title || "").trim())
+                .filter(Boolean)
+            : [];
+          placeholderText.style.display = "none";
+          shelfCanvas.style.display = "block";
+          canvasControls.classList.remove("hidden-element");
+          updateScanSteps();
+
+          await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+              shelfCanvas.width = img.width;
+              shelfCanvas.height = img.height;
+              currentLoadedImage = img;
+              redrawCanvasOverlays(null);
+              updateScanSteps();
+              resolve();
+            };
+            img.onerror = () => reject(new Error("Could not load shelf image"));
+            img.src = URL.createObjectURL(file);
+          });
+
+          await runShelfOcr(file, { forceRescan: true });
+          currentDetectedSpines = applyDismissedTitles(
+            currentDetectedSpines,
+            currentDismissedTitles,
+          );
+          renderDetectedSpines();
+        } catch (err) {
+          console.error("Rescan failed:", err);
+          showToast(err.message || "Rescan failed. Try again.", "error");
+          document.getElementById("pendingContainer").innerHTML =
+            "<p class='empty-state'>Rescan failed. Try again from the map.</p>";
+        }
       });
 
     shelfWrapper

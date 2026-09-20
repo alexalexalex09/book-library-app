@@ -71,7 +71,21 @@ describe("API integration", () => {
       supabase,
       fetchBooks: async (q) => ({
         status: 200,
-        data: { items: [{ id: "1", volumeInfo: { title: q } }] },
+        data: {
+          items: [
+            {
+              id: "vol-1",
+              volumeInfo: {
+                title: "The Hobbit",
+                authors: ["J. R. R. Tolkien"],
+                publishedDate: "1937",
+                industryIdentifiers: [{ type: "ISBN_13", identifier: "9780261103573" }],
+              },
+            },
+          ],
+        },
+        // Echo query so tests can assert shaping if needed
+        _echoQuery: q,
       }),
       processImage: async () => ({ spines: [], imageHash: "abc" }),
       env: {
@@ -188,13 +202,19 @@ describe("API integration", () => {
       assert.equal(response.status, 400);
     });
 
-    it("returns mocked results when authenticated", async () => {
-      const response = await fetch(`${baseUrl}/api/books?q=hobbit`, {
-        headers: authHeaders("token-free"),
-      });
+    it("returns ranked mocked results when authenticated", async () => {
+      const response = await fetch(
+        `${baseUrl}/api/books?q=hobbit&author=Tolkien`,
+        {
+          headers: authHeaders("token-free"),
+        },
+      );
       assert.equal(response.status, 200);
       const body = await response.json();
-      assert.equal(body.items[0].volumeInfo.title, "hobbit");
+      assert.equal(body.items[0].volumeInfo.title, "The Hobbit");
+      assert.ok(String(body.query).includes("intitle:"));
+      assert.ok(String(body.query).includes("inauthor:"));
+      assert.ok(Number.isFinite(body.items[0].matchScore));
     });
   });
 
