@@ -1,0 +1,27 @@
+---
+description: Directory boundaries and app architecture
+alwaysApply: true
+---
+
+# Architecture
+
+Vanilla JS + Express. **Not** React/Next and **not** Tailwind.
+
+## Directory boundaries
+
+| Path | Purpose |
+|------|---------|
+| `client/src/` | Static frontend only: `index.html`, legal/pricing HTML, `css/`, `js/`, `img/`, PWA (`sw.js`, manifest) |
+| `client/src/js/` | Browser logic (`app.js`, `api.js`, `legal.js`, `pwa.js`, offline helpers). No Node `require` |
+| `client/src/css/` | App styles (`style.css`, `legal.css`). Prefer CSS variables already in `style.css` |
+| `server/src/` | Express app and route modules (`server.js`, `*-routes.js`, `billing.js`, `http-security.js`) |
+| `server/test/` | Server unit + API integration tests and fixtures |
+| `e2e/` | Playwright smoke specs only |
+| `server/sql/` | SQL migrations / hardening scripts |
+
+## Rules of thumb
+
+- Put **API route modules** in `server/src/` (e.g. `library-routes.js`, `books-routes.js`); keep `server.js` as wiring + OCR pipeline.
+- Put **UI markup** in `client/src/*.html`; put **behavior** in `client/src/js/`; put **styles** in `client/src/css/` — do not invent `/components/ui` or Tailwind unless migrating the stack.
+- Secrets stay in `server/.env` (gitignored); never commit keys or put service-role secrets in client JS.
+- Shared legal version IDs: `server/src/legal.js` and `client/src/js/legal.js` must match.

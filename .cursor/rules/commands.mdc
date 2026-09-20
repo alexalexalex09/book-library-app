@@ -1,0 +1,43 @@
+---
+description: Dev commands for start, test, build, and lint
+alwaysApply: true
+---
+
+# Commands
+
+Run from the **repo root** unless noted.
+
+## Dev server
+
+```bash
+npm start --prefix server
+```
+
+Serves the app from `server/` (Express on `PORT` or `3000`). Loads `server/.env`. Static UI is `client/src` (no separate client server).
+
+## Test
+
+```bash
+npm test                 # server unit/API + Playwright e2e
+npm run test:server      # Node tests in server/ only
+npm run test:e2e         # Playwright only
+npm run test:e2e:install # once: download Chromium
+```
+
+Details: see the **testing** rule and `TESTING.md`.
+
+## Build
+
+There is **no production build step**. The client is static HTML/CSS/JS served as-is. Deploy runs `npm start` in `server/`.
+
+## Lint
+
+There is **no project lint script** (no ESLint/Prettier config). Do not invent a lint command unless adding a real toolchain.
+
+## After edits
+
+Do **not** ask the user to manually review or run checks. After substantive code changes, run verification yourself:
+
+1. If a lint script exists, run it on touched files/areas.
+2. Run the narrowest useful tests: `npm run test:server` for server/API changes; `npm run test:e2e` for UI/navigation; `npm test` when both are affected or unsure.
+3. Fix failures you introduced before finishing the task.

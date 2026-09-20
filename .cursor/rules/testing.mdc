@@ -1,0 +1,40 @@
+---
+description: How to run and extend ShelfMapper tests
+alwaysApply: true
+---
+
+# Testing
+
+## Layers
+
+1. **Server unit/API** — `node --test` under `server/test/**/*.test.js` (helpers + API harness with mocked Supabase/Stripe/Vision).
+2. **E2E smoke** — Playwright in `e2e/` against a local Express server (`playwright.config.js`).
+
+## Run
+
+```bash
+npm test                 # full suite
+npm run test:server
+npm run test:e2e
+```
+
+Authenticated e2e needs env (PowerShell):
+
+```powershell
+$env:E2E_EMAIL="user@example.com"
+$env:E2E_PASSWORD="secret"
+npm run test:e2e
+```
+
+Guest/static e2e runs without credentials. Optional: `E2E_PORT` (default `3100`).
+
+## When adding features
+
+- Prefer **server API tests** with the harness in `server/test/helpers/app-harness.js` for auth gates, validation, and premium locks.
+- Keep Playwright **thin** (UI presence / navigation); do not hit live Stripe or Google Vision in CI.
+- New server tests: `*.test.js` only (helpers must not be named `*.test.js`).
+- Keep legal version constants in sync (`server/src/legal.js` ↔ `client/src/js/legal.js` ↔ terms/privacy HTML); unit tests enforce this.
+
+## After edits
+
+Run lint (when available) and the relevant test commands yourself after changes — see the **commands** rule. Do not ask the user to review or run tests for you.

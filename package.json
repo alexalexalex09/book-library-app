@@ -1,0 +1,15 @@
+{
+  "name": "book-library-app",
+  "private": true,
+  "version": "1.0.0",
+  "description": "ShelfMapper monorepo test runner",
+  "scripts": {
+    "test": "npm run test:server && npm run test:e2e",
+    "test:server": "npm test --prefix server",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}

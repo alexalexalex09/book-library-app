@@ -8,7 +8,6 @@ const fs = require("fs");
 const sharp = require("sharp");
 const crypto = require("crypto");
 const axios = require("axios");
-const { randomBytes } = require("crypto");
 const {
   resolveNormalizationSize,
   mapPolygonFromInferencePoints,
@@ -30,6 +29,14 @@ const {
   setSecurityHeaders,
 } = require("./http-security");
 const { createBillingRouter } = require("./billing");
+const {
+  mountPublicConfigRoutes,
+} = require("./public-config");
+const {
+  createLibraryRouter,
+  handlePublicShare,
+} = require("./library-routes");
+const { createBooksRouter } = require("./books-routes");
 
 sharp.cache(false);
 
@@ -75,16 +82,6 @@ app.use(
 
 const clientPath = path.join(__dirname, "../../client/src");
 
-function getPublicAppOrigin() {
-  const raw = String(
-    process.env.CANONICAL_ORIGIN || process.env.APP_BASE_URL || "",
-  )
-    .trim()
-    .replace(/\/$/, "");
-  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
-  return "";
-}
-
 function sendIndexHtml(res) {
   const indexPath = path.join(clientPath, "index.html");
   let html = fs.readFileSync(indexPath, "utf8");
@@ -97,13 +94,7 @@ function sendIndexHtml(res) {
   res.type("html").send(html);
 }
 
-app.get("/api/public-config.js", (req, res) => {
-  const payload = JSON.stringify({
-    appOrigin: getPublicAppOrigin() || null,
-  });
-  res.setHeader("Cache-Control", "no-cache");
-  res.type("application/javascript").send(`window.__SHELFMAPPER_PUBLIC__=${payload};`);
-});
+mountPublicConfigRoutes(app);
 
 app.get(["/", "/index.html"], (req, res) => sendIndexHtml(res));
 
@@ -699,208 +690,22 @@ app.post(
 }),
 );
 
-app.get("/api/books", requireAuth, booksRateLimit, async (req, res) => {
-  const searchQuery =
-    typeof req.query.q === "string" ? req.query.q.trim() : "";
-  if (!searchQuery)
-    return res.status(400).json({ error: "Missing search query" });
-  if (searchQuery.length > 200)
-    return res.status(400).json({ error: "Search query is too long" });
+app.use(
+  "/api/books",
+  createBooksRouter({
+    requireAuth,
+    rateLimit: booksRateLimit,
+  }),
+);
 
-  const apiKey = (process.env.GOOGLE_BOOKS_API_KEY || "").trim();
-  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchQuery)}&maxResults=3${apiKey ? `&key=${apiKey}` : ""}`;
-
-  try {
-    const response = await fetch(url);
-    const data = await response.json();
-    if (!response.ok) return res.status(response.status).json(data);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch book data" });
-  }
+const libraryRouter = createLibraryRouter({
+  supabase,
+  requireAuth,
+  requirePremium,
+  getUserPlan,
 });
-
-app.get("/api/rooms", requireAuth, async (req, res) => {
-  try {
-    if (getUserPlan(req.user) !== "premium") {
-      return res.json([{ id: "default", name: "My Library", isDefault: true }]);
-    }
-    const { data, error } = await supabase
-      .from("libraries")
-      .select("*")
-      .eq("user_id", req.user.id)
-      .order("created_at", { ascending: true });
-    if (error) throw error;
-    return res.json(data || []);
-  } catch (error) {
-    return res.status(500).json({ error: "Failed to load rooms" });
-  }
-});
-
-app.post("/api/rooms", requireAuth, requirePremium, async (req, res) => {
-  const name = String(req.body?.name || "").trim();
-  if (!name) return res.status(400).json({ error: "Room name is required" });
-  try {
-    const { data, error } = await supabase
-      .from("libraries")
-      .insert({ user_id: req.user.id, name })
-      .select("*")
-      .single();
-    if (error) throw error;
-    return res.json(data);
-  } catch (error) {
-    return res.status(500).json({ error: "Failed to create room" });
-  }
-});
-
-app.patch("/api/rooms/:id", requireAuth, requirePremium, async (req, res) => {
-  const name = String(req.body?.name || "").trim();
-  if (!name) return res.status(400).json({ error: "Room name is required" });
-  try {
-    const { data, error } = await supabase
-      .from("libraries")
-      .update({ name })
-      .eq("id", req.params.id)
-      .eq("user_id", req.user.id)
-      .select("*")
-      .single();
-    if (error) throw error;
-    return res.json(data);
-  } catch (error) {
-    return res.status(500).json({ error: "Failed to rename room" });
-  }
-});
-
-app.post("/api/rooms/assign", requireAuth, requirePremium, async (req, res) => {
-  const shelfId = Number(req.body?.shelfId);
-  const roomId = Number(req.body?.roomId);
-  if (!Number.isFinite(shelfId) || !Number.isFinite(roomId)) {
-    return res.status(400).json({ error: "shelfId and roomId are required" });
-  }
-  try {
-    const { data, error } = await supabase
-      .from("shelves")
-      .update({ library_id: roomId })
-      .eq("id", shelfId)
-      .eq("user_id", req.user.id)
-      .select("*")
-      .single();
-    if (error) throw error;
-    return res.json(data);
-  } catch (error) {
-    return res.status(500).json({ error: "Failed to assign shelf to room" });
-  }
-});
-
-app.post("/api/books/:id/cover", requireAuth, requirePremium, async (req, res) => {
-  const cover = String(req.body?.cover || "").trim();
-  if (!cover) return res.status(400).json({ error: "cover is required" });
-  try {
-    const { data, error } = await supabase
-      .from("user_books")
-      .update({ cover })
-      .eq("id", req.params.id)
-      .eq("user_id", req.user.id)
-      .select("*")
-      .single();
-    if (error) throw error;
-    return res.json(data);
-  } catch (error) {
-    return res.status(500).json({ error: "Failed to update cover" });
-  }
-});
-
-app.get("/api/shares", requireAuth, requirePremium, async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from("library_shares")
-      .select("*")
-      .eq("user_id", req.user.id)
-      .is("revoked_at", null)
-      .order("created_at", { ascending: false });
-    if (error) throw error;
-    return res.json(data || []);
-  } catch (error) {
-    return res.status(500).json({ error: "Failed to load shares" });
-  }
-});
-
-app.post("/api/shares", requireAuth, requirePremium, async (req, res) => {
-  const libraryIdValue = req.body?.libraryId;
-  const libraryId =
-    libraryIdValue === null || libraryIdValue === undefined
-      ? null
-      : Number(libraryIdValue);
-  if (libraryIdValue !== null && libraryIdValue !== undefined && !Number.isFinite(libraryId)) {
-    return res.status(400).json({ error: "libraryId must be a number or null" });
-  }
-  try {
-    const token = randomBytes(24).toString("base64url");
-    const { data, error } = await supabase
-      .from("library_shares")
-      .insert({
-        user_id: req.user.id,
-        token,
-        library_id: libraryId,
-      })
-      .select("*")
-      .single();
-    if (error) throw error;
-    return res.json({ ...data, url: `${req.protocol}://${req.get("host")}/share/${token}` });
-  } catch (error) {
-    return res.status(500).json({ error: "Failed to create share link" });
-  }
-});
-
-app.delete("/api/shares/:id", requireAuth, requirePremium, async (req, res) => {
-  try {
-    const { error } = await supabase
-      .from("library_shares")
-      .update({ revoked_at: new Date().toISOString() })
-      .eq("id", req.params.id)
-      .eq("user_id", req.user.id);
-    if (error) throw error;
-    return res.json({ ok: true });
-  } catch (error) {
-    return res.status(500).json({ error: "Failed to revoke share link" });
-  }
-});
-
-app.get("/api/share/:token", async (req, res) => {
-  try {
-    const token = String(req.params.token || "").trim();
-    if (!token) return res.status(404).json({ error: "Share not found" });
-
-    const { data: share, error: shareError } = await supabase
-      .from("library_shares")
-      .select("*")
-      .eq("token", token)
-      .is("revoked_at", null)
-      .maybeSingle();
-    if (shareError) throw shareError;
-    if (!share) return res.status(404).json({ error: "Share not found" });
-
-    const shelvesQuery = supabase
-      .from("shelves")
-      .select("*")
-      .eq("user_id", share.user_id);
-    if (share.library_id) shelvesQuery.eq("library_id", share.library_id);
-    const { data: shelves, error: shelvesError } = await shelvesQuery;
-    if (shelvesError) throw shelvesError;
-
-    const shelfIds = (shelves || []).map((s) => s.id);
-    const booksQuery = supabase
-      .from("user_books")
-      .select("id,shelf_id,title,author,cover,bounding_box,polygon,created_at")
-      .eq("user_id", share.user_id);
-    if (shelfIds.length > 0) booksQuery.in("shelf_id", shelfIds);
-    const { data: books, error: booksError } = await booksQuery;
-    if (booksError) throw booksError;
-    return res.json({ shelves: shelves || [], books: books || [] });
-  } catch (error) {
-    return res.status(500).json({ error: "Failed to load shared library" });
-  }
-});
+app.use("/api", libraryRouter);
+app.get("/api/share/:token", (req, res) => handlePublicShare(req, res, supabase));
 
 // Uses Gemini API to structure messy OCR fragments into clean metadata
 async function refineSpinesWithAI(spines) {
@@ -981,12 +786,6 @@ Output format JSON array:
     return spines; // Fallback to raw OCR titles on error
   }
 }
-
-app.get("/api/public-config", (req, res) => {
-  res.json({
-    appOrigin: getPublicAppOrigin() || null,
-  });
-});
 
 app.use((req, res) => sendIndexHtml(res));
 app.use(handleUploadError);
