@@ -33,6 +33,8 @@ let lastShelvesSnapshot = [];
 let offlineMode = !navigator.onLine;
 const offlineStore = window.HiLibraryOffline || null;
 
+const shelfSave = window.ShelfMapperShelfSave || null;
+
 const SEARCH_RESULT_LIMIT = 3;
 const DEFAULT_SHELF_CARD_WIDTH = 300;
 const MIN_SHELF_CARD_WIDTH = 160;
@@ -2609,8 +2611,52 @@ applyCropBtn?.addEventListener("click", async () => {
 // ==========================================
 // 6. DATABASE SAVING & LOADING
 // ==========================================
+async function insertBooksForShelf(shelfId, imagePath) {
+  let payload = shelfSave.buildUserBooksRows({
+    userId: currentUser.id,
+    shelfId,
+    imagePath,
+    spines: currentDetectedSpines,
+    toHttpsUrl,
+  });
+
+  let { error } = await supabaseClient.from("user_books").insert(payload);
+  if (error && /cover_url|'cover'/i.test(error.message)) {
+    payload = payload.map(({ cover, ...rest }) => rest);
+    const retry = await supabaseClient.from("user_books").insert(payload);
+    error = retry.error;
+  }
+  if (error && /polygon/i.test(error.message)) {
+    payload = payload.map(({ polygon, ...rest }) => rest);
+    const retry = await supabaseClient.from("user_books").insert(payload);
+    error = retry.error;
+  }
+  return { error, count: payload.length };
+}
+
+async function finalizeSavedShelf(bookCount) {
+  showToast(
+    `Successfully saved shelf and ${bookCount} book(s) to your library!`,
+    "success",
+  );
+  resetScanWorkspace();
+  await loadLibraryData();
+  await loadLibraryMap();
+  if (isPremiumPlan() && scanQueue.length > 0) {
+    const nextFile = scanQueue.shift();
+    if (nextFile) {
+      showToast(`Saved. Loading next photo (${scanQueue.length + 1} left in queue).`, "info");
+      beginScanForFile(nextFile);
+    }
+  }
+}
+
 async function saveShelfToDatabase() {
   if (!requireOnline("Saving shelves")) return;
+  if (!shelfSave) {
+    showToast("Save helper failed to load. Refresh and try again.", "error");
+    return;
+  }
   if (!currentUploadedFile || currentDetectedSpines.length === 0) {
     showToast("No image or detected books to save.", "error");
     return;
@@ -2656,6 +2702,50 @@ async function saveShelfToDatabase() {
         showToast("This shelf image is already saved.", "error");
         return;
       }
+
+      const { data: previousBooks, error: previousBooksError } =
+        await supabaseClient
+          .from("user_books")
+          .select("id")
+          .eq("shelf_id", existingShelf.id)
+          .eq("user_id", currentUser.id);
+      if (previousBooksError) {
+        showToast(
+          "Failed to load existing books for this shelf: " +
+            previousBooksError.message,
+          "error",
+        );
+        return;
+      }
+
+      const { error: booksError, count: bookCount } = await insertBooksForShelf(
+        existingShelf.id,
+        imagePath,
+      );
+      if (booksError) {
+        console.error("Failed to insert user_books:", booksError);
+        showToast("Could not save updated books: " + booksError.message, "error");
+        return;
+      }
+
+      const previousIds = shelfSave.bookIdsToDeleteAfterInsert(
+        previousBooks,
+        !booksError,
+      );
+      if (previousIds.length > 0) {
+        const { error: deleteError } = await supabaseClient
+          .from("user_books")
+          .delete()
+          .in("id", previousIds)
+          .eq("user_id", currentUser.id);
+        if (deleteError) {
+          showToast(
+            "Updated books saved, but old titles could not be removed. You may see duplicates.",
+            "error",
+          );
+        }
+      }
+
       const { error: updateError } = await supabaseClient
         .from("shelves")
         .update({
@@ -2665,24 +2755,11 @@ async function saveShelfToDatabase() {
         .eq("id", existingShelf.id)
         .eq("user_id", currentUser.id);
       if (updateError) {
-        showToast("Failed to update shelf: " + updateError.message, "error");
+        showToast("Books updated, but failed to update shelf: " + updateError.message, "error");
         return;
       }
-      showToast("This image is already in your library.", "info");
-      currentDetectedSpines = [];
-      currentDismissedTitles = [];
-      currentUploadedFile = null;
-      currentLoadedImage = null;
-      currentUploadedImageHash = null;
-      document.getElementById("pendingContainer").innerHTML =
-        "<p class='empty-state'>Upload a new image to continue.</p>";
-      if (ctx && shelfCanvas) {
-        ctx.clearRect(0, 0, shelfCanvas.width, shelfCanvas.height);
-        shelfCanvas.style.display = "none";
-      }
-      if (placeholderText) placeholderText.style.display = "flex";
-      if (canvasControls) canvasControls.classList.add("hidden-element");
-      loadLibraryData();
+
+      await finalizeSavedShelf(bookCount);
       return;
     }
 
@@ -2704,32 +2781,10 @@ async function saveShelfToDatabase() {
       return;
     }
 
-    const booksToInsert = currentDetectedSpines.map((spine) => ({
-      user_id: currentUser.id,
-      shelf_id: shelfData.id,
-      title: spine.title?.trim() || "Untitled Book",
-      bounding_box: spine.box || spine.boundingBox || null,
-      polygon: spine.polygon || null,
-      cover: toHttpsUrl(spine.thumbnail) || null,
-      shelf_image_url: imagePath,
-    }));
-
-    let payload = booksToInsert;
-    let { error: booksError } = await supabaseClient
-      .from("user_books")
-      .insert(payload);
-
-    if (booksError && /cover_url|'cover'/i.test(booksError.message)) {
-      payload = payload.map(({ cover, ...rest }) => rest);
-      const retry = await supabaseClient.from("user_books").insert(payload);
-      booksError = retry.error;
-    }
-
-    if (booksError && /polygon/i.test(booksError.message)) {
-      payload = payload.map(({ polygon, ...rest }) => rest);
-      const retry = await supabaseClient.from("user_books").insert(payload);
-      booksError = retry.error;
-    }
+    const { error: booksError, count: bookCount } = await insertBooksForShelf(
+      shelfData.id,
+      imagePath,
+    );
 
     if (booksError) {
       console.error("Failed to insert user_books:", booksError);
@@ -2737,36 +2792,7 @@ async function saveShelfToDatabase() {
       return;
     }
 
-    showToast(
-      `Successfully saved shelf and ${booksToInsert.length} book(s) to your library!`,
-      "success",
-    );
-
-    currentDetectedSpines = [];
-    currentDismissedTitles = [];
-    currentUploadedFile = null;
-    currentLoadedImage = null;
-    currentUploadedImageHash = null;
-
-    document.getElementById("pendingContainer").innerHTML =
-      "<p class='empty-state'>Upload a new image to continue.</p>";
-
-    if (ctx && shelfCanvas) {
-      ctx.clearRect(0, 0, shelfCanvas.width, shelfCanvas.height);
-      shelfCanvas.style.display = "none";
-    }
-    if (placeholderText) placeholderText.style.display = "flex";
-    if (canvasControls) canvasControls.classList.add("hidden-element");
-
-    await loadLibraryData();
-    await loadLibraryMap();
-    if (isPremiumPlan() && scanQueue.length > 0) {
-      const nextFile = scanQueue.shift();
-      if (nextFile) {
-        showToast(`Saved. Loading next photo (${scanQueue.length + 1} left in queue).`, "info");
-        beginScanForFile(nextFile);
-      }
-    }
+    await finalizeSavedShelf(bookCount);
  } catch (err) {
     console.error("Save failed:", err);
     showToast("An unexpected error occurred while saving.", "error");
