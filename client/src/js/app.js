@@ -32,6 +32,30 @@ let currentDismissedTitles = [];
 let lastShelvesSnapshot = [];
 let offlineMode = !navigator.onLine;
 const offlineStore = window.HiLibraryOffline || null;
+const scanRequests =
+  typeof createScanRequestGuard === "function"
+    ? createScanRequestGuard()
+    : {
+        current: 0,
+        begin() {
+          this.current += 1;
+          return this.current;
+        },
+        isCurrent(requestId) {
+          return requestId === this.current;
+        },
+        isAbortError(error) {
+          return Boolean(error && error.name === "AbortError");
+        },
+      };
+let scanOcrAbort = null;
+
+function beginScanGeneration() {
+  scanOcrAbort?.abort();
+  scanOcrAbort = new AbortController();
+  if (typeof hideLoadingOverlay === "function") hideLoadingOverlay();
+  return scanRequests.begin();
+}
 
 const SEARCH_RESULT_LIMIT = 5;
 const FREE_SEARCH_ALL_LIMIT = 5;
@@ -476,8 +500,10 @@ function confirmSpineWithBook(spine, book) {
 async function autoMatchDetectedSpines({
   onlyUnconfirmed = true,
   notifyLimit = true,
+  requestId = scanRequests.current,
 } = {}) {
   if (!requireOnline("Book search", false)) return { matched: 0, limited: false };
+  if (!scanRequests.isCurrent(requestId)) return { matched: 0, limited: false };
 
   let targets = currentDetectedSpines.filter((spine) => {
     if (!isSearchableSpineTitle(spine.title)) return false;
@@ -495,9 +521,10 @@ async function autoMatchDetectedSpines({
   let matched = 0;
 
   await mapPool(targets, SEARCH_CONCURRENCY, async (spine) => {
-    if (hitLimit) return;
+    if (hitLimit || !scanRequests.isCurrent(requestId)) return;
     try {
       const books = await searchBooksByQuery(spine.title, spine.author || "");
+      if (!scanRequests.isCurrent(requestId)) return;
       const best = books[0];
       if (!best) return;
       const score = Number.isFinite(best.matchScore) ? best.matchScore : 0;
@@ -512,6 +539,8 @@ async function autoMatchDetectedSpines({
       if (err?.code === "PLAN_LIMIT") hitLimit = true;
     }
   });
+
+  if (!scanRequests.isCurrent(requestId)) return { matched: 0, limited: hitLimit };
 
   renderDetectedSpines();
 
@@ -2114,6 +2143,7 @@ window.addEventListener("touchend", stopCanvasDrag);
 
 function beginScanForFile(file) {
   if (!file) return;
+  const requestId = beginScanGeneration();
 
   currentUploadedFile = null;
   currentDetectedSpines = [];
@@ -2140,25 +2170,29 @@ function beginScanForFile(file) {
 
   prepareImageFileForUpload(file)
     .then((prepared) => {
+      if (!scanRequests.isCurrent(requestId)) return;
       currentUploadedFile = prepared;
       document.getElementById("pendingContainer").innerHTML =
         "<p class='scan-loading-text'>Scanning shelf...</p>";
       const img = new Image();
       img.onload = () => {
+        if (!scanRequests.isCurrent(requestId)) return;
         shelfCanvas.width = img.width;
         shelfCanvas.height = img.height;
         currentLoadedImage = img;
         redrawCanvasOverlays(null);
         updateScanSteps();
-        runShelfOcr(prepared, { forceRescan: false });
+        runShelfOcr(prepared, { forceRescan: false, requestId });
       };
       img.onerror = () => {
+        if (!scanRequests.isCurrent(requestId)) return;
         showToast("Could not load that image. Try another file.", "error");
         resetScanWorkspace();
       };
       img.src = URL.createObjectURL(prepared);
     })
     .catch((err) => {
+      if (!scanRequests.isCurrent(requestId)) return;
       console.error("Image prepare failed:", err);
       showToast("Could not prepare that image.", "error");
       resetScanWorkspace();
@@ -2378,6 +2412,7 @@ function renderDetectedSpines(options = {}) {
       const { matched } = await autoMatchDetectedSpines({
         onlyUnconfirmed: true,
         notifyLimit: true,
+        requestId: scanRequests.current,
       });
       if (matched > 0) {
         showToast(`Matched ${matched} book(s).`, "success");
@@ -2576,7 +2611,8 @@ let isCropping = false;
 let cropStart = { x: 0, y: 0 };
 let cropShouldForceRescan = true;
 
-async function handleOcrResponse(data) {
+async function handleOcrResponse(data, requestId = scanRequests.current) {
+  if (!scanRequests.isCurrent(requestId)) return true;
   if (data.duplicate) {
     showToast(
       "This image is already in your library! Navigating to its location on the map.",
@@ -2597,7 +2633,11 @@ async function handleOcrResponse(data) {
   renderDetectedSpines();
   if (currentDetectedSpines.some((s) => isSearchableSpineTitle(s.title))) {
     showToast("Matching titles in Google Books...", "info");
-    const { matched } = await autoMatchDetectedSpines({ notifyLimit: false });
+    const { matched } = await autoMatchDetectedSpines({
+      notifyLimit: false,
+      requestId,
+    });
+    if (!scanRequests.isCurrent(requestId)) return true;
     if (matched > 0) {
       showToast(`Auto-matched ${matched} book(s).`, "success");
     }
@@ -2605,9 +2645,10 @@ async function handleOcrResponse(data) {
   return false;
 }
 
-async function runShelfOcr(file, { forceRescan = false } = {}) {
+async function runShelfOcr(file, { forceRescan = false, requestId = scanRequests.current } = {}) {
   if (!file) return;
   if (!requireOnline("Shelf scanning")) return;
+  if (!scanRequests.isCurrent(requestId)) return;
 
   showLoadingOverlay("Scanning shelf...");
   const formData = new FormData();
@@ -2618,8 +2659,10 @@ async function runShelfOcr(file, { forceRescan = false } = {}) {
     const response = await authenticatedFetch("/api/ocr", {
       method: "POST",
       body: formData,
+      signal: scanOcrAbort?.signal,
     });
     const data = await response.json().catch(() => ({}));
+    if (!scanRequests.isCurrent(requestId)) return;
     if (!response.ok) {
       if (data.code === "PLAN_LIMIT") {
         showUpgradeModal({
@@ -2629,15 +2672,20 @@ async function runShelfOcr(file, { forceRescan = false } = {}) {
       }
       throw new Error(data.error || "Scan failed");
     }
-    await handleOcrResponse(data);
+    await handleOcrResponse(data, requestId);
   } catch (err) {
+    if (scanRequests.isAbortError(err) || !scanRequests.isCurrent(requestId)) {
+      return;
+    }
     console.error("Shelf scan failed:", err);
     showToast(err.message || "Scan failed. Try again.", "error");
     document.getElementById("pendingContainer").innerHTML =
       "<p class='empty-state'>Scan failed. Crop &amp; re-scan, or upload another photo.</p>";
   } finally {
-    hideLoadingOverlay();
-    updateScanSteps();
+    if (scanRequests.isCurrent(requestId)) {
+      hideLoadingOverlay();
+      updateScanSteps();
+    }
   }
 }
 
@@ -2711,6 +2759,7 @@ async function saveBooksForShelf(shelfId, imagePath) {
 }
 
 function resetScanWorkspace() {
+  beginScanGeneration();
   currentUploadedFile = null;
   currentLoadedImage = null;
   currentDetectedSpines = [];
@@ -2922,11 +2971,13 @@ applyCropBtn?.addEventListener("click", async () => {
       });
       const shouldForceRescan = cropShouldForceRescan;
       cropShouldForceRescan = true;
+      const requestId = beginScanGeneration();
       currentUploadedFile = croppedFile;
       currentDetectedSpines = [];
 
       const img = new Image();
       img.onload = () => {
+        if (!scanRequests.isCurrent(requestId)) return;
         shelfCanvas.width = img.width;
         shelfCanvas.height = img.height;
         currentLoadedImage = img;
@@ -2937,7 +2988,10 @@ applyCropBtn?.addEventListener("click", async () => {
 
       document.getElementById("pendingContainer").innerHTML =
         "<p class='scan-loading-text'>Scanning shelf...</p>";
-      await runShelfOcr(croppedFile, { forceRescan: shouldForceRescan });
+      await runShelfOcr(croppedFile, {
+        forceRescan: shouldForceRescan,
+        requestId,
+      });
     },
     "image/jpeg",
     0.95,
@@ -4074,6 +4128,7 @@ async function loadLibraryMap() {
         });
         if (!confirmed) return;
 
+        const requestId = beginScanGeneration();
         const scanNavBtn = document.querySelector(
           '.nav-btn[data-target="uploadView"]',
         );
@@ -4084,6 +4139,7 @@ async function loadLibraryMap() {
         updateScanSteps();
 
         try {
+          if (!scanRequests.isCurrent(requestId)) return;
           const shelfImagePath = storagePathFromShelfImage(shelf.image_url);
           const shelfMediaCacheKey = mediaCacheKeyForShelfPath(shelfImagePath);
           const signedShelfImageUrl =
@@ -4101,6 +4157,7 @@ async function loadLibraryMap() {
             : signedShelfImageUrl;
           const response = await fetch(sourceUrl || signedShelfImageUrl);
           const blob = await response.blob();
+          if (!scanRequests.isCurrent(requestId)) return;
           const file = new File([blob], "rescan_shelf.jpg", {
             type: "image/jpeg",
           });
@@ -4120,6 +4177,10 @@ async function loadLibraryMap() {
           await new Promise((resolve, reject) => {
             const img = new Image();
             img.onload = () => {
+              if (!scanRequests.isCurrent(requestId)) {
+                resolve();
+                return;
+              }
               shelfCanvas.width = img.width;
               shelfCanvas.height = img.height;
               currentLoadedImage = img;
@@ -4131,13 +4192,18 @@ async function loadLibraryMap() {
             img.src = URL.createObjectURL(file);
           });
 
-          await runShelfOcr(file, { forceRescan: true });
+          if (!scanRequests.isCurrent(requestId)) return;
+          await runShelfOcr(file, { forceRescan: true, requestId });
+          if (!scanRequests.isCurrent(requestId)) return;
           currentDetectedSpines = applyDismissedTitles(
             currentDetectedSpines,
             currentDismissedTitles,
           );
           renderDetectedSpines();
         } catch (err) {
+          if (scanRequests.isAbortError(err) || !scanRequests.isCurrent(requestId)) {
+            return;
+          }
           console.error("Rescan failed:", err);
           showToast(err.message || "Rescan failed. Try again.", "error");
           document.getElementById("pendingContainer").innerHTML =

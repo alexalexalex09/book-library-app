@@ -11,6 +11,8 @@ const APP_SHELL_URLS = [
   "/js/legal.js",
   "/js/offline-store.js",
   "/js/pwa.js",
+  "/js/prompt-utils.js",
+  "/js/scan-request.js",
   "/img/ShelfMapperLogo.svg",
   "/img/noun_Crop_1935400.svg",
   "/img/logo-180.png",
