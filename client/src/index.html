@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="ShelfMapper">
   
   <!-- CSS Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=28">
+  <link rel="stylesheet" href="css/style.css?v=31">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500;1,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -397,6 +397,25 @@
     </div>
   </div>
 
+  <div id="bookSettingsModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="bookSettingsTitle" aria-describedby="bookSettingsHint">
+    <div class="modal-content modal-dialog book-settings-dialog" role="document">
+      <h2 id="bookSettingsTitle" class="modal-title">Book settings</h2>
+      <p id="bookSettingsHint" class="modal-message">Edit this book’s title, search the catalog, or set a cover.</p>
+      <label class="modal-input-label" for="bookSettingsTitleInput">Title</label>
+      <div class="book-settings-title-row">
+        <input id="bookSettingsTitleInput" class="auth-input modal-input" type="text" autocomplete="off" />
+        <button id="bookSettingsSaveTitleBtn" class="auth-btn primary-btn" type="button">Save title</button>
+      </div>
+      <div class="book-settings-actions">
+        <button id="bookSettingsSearchBtn" class="auth-btn secondary-btn modal-btn" type="button">Search Google Books</button>
+        <button id="bookSettingsCoverBtn" class="auth-btn secondary-btn modal-btn" type="button">Custom cover</button>
+      </div>
+      <div class="modal-actions">
+        <button id="bookSettingsCloseBtn" class="auth-btn secondary-btn modal-btn" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div id="promptModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="promptModalTitle" aria-describedby="promptModalHint">
     <div class="modal-content modal-dialog" role="document">
       <h2 id="promptModalTitle" class="modal-title">Rename</h2>
@@ -512,6 +531,6 @@
   <script src="js/legal.js?v=1"></script>
   <script src="js/prompt-utils.js?v=1"></script>
   <script src="js/api.js"></script>
-  <script src="js/app.js?v=25"></script>
+  <script src="js/app.js?v=29"></script>
 </body>
 </html>

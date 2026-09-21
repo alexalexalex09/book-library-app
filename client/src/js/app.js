@@ -28,6 +28,7 @@ let usageState = {
 let isPublicShareView = false;
 let bookLookupTarget = null;
 let customCoverTarget = null;
+let bookSettingsTarget = null;
 let currentDismissedTitles = [];
 let lastShelvesSnapshot = [];
 let offlineMode = !navigator.onLine;
@@ -50,7 +51,7 @@ const FOLIO_COLORS = {
   success: "#6f8753",
   warning: "#9d7138",
   mapDefaultFill: "rgba(139, 58, 47, 0.2)",
-  mapSelectedFill: "rgba(111, 135, 83, 0.35)",
+  mapSelectedFill: "rgba(111, 135, 83, 0.65)",
 };
 
 function isOfflineActive() {
@@ -3304,6 +3305,138 @@ function setupBookLookupModal() {
 }
 setupBookLookupModal();
 
+const SETTINGS_GEAR_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+
+function closeBookSettingsModal() {
+  const modal = document.getElementById("bookSettingsModal");
+  if (!modal) return;
+  bookSettingsTarget = null;
+  closeModalAndRestore(modal);
+}
+
+function openBookSettingsModal(book) {
+  const modal = document.getElementById("bookSettingsModal");
+  const input = document.getElementById("bookSettingsTitleInput");
+  const hint = document.getElementById("bookSettingsHint");
+  if (!modal || !input || !book) return;
+
+  bookSettingsTarget = book;
+  input.value = book.title || "";
+  if (hint) {
+    hint.textContent = `Edit title, search the catalog, or set a cover for “${book.title || "this book"}”.`;
+  }
+  openModalWithFocus(modal, input);
+}
+
+async function saveBookSettingsTitle() {
+  if (!bookSettingsTarget) return;
+  if (!requireOnline("Book updates")) return;
+  const input = document.getElementById("bookSettingsTitleInput");
+  const saveBtn = document.getElementById("bookSettingsSaveTitleBtn");
+  const nextTitle = String(input?.value || "").trim();
+  if (!nextTitle) {
+    showToast("Enter a title before saving.", "error");
+    input?.focus();
+    return;
+  }
+
+  if (saveBtn) saveBtn.disabled = true;
+  try {
+    const { error } = await supabaseClient
+      .from("user_books")
+      .update({ title: nextTitle })
+      .eq("id", bookSettingsTarget.id)
+      .eq("user_id", currentUser.id);
+
+    if (error) {
+      showToast("Failed to update title: " + error.message, "error");
+      return;
+    }
+
+    bookSettingsTarget.title = nextTitle;
+    const stored = myLibrary.find((entry) => entry.id === bookSettingsTarget.id);
+    if (stored) stored.title = nextTitle;
+
+    refreshLibraryList();
+    await persistOfflineSnapshot();
+    if (
+      document.getElementById("libraryView")?.classList.contains("active-view")
+    ) {
+      loadLibraryMap();
+    }
+    if (input) input.value = nextTitle;
+    const hint = document.getElementById("bookSettingsHint");
+    if (hint) {
+      hint.textContent = `Edit title, search the catalog, or set a cover for “${nextTitle}”.`;
+    }
+    showToast(`Title updated to "${nextTitle}".`, "success");
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+function setupBookSettingsModal() {
+  const modal = document.getElementById("bookSettingsModal");
+  const closeBtn = document.getElementById("bookSettingsCloseBtn");
+  const saveTitleBtn = document.getElementById("bookSettingsSaveTitleBtn");
+  const searchBtn = document.getElementById("bookSettingsSearchBtn");
+  const coverBtn = document.getElementById("bookSettingsCoverBtn");
+  const input = document.getElementById("bookSettingsTitleInput");
+  if (!modal) return;
+
+  let pointerDownOnOverlay = false;
+
+  closeBtn?.addEventListener("click", () => closeBookSettingsModal());
+  saveTitleBtn?.addEventListener("click", () => {
+    saveBookSettingsTitle();
+  });
+  input?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveBookSettingsTitle();
+    }
+  });
+  searchBtn?.addEventListener("click", () => {
+    const book = bookSettingsTarget;
+    if (!book) return;
+    closeBookSettingsModal();
+    openBookLookupModal(book);
+  });
+  coverBtn?.addEventListener("click", () => {
+    const book = bookSettingsTarget;
+    if (!book) return;
+    if (!requirePremiumFeature("Custom cover is Premium-only.", "custom_cover")) {
+      return;
+    }
+    closeBookSettingsModal();
+    openCustomCoverModal(book);
+  });
+
+  modal.addEventListener("keydown", (e) => {
+    trapFocusInModal(modal, e);
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      closeBookSettingsModal();
+    }
+  });
+
+  // Close only when both press and release happen on the overlay (outside the dialog).
+  modal.addEventListener("pointerdown", (e) => {
+    pointerDownOnOverlay = e.target === modal;
+  });
+  modal.addEventListener("pointerup", (e) => {
+    if (pointerDownOnOverlay && e.target === modal) {
+      closeBookSettingsModal();
+    }
+    pointerDownOnOverlay = false;
+  });
+  modal.addEventListener("pointercancel", () => {
+    pointerDownOnOverlay = false;
+  });
+}
+setupBookSettingsModal();
+
 function closeCustomCoverModal() {
   const modal = document.getElementById("customCoverModal");
   if (!modal) return;
@@ -3613,34 +3746,20 @@ function renderLibraryList(books) {
     const titleSpan = document.createElement("span");
     titleSpan.className = "library-row-title";
     titleSpan.textContent = book.title;
+    titleSpan.title = book.title || "";
 
     const actions = document.createElement("div");
     actions.className = "library-row-actions";
 
-    const lookupBtn = document.createElement("button");
-    lookupBtn.className = "library-lookup-btn";
-    lookupBtn.type = "button";
-    lookupBtn.textContent = "Search";
-    lookupBtn.title = `Search Google Books for ${book.title}`;
-    lookupBtn.setAttribute(
-      "aria-label",
-      `Search Google Books for ${book.title}`,
-    );
-    lookupBtn.addEventListener("click", (e) => {
+    const settingsBtn = document.createElement("button");
+    settingsBtn.className = "library-settings-btn";
+    settingsBtn.type = "button";
+    settingsBtn.innerHTML = SETTINGS_GEAR_SVG;
+    settingsBtn.title = `Book settings for ${book.title}`;
+    settingsBtn.setAttribute("aria-label", `Book settings for ${book.title}`);
+    settingsBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      openBookLookupModal(book);
-    });
-
-    const coverBtn = document.createElement("button");
-    coverBtn.className = "library-lookup-btn";
-    coverBtn.type = "button";
-    coverBtn.textContent = "Cover";
-    coverBtn.title = `Set custom cover for ${book.title}`;
-    coverBtn.setAttribute("aria-label", `Set custom cover for ${book.title}`);
-    coverBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (!requirePremiumFeature("Custom cover is Premium-only.", "custom_cover")) return;
-      openCustomCoverModal(book);
+      openBookSettingsModal(book);
     });
 
     const delBtn = document.createElement("button");
@@ -3664,12 +3783,14 @@ function renderLibraryList(books) {
 
     const activate = () => {
       if (
-        document.getElementById("libraryView").classList.contains("active-view")
+        !document.getElementById("libraryView").classList.contains("active-view")
       ) {
-        zoomToBookOnMap(book);
-      } else {
         showToast(`Selected: ${book.title}`, "info");
+        return;
       }
+      // Collapse the mobile drawer so the book is visible when we zoom.
+      if (window.innerWidth <= 768) setMobileSheetCollapsed(true);
+      requestAnimationFrame(() => zoomToBookOnMap(book));
     };
     li.addEventListener("click", activate);
     li.addEventListener("keydown", (e) => {
@@ -3680,8 +3801,7 @@ function renderLibraryList(books) {
     });
 
     li.appendChild(titleSpan);
-    actions.appendChild(lookupBtn);
-    actions.appendChild(coverBtn);
+    actions.appendChild(settingsBtn);
     actions.appendChild(delBtn);
     li.appendChild(actions);
     list.appendChild(li);
@@ -4457,17 +4577,16 @@ function showBookActionPopover(shelfWrapper, book, books) {
   const titleEl = document.createElement("span");
   titleEl.className = "popover-title book-popover-title";
   titleEl.textContent = book.title;
+  titleEl.title = book.title || "";
 
   const actions = document.createElement("div");
   actions.className = "book-popover-actions";
   actions.innerHTML = `
-    <button class="popover-search-btn book-popover-search" type="button">Search</button>
-    <button class="popover-cover-btn book-popover-search" type="button">Cover</button>
+    <button class="popover-settings-btn book-popover-settings" type="button" aria-label="Book settings">${SETTINGS_GEAR_SVG}<span>Settings</span></button>
     <button class="popover-del-btn book-popover-delete" type="button">Delete</button>
     <button class="popover-close-btn book-popover-close" type="button" aria-label="Close book actions">✕</button>
   `;
-  actions.querySelector(".popover-search-btn").setAttribute("aria-label", `Search Google Books for ${book.title}`);
-  actions.querySelector(".popover-cover-btn").setAttribute("aria-label", `Set custom cover for ${book.title}`);
+  actions.querySelector(".popover-settings-btn").setAttribute("aria-label", `Book settings for ${book.title}`);
   actions.querySelector(".popover-del-btn").setAttribute("aria-label", `Delete ${book.title}`);
 
   meta.appendChild(titleEl);
@@ -4483,14 +4602,9 @@ function showBookActionPopover(shelfWrapper, book, books) {
     main.prepend(img);
   }
 
-  actions.querySelector(".popover-search-btn").addEventListener("click", (e) => {
+  actions.querySelector(".popover-settings-btn").addEventListener("click", (e) => {
     e.stopPropagation();
-    openBookLookupModal(book);
-  });
-  actions.querySelector(".popover-cover-btn").addEventListener("click", (e) => {
-    e.stopPropagation();
-    if (!requirePremiumFeature("Custom cover is a Premium feature.", "custom_cover")) return;
-    openCustomCoverModal(book);
+    openBookSettingsModal(book);
   });
 
   popover
@@ -4513,7 +4627,24 @@ function showBookActionPopover(shelfWrapper, book, books) {
   });
 
   const imgContainer = shelfWrapper.querySelector(".shelf-img-wrap");
-  if (imgContainer) imgContainer.appendChild(popover);
+  if (!imgContainer) return;
+
+  // Anchor above the selected book (not shelf center).
+  const img = shelfWrapper.querySelector(".shelf-img");
+  const box = getBookBounds(book);
+  if (box && img) {
+    const w = img.clientWidth || img.naturalWidth || 280;
+    const h =
+      img.clientHeight ||
+      w * (img.naturalHeight / (img.naturalWidth || 1)) ||
+      200;
+    const cx = ((box.minX + box.maxX) / 2) * w;
+    const topY = box.minY * h;
+    popover.style.left = `${cx}px`;
+    popover.style.top = `${topY - 8}px`;
+  }
+
+  imgContainer.appendChild(popover);
 }
 
 function renderShelfSvgOverlays(
@@ -4650,6 +4781,10 @@ const initMapDrag = (e) => {
     e.target.closest(".map-controls")
   )
     return;
+
+  // Avoid selecting chrome text (e.g. Fit) while panning across the map.
+  if (e.cancelable) e.preventDefault();
+  window.getSelection?.()?.removeAllRanges?.();
 
   deselectAllMapBooks();
 
@@ -4888,6 +5023,38 @@ function getBookBounds(book) {
   return null;
 }
 
+/** Unscaled offset of `el` inside `ancestor` under the current map transform. */
+function mapOffsetWithin(el, ancestor) {
+  const scale = mapState.scale || 1;
+  const a = ancestor.getBoundingClientRect();
+  const e = el.getBoundingClientRect();
+  return {
+    x: (e.left - a.left) / scale,
+    y: (e.top - a.top) / scale,
+  };
+}
+
+/** Focus point in map viewport coords, avoiding the library sidebar/drawer. */
+function getMapFocusCenter() {
+  const rect = infiniteMap.getBoundingClientRect();
+  let cx = rect.width / 2;
+  let cy = rect.height / 2;
+
+  const sidebar = document.querySelector("#libraryView .sidebar");
+  if (!sidebar) return { cx, cy, rect };
+
+  const side = sidebar.getBoundingClientRect();
+  if (window.innerWidth > 768) {
+    const visibleRight = Math.max(0, Math.min(rect.width, side.left - rect.left));
+    if (visibleRight > 120) cx = visibleRight / 2;
+  } else if (!mobileLibraryContent?.classList.contains("collapsed")) {
+    const visibleBottom = Math.max(0, side.top - rect.top);
+    if (visibleBottom > 120) cy = visibleBottom / 2;
+  }
+
+  return { cx, cy, rect };
+}
+
 function zoomToBookOnMap(book, { showHandles = false, books } = {}) {
   const box = getBookBounds(book);
   if (!box) return;
@@ -4913,15 +5080,16 @@ function zoomToBookOnMap(book, { showHandles = false, books } = {}) {
   const bookCx = ((box.minX + box.maxX) / 2) * renderedWidth;
   const bookCy = ((box.minY + box.maxY) / 2) * renderedHeight;
 
+  // img.offsetLeft/Top are relative to .shelf-img-wrap (position:relative),
+  // not the shelf card — so header/room row were skipped. Use rects instead.
   const shelfLeft = parseFloat(shelfWrapper.style.left) || 0;
   const shelfTop = parseFloat(shelfWrapper.style.top) || 0;
-  const imgLeft = imgElement.offsetLeft || 0;
-  const imgTop = imgElement.offsetTop || 0;
+  const imgOffset = mapOffsetWithin(imgElement, shelfWrapper);
 
-  const targetX = shelfLeft + imgLeft + bookCx;
-  const targetY = shelfTop + imgTop + bookCy;
+  const targetX = shelfLeft + imgOffset.x + bookCx;
+  const targetY = shelfTop + imgOffset.y + bookCy;
 
-  const rect = infiniteMap.getBoundingClientRect();
+  const { cx, cy, rect } = getMapFocusCenter();
   const targetScale = Math.min(
     5,
     Math.max(
@@ -4931,11 +5099,11 @@ function zoomToBookOnMap(book, { showHandles = false, books } = {}) {
   );
   mapState.scale = targetScale;
 
-  mapState.x = rect.width / 2 - targetX * targetScale;
-  mapState.y = rect.height / 2 - targetY * targetScale;
+  mapState.x = cx - targetX * targetScale;
+  mapState.y = cy - targetY * targetScale;
 
   mapViewport.style.transition = "transform 0.4s ease-in-out";
-  mapViewport.style.transform = `translate(${mapState.x}px, ${mapState.y}px) scale(${mapState.scale})`;
+  applyMapTransform();
   persistMapView("custom");
 
   setTimeout(() => {

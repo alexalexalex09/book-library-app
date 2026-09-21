@@ -704,6 +704,8 @@ input:focus-visible,
     linear-gradient(90deg, rgba(15, 23, 42, 0.055) 1px, transparent 1px);
   background-size: 32px 32px;
   cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .map-controls {
@@ -717,6 +719,8 @@ input:focus-visible,
   align-items: center;
   flex-wrap: wrap;
   pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .map-controls > * {
@@ -742,6 +746,8 @@ input:focus-visible,
   font-size: 1.1rem;
   font-weight: 700;
   cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .map-zoom-btn + .map-zoom-btn {
@@ -1798,16 +1804,18 @@ input:focus-visible,
   cursor: pointer;
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 4px;
 }
 
 .library-row-title {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.35;
+  padding-top: 6px;
 }
 
 .library-row-actions {
@@ -1817,6 +1825,7 @@ input:focus-visible,
 }
 
 .library-lookup-btn,
+.library-settings-btn,
 .library-delete-btn {
   background: none;
   border: none;
@@ -1827,16 +1836,77 @@ input:focus-visible,
   min-height: 36px;
   border-radius: 6px;
   color: var(--text-subtle);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .library-lookup-btn:hover,
+.library-settings-btn:hover,
 .library-delete-btn:hover {
   background: var(--primary-soft);
   color: var(--primary);
 }
 
+.library-settings-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
 .library-delete-btn {
   margin-left: 0;
+}
+
+.book-settings-title-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin-bottom: 12px;
+}
+
+.book-settings-title-row .modal-input {
+  flex: 1;
+  margin: 0;
+}
+
+.book-settings-title-row .auth-btn {
+  width: auto;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.book-settings-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.book-settings-actions .modal-btn {
+  width: 100%;
+  margin: 0;
+}
+
+.book-popover-settings {
+  background: var(--surface-muted, #f7f0e2);
+  color: var(--text, #2c1f0e);
+  border: 1px solid var(--border, #e0d5c5);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.75rem;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.book-popover-settings svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .shelf-card {
@@ -1990,9 +2060,10 @@ input:focus-visible,
 .book-popover-title {
   font-weight: 600;
   max-width: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.35;
 }
 
 .book-popover-search {

@@ -1,5 +1,5 @@
-const SHELL_CACHE = "shelfmapper-shell-v1";
-const RUNTIME_CACHE = "shelfmapper-runtime-v1";
+const SHELL_CACHE = "shelfmapper-shell-v2";
+const RUNTIME_CACHE = "shelfmapper-runtime-v2";
 
 const APP_SHELL_URLS = [
   "/",
@@ -69,8 +69,10 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  const isScript = url.origin === self.location.origin && url.pathname.endsWith(".js");
-  if (isScript) {
+  const isScriptOrStyle =
+    url.origin === self.location.origin &&
+    (url.pathname.endsWith(".js") || url.pathname.endsWith(".css"));
+  if (isScriptOrStyle) {
     event.respondWith(
       (async () => {
         const key = normalizedRequest(request);
