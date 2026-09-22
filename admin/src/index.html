@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>ShelfMapper Admin</title>
+  <link rel="stylesheet" href="css/admin.css" />
+</head>
+<body>
+  <main class="admin-shell">
+    <header class="admin-header">
+      <h1 class="admin-brand">ShelfMapper Admin</h1>
+      <div id="sessionBar" class="session-bar hidden">
+        <span id="sessionEmail" class="session-email"></span>
+        <button id="signOutBtn" class="btn secondary" type="button">Sign out</button>
+      </div>
+    </header>
+
+    <section id="loginPanel" class="panel">
+      <h2>Sign in</h2>
+      <p class="hint">Admin access only. There is no self-service signup here.</p>
+      <form id="loginForm" class="stack">
+        <label class="field">
+          <span>Email</span>
+          <input id="loginEmail" type="email" autocomplete="username" required />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input id="loginPassword" type="password" autocomplete="current-password" required />
+        </label>
+        <button class="btn primary" type="submit">Sign in</button>
+      </form>
+      <p id="loginError" class="error" role="alert" hidden></p>
+    </section>
+
+    <section id="deniedPanel" class="panel hidden">
+      <h2>Access denied</h2>
+      <p>This account is signed in but is not an admin.</p>
+      <button id="deniedSignOutBtn" class="btn secondary" type="button">Sign out</button>
+    </section>
+
+    <section id="consolePanel" class="panel hidden">
+      <h2>Users</h2>
+      <form id="searchForm" class="search-row">
+        <label class="field grow">
+          <span class="sr-only">Search by email</span>
+          <input id="searchInput" type="search" minlength="3" placeholder="Search by email (min 3 chars)" required />
+        </label>
+        <button class="btn primary" type="submit">Search</button>
+      </form>
+      <p id="searchStatus" class="hint" hidden></p>
+      <ul id="userList" class="user-list"></ul>
+
+      <div id="userDetail" class="user-detail hidden">
+        <h3>User detail</h3>
+        <dl id="userDetailFields" class="detail-grid"></dl>
+        <button id="syncBillingBtn" class="btn secondary" type="button">Sync billing from Stripe</button>
+        <p id="detailStatus" class="hint" hidden></p>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

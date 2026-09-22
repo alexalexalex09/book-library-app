@@ -163,8 +163,8 @@ function createBillingRouter({
     await updateUserBillingMetadata(userId, { renewal_notice: null });
   }
 
-  async function syncSubscriptionToSupabase(subscription) {
-    const userId = subscription?.metadata?.supabase_user_id;
+  async function syncSubscriptionToSupabase(subscription, { userId: userIdOverride } = {}) {
+    const userId = userIdOverride || subscription?.metadata?.supabase_user_id;
     if (!userId) return;
     const firstPrice = subscription?.items?.data?.[0]?.price;
     const plan = getPlanFromSubscriptionStatus(subscription?.status);
@@ -185,6 +185,51 @@ function createBillingRouter({
         Boolean(subscription?.trial_end) ||
         undefined,
     });
+  }
+
+  /**
+   * Re-fetch the user's Stripe subscription and write plan metadata to Auth.
+   * Used by the admin console — does not invent a plan without Stripe.
+   */
+  async function syncBillingForUserId(userId) {
+    if (!billingConfigured || !stripe) {
+      const err = new Error("Billing is not configured yet.");
+      err.code = "BILLING_NOT_CONFIGURED";
+      throw err;
+    }
+    const { data, error } = await supabase.auth.admin.getUserById(userId);
+    if (error || !data?.user) {
+      const err = new Error(error?.message || "User not found");
+      err.code = "USER_NOT_FOUND";
+      throw err;
+    }
+    const metadata = data.user.app_metadata || {};
+    let subscription = null;
+    if (metadata.stripe_subscription_id) {
+      subscription = await stripe.subscriptions.retrieve(
+        metadata.stripe_subscription_id,
+      );
+    } else if (metadata.stripe_customer_id) {
+      const listed = await stripe.subscriptions.list({
+        customer: metadata.stripe_customer_id,
+        status: "all",
+        limit: 5,
+      });
+      subscription =
+        (listed.data || []).find((sub) =>
+          ["active", "trialing", "past_due"].includes(sub.status),
+        ) ||
+        listed.data?.[0] ||
+        null;
+    }
+    if (!subscription) {
+      const err = new Error("No Stripe subscription found for this user.");
+      err.code = "NO_SUBSCRIPTION";
+      throw err;
+    }
+    await syncSubscriptionToSupabase(subscription, { userId });
+    const refreshed = await supabase.auth.admin.getUserById(userId);
+    return refreshed.data?.user || data.user;
   }
 
   async function getOrCreateCustomerForUser(user) {
@@ -353,7 +398,14 @@ function createBillingRouter({
     }
   }
 
-  return { router, webhookHandler, getPlanFromSubscriptionStatus, normalizeInterval };
+  return {
+    router,
+    webhookHandler,
+    getPlanFromSubscriptionStatus,
+    normalizeInterval,
+    syncBillingForUserId,
+    syncSubscriptionToSupabase,
+  };
 }
 
 module.exports = {

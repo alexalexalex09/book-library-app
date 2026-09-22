@@ -686,7 +686,16 @@ input:focus-visible,
 }
 
 .maximize-spines-btn {
-  display: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  width: auto;
+  height: auto;
+  min-height: 36px;
+  padding: 8px 14px;
+  line-height: 1.2;
+  box-sizing: border-box;
 }
 
 /* ==========================================
@@ -1630,6 +1639,35 @@ input:focus-visible,
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
+.spine-card-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.spine-crop-thumb {
+  width: 200px;
+  height: 300px;
+  flex-shrink: 0;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-muted, #e4e4e7);
+  background: #f4f4f5;
+  cursor: pointer;
+}
+
+#uploadView[data-scan-stage="review"]:not(.shelf-photo-collapsed) .spine-crop-thumb {
+  display: none;
+}
+
+.spine-card-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
 .spine-input-row {
   display: flex;
   align-items: center;
@@ -2276,7 +2314,7 @@ input:focus-visible,
     align-items: flex-start;
   }
 
-  /* Full-screen Mobile Overlay when Maximized */
+  /* Full-screen Mobile Overlay when Maximized (legacy; shelf-photo toggle preferred) */
   #pendingContainer.maximized {
     position: fixed;
     top: 0;
@@ -2314,10 +2352,15 @@ input:focus-visible,
     line-height: 1;
   }
 
-  .spines-batch-actions .maximize-spines-btn.spine-icon-btn {
+  .spines-batch-actions .maximize-spines-btn {
     height: auto;
     width: auto;
     min-width: 7em;
+    padding: 8px 14px;
+  }
+
+  #uploadView[data-scan-stage="review"].shelf-photo-collapsed #pendingContainer {
+    max-height: none;
   }
 
   .nav-brand, 
@@ -3294,6 +3337,23 @@ body.guest-auth-open {
   margin: 0;
 }
 
+.hide-shelf-photo-btn {
+  display: none;
+  width: auto;
+  min-height: 36px;
+  padding: 8px 14px;
+  margin: 0;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+#uploadView[data-scan-stage="review"] .hide-shelf-photo-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .scan-analyse-btn:disabled {
   background: #dfd2bb;
   color: #ab9c86;
@@ -3347,9 +3407,13 @@ body.guest-auth-open {
     min-height: min(480px, calc(100dvh - 280px));
   }
 
-  /* Review: give matching list room; canvas fills the photo column */
+  /* Review: give matching list room; canvas fills the photo column when revealed */
   #uploadView[data-scan-stage="review"] .scan-wizard-body {
     grid-template-columns: minmax(0, 1fr) minmax(380px, 1.05fr);
+  }
+
+  #uploadView[data-scan-stage="review"].shelf-photo-collapsed .scan-wizard-body {
+    grid-template-columns: 1fr;
   }
 
   #uploadView[data-scan-stage="review"] .canvas-container {
@@ -3365,6 +3429,10 @@ body.guest-auth-open {
     min-height: 420px;
     max-height: calc(100dvh - 220px);
   }
+
+  #uploadView[data-scan-stage="review"].shelf-photo-collapsed #pendingContainer {
+    max-height: calc(100dvh - 180px);
+  }
 }
 
 #uploadView[data-scan-stage="upload"] #pendingContainer {
@@ -3374,6 +3442,15 @@ body.guest-auth-open {
 #uploadView[data-scan-stage="review"] .upload-label-btn,
 #uploadView[data-scan-stage="review"] .scan-tips-panel {
   display: none;
+}
+
+/* List-first review: hide the full shelf photo until revealed */
+#uploadView[data-scan-stage="review"].shelf-photo-collapsed .scan-main-panel {
+  display: none;
+}
+
+#uploadView[data-scan-stage="review"].shelf-photo-collapsed .scan-side-panel {
+  min-height: 0;
 }
 
 .sidebar-title,

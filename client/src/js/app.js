@@ -1677,6 +1677,11 @@ function updateScanSteps() {
   if (uploadView) {
     const stage = !hasImage ? "upload" : "review";
     uploadView.setAttribute("data-scan-stage", stage);
+    if (stage === "upload") {
+      uploadView.classList.remove("shelf-photo-collapsed");
+    } else {
+      uploadView.classList.toggle("shelf-photo-collapsed", shelfPhotoCollapsed);
+    }
     const stageMeta = {
       upload: {
         number: "Step 1 of 2",
@@ -1777,6 +1782,10 @@ saveShelfBtn?.addEventListener("click", () => {
   saveShelfToDatabase();
 });
 
+document.getElementById("hideShelfPhotoBtn")?.addEventListener("click", () => {
+  setShelfPhotoCollapsed(true);
+});
+
 // Canvas Viewport & Editing State
 let canvasState = {
   scale: 1,
@@ -1802,6 +1811,125 @@ function getSpineBounds(spine) {
     };
   }
   return spine?.box || spine?.boundingBox || null;
+}
+
+/** Object URLs for per-spine review thumbs; revoked on each list re-render. */
+let spineCropObjectUrls = [];
+/** Review stage: shelf photo starts collapsed (list-first). */
+let shelfPhotoCollapsed = true;
+
+function revokeSpineCropUrls() {
+  spineCropObjectUrls.forEach((url) => {
+    try {
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore */
+    }
+  });
+  spineCropObjectUrls = [];
+}
+
+function setShelfPhotoCollapsed(collapsed) {
+  shelfPhotoCollapsed = Boolean(collapsed);
+  const uploadView = document.getElementById("uploadView");
+  uploadView?.classList.toggle("shelf-photo-collapsed", shelfPhotoCollapsed);
+  syncShelfPhotoToggleButtons();
+}
+
+function syncShelfPhotoToggleButtons() {
+  const collapsed = shelfPhotoCollapsed;
+  const label = collapsed ? "Show shelf photo" : "Hide shelf photo";
+  document.querySelectorAll(".maximize-spines-btn").forEach((btn) => {
+    btn.textContent = label;
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+    btn.setAttribute("aria-expanded", String(!collapsed));
+  });
+}
+
+/**
+ * Crop a spine AABB from the shelf image into a thumbnail object URL,
+ * with the detection highlighted inside the crop.
+ * @returns {string|null}
+ */
+function cropSpineThumbnail(image, spine, { pad = 0.08, maxEdge = 400 } = {}) {
+  const box = getSpineBounds(spine);
+  if (!image || !box) return null;
+  const natW = image.naturalWidth || image.width;
+  const natH = image.naturalHeight || image.height;
+  if (!natW || !natH) return null;
+  if (
+    !Number.isFinite(box.minX) ||
+    !Number.isFinite(box.maxX) ||
+    !Number.isFinite(box.minY) ||
+    !Number.isFinite(box.maxY)
+  ) {
+    return null;
+  }
+
+  const minX = Math.max(0, Math.min(1, box.minX - pad));
+  const maxX = Math.max(0, Math.min(1, box.maxX + pad));
+  const minY = Math.max(0, Math.min(1, box.minY - pad));
+  const maxY = Math.max(0, Math.min(1, box.maxY + pad));
+  const sx = minX * natW;
+  const sy = minY * natH;
+  const sw = Math.max(1, (maxX - minX) * natW);
+  const sh = Math.max(1, (maxY - minY) * natH);
+  if (sw < 1 || sh < 1) return null;
+
+  const scale = Math.min(1, maxEdge / Math.max(sw, sh));
+  const dw = Math.max(1, Math.round(sw * scale));
+  const dh = Math.max(1, Math.round(sh * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = dw;
+  canvas.height = dh;
+  const c = canvas.getContext("2d");
+  if (!c) return null;
+  try {
+    c.drawImage(image, sx, sy, sw, sh, 0, 0, dw, dh);
+
+    const toCrop = (nx, ny) => ({
+      x: (nx * natW - sx) * (dw / sw),
+      y: (ny * natH - sy) * (dh / sh),
+    });
+
+    c.save();
+    c.strokeStyle = FOLIO_COLORS.success;
+    c.lineWidth = Math.max(2, Math.round(Math.min(dw, dh) * 0.02));
+    c.lineJoin = "round";
+
+    const poly = spine.polygon;
+    if (Array.isArray(poly) && poly.length >= 3) {
+      c.beginPath();
+      poly.forEach((pt, i) => {
+        const p = toCrop(pt.x, pt.y);
+        if (i === 0) c.moveTo(p.x, p.y);
+        else c.lineTo(p.x, p.y);
+      });
+      c.closePath();
+      c.stroke();
+    } else {
+      const tl = toCrop(box.minX, box.minY);
+      const br = toCrop(box.maxX, box.maxY);
+      const rw = Math.max(1, br.x - tl.x);
+      const rh = Math.max(1, br.y - tl.y);
+      c.strokeRect(tl.x, tl.y, rw, rh);
+    }
+    c.restore();
+
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    const comma = dataUrl.indexOf(",");
+    if (comma < 0) return null;
+    const bin = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+    spineCropObjectUrls.push(url);
+    return url;
+  } catch {
+    return null;
+  }
 }
 
 function setCanvasZoom(newScale) {
@@ -2314,9 +2442,13 @@ function renderDetectedSpines(options = {}) {
     containerEl.appendChild(selectedRow);
   };
 
+  revokeSpineCropUrls();
+
   const container = document.getElementById("pendingContainer");
   container.innerHTML = "";
+  container.classList.remove("maximized");
   updateScanSteps();
+  setShelfPhotoCollapsed(shelfPhotoCollapsed);
 
   if (currentDetectedSpines.length === 0) {
     container.innerHTML = "<p class='empty-state'>No spines detected.</p>";
@@ -2324,8 +2456,6 @@ function renderDetectedSpines(options = {}) {
   }
 
   redrawCanvasOverlays(null);
-
-  // Step 2 header: review progress within the 1-2-3 flow
 
   // Toolbar
   const header = document.createElement("div");
@@ -2339,24 +2469,11 @@ function renderDetectedSpines(options = {}) {
   const batchActions = document.createElement("div");
   batchActions.className = "spines-batch-actions";
 
-  // Mobile Maximize / Minimize Toggle Button (Styled as 32x32px icon button)
-  const maximizeBtn = document.createElement("button");
-  maximizeBtn.className = "auth-btn secondary-btn maximize-spines-btn spine-icon-btn";
-  maximizeBtn.type = "button";
-
-  const updateMaximizeBtn = () => {
-    const isMax = container.classList.contains("maximized");
-    maximizeBtn.textContent = isMax ? "▼ Show Image" : "▲ Hide Image";
-    maximizeBtn.title = isMax ? "Minimize" : "Maximize";
-    maximizeBtn.setAttribute("aria-label", isMax ? "Minimize detected spines" : "Maximize detected spines");
-    maximizeBtn.setAttribute("aria-expanded", String(isMax));
-  };
-
-  updateMaximizeBtn();
-
-  maximizeBtn.onclick = () => {
-    container.classList.toggle("maximized");
-    updateMaximizeBtn();
+  const shelfPhotoBtn = document.createElement("button");
+  shelfPhotoBtn.className = "auth-btn secondary-btn maximize-spines-btn";
+  shelfPhotoBtn.type = "button";
+  shelfPhotoBtn.onclick = () => {
+    setShelfPhotoCollapsed(!shelfPhotoCollapsed);
   };
 
   const searchAllBtn = document.createElement("button");
@@ -2403,11 +2520,12 @@ function renderDetectedSpines(options = {}) {
 
   batchActions.appendChild(searchAllBtn);
   batchActions.appendChild(skipUnlabeledBtn);
-  batchActions.appendChild(maximizeBtn);
+  batchActions.appendChild(shelfPhotoBtn);
 
   header.appendChild(titleEl);
   header.appendChild(batchActions);
   container.appendChild(header);
+  syncShelfPhotoToggleButtons();
 
   const spinesScroll = document.createElement("div");
   spinesScroll.className = "spines-scroll";
@@ -2417,6 +2535,42 @@ function renderDetectedSpines(options = {}) {
     const div = document.createElement("div");
     div.className = "spine-card";
     if (spine.confirmed) div.classList.add("is-confirmed");
+
+    const highlight = () => {
+      activeEditingSpineIndex = index;
+      div.classList.add("is-highlighted");
+      redrawCanvasOverlays(index);
+    };
+
+    const unhighlight = () => {
+      div.classList.remove("is-highlighted");
+      redrawCanvasOverlays(null);
+    };
+
+    const cardMain = document.createElement("div");
+    cardMain.className = "spine-card-main";
+
+    const cropUrl = cropSpineThumbnail(currentLoadedImage, spine);
+    if (cropUrl) {
+      const thumb = document.createElement("img");
+      thumb.className = "spine-crop-thumb";
+      thumb.src = cropUrl;
+      thumb.alt = "";
+      thumb.draggable = false;
+      thumb.addEventListener("click", (e) => {
+        e.stopPropagation();
+        highlight();
+        if (!shelfPhotoCollapsed) zoomCanvasToSpine(spine);
+        else {
+          setShelfPhotoCollapsed(false);
+          requestAnimationFrame(() => zoomCanvasToSpine(spine));
+        }
+      });
+      cardMain.appendChild(thumb);
+    }
+
+    const cardContent = document.createElement("div");
+    cardContent.className = "spine-card-content";
 
     const inputRow = document.createElement("div");
     inputRow.className = "spine-input-row";
@@ -2443,21 +2597,10 @@ function renderDetectedSpines(options = {}) {
       }
     });
 
-    const highlight = () => {
-      activeEditingSpineIndex = index;
-      div.classList.add("is-highlighted");
-      redrawCanvasOverlays(index);
-    };
-
-    const unhighlight = () => {
-      div.classList.remove("is-highlighted");
-      redrawCanvasOverlays(null);
-    };
-
     titleInput.addEventListener("focus", highlight);
     titleInput.addEventListener("click", () => {
       highlight();
-      zoomCanvasToSpine(spine);
+      if (!shelfPhotoCollapsed) zoomCanvasToSpine(spine);
     });
     titleInput.addEventListener("blur", unhighlight);
     div.addEventListener("mouseenter", highlight);
@@ -2553,10 +2696,12 @@ function renderDetectedSpines(options = {}) {
       }
     };
 
-    div.appendChild(inputRow);
-    div.appendChild(actionRow);
+    cardContent.appendChild(inputRow);
+    cardContent.appendChild(actionRow);
     renderConfirmedBookRow(searchResults, spine);
-    div.appendChild(searchResults);
+    cardContent.appendChild(searchResults);
+    cardMain.appendChild(cardContent);
+    div.appendChild(cardMain);
     spinesScroll.appendChild(div);
   });
 
@@ -2718,6 +2863,8 @@ function resetScanWorkspace() {
   currentUploadedImageHash = null;
   pendingSavedShelfId = null;
   currentDismissedTitles = [];
+  revokeSpineCropUrls();
+  shelfPhotoCollapsed = true;
 
   if (ctx && shelfCanvas) ctx.clearRect(0, 0, shelfCanvas.width, shelfCanvas.height);
   if (shelfCanvas) shelfCanvas.style.display = "none";

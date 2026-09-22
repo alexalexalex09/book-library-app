@@ -14,12 +14,86 @@ const PLAN_QUOTAS = {
   premium: { ocr: 60, books: 300 },
 };
 
+const LOCAL_DEV_ORIGINS = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:5500",
+  "http://127.0.0.1:5500",
+  "http://localhost:8080",
+  "http://127.0.0.1:8080",
+];
+
 function normalizePlan(plan) {
   return String(plan || "")
     .trim()
     .toLowerCase() === "premium"
     ? "premium"
     : "free";
+}
+
+function normalizeEmail(email) {
+  return String(email || "")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeOrigin(origin) {
+  return String(origin || "")
+    .trim()
+    .replace(/\/$/, "");
+}
+
+function parseCsvList(raw) {
+  return String(raw || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function parseAdminEmails(env = process.env) {
+  return new Set(parseCsvList(env.ADMIN_EMAILS).map(normalizeEmail).filter(Boolean));
+}
+
+/** Exact CORS allowlist from CORS_ORIGINS (or legacy CORS_ORIGIN). */
+function getAllowedCorsOrigins(env = process.env) {
+  const listed = parseCsvList(env.CORS_ORIGINS || env.CORS_ORIGIN).map(
+    normalizeOrigin,
+  );
+  if (env.NODE_ENV !== "production") {
+    for (const origin of LOCAL_DEV_ORIGINS) {
+      if (!listed.includes(origin)) listed.push(origin);
+    }
+  }
+  return new Set(listed);
+}
+
+/** Origins allowed to call mutating /api/admin routes. */
+function getAdminOrigins(env = process.env) {
+  const explicit = parseCsvList(env.ADMIN_ORIGINS).map(normalizeOrigin);
+  if (explicit.length > 0) {
+    const set = new Set(explicit);
+    if (env.NODE_ENV !== "production") {
+      for (const origin of LOCAL_DEV_ORIGINS) set.add(origin);
+    }
+    return set;
+  }
+  const fromCors = [...getAllowedCorsOrigins(env)].filter(
+    (origin) =>
+      /\/\/admin\./i.test(origin) ||
+      (env.NODE_ENV !== "production" &&
+        /localhost|127\.0\.0\.1/i.test(origin)),
+  );
+  return new Set(fromCors);
+}
+
+function createCorsOriginDelegate(env = process.env) {
+  const allowed = getAllowedCorsOrigins(env);
+  return function corsOrigin(origin, callback) {
+    // Non-browser tooling may omit Origin — allow without reflecting ACAO.
+    if (!origin) return callback(null, false);
+    if (allowed.has(normalizeOrigin(origin))) return callback(null, true);
+    return callback(null, false);
+  };
 }
 
 function getBearerToken(authorizationHeader) {
@@ -48,6 +122,74 @@ function createRequireAuth(supabase) {
     req.user = user;
     return next();
   };
+}
+
+function isAdminUser(user, env = process.env) {
+  const role = String(user?.app_metadata?.role || "")
+    .trim()
+    .toLowerCase();
+  if (role !== "admin") return false;
+  const email = normalizeEmail(user?.email);
+  if (!email) return false;
+  const allowlist = parseAdminEmails(env);
+  if (allowlist.size === 0) return false;
+  return allowlist.has(email);
+}
+
+function requireAdmin(req, res, next) {
+  if (isAdminUser(req.user)) return next();
+  return res.status(403).json({
+    error: "Admin access required.",
+    code: "ADMIN_REQUIRED",
+  });
+}
+
+function extractRequestOrigin(req) {
+  const origin = normalizeOrigin(req.get("origin"));
+  if (origin) return origin;
+  const referer = String(req.get("referer") || "").trim();
+  if (!referer) return null;
+  try {
+    const url = new URL(referer);
+    return normalizeOrigin(url.origin);
+  } catch {
+    return null;
+  }
+}
+
+/** Block mutating admin calls that do not come from an allowlisted admin Origin. */
+function requireAdminOrigin(req, res, next) {
+  const method = String(req.method || "GET").toUpperCase();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+    return next();
+  }
+  const origin = extractRequestOrigin(req);
+  const allowed = getAdminOrigins();
+  if (origin && allowed.has(origin)) return next();
+  return res.status(403).json({
+    error: "Admin requests must originate from the admin site.",
+    code: "ADMIN_ORIGIN_REQUIRED",
+  });
+}
+
+function createAdminRateLimiter() {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => {
+      const userId = req.user?.id;
+      if (userId) return `admin-user:${userId}`;
+      return `admin-ip:${rateLimit.ipKeyGenerator(req.ip)}`;
+    },
+    handler: (req, res) => {
+      res.status(429).json({
+        error: "Too many admin requests. Please try again later.",
+        code: "ADMIN_RATE_LIMIT",
+      });
+    },
+  });
 }
 
 function createImageUpload() {
@@ -166,13 +308,25 @@ module.exports = {
   MAX_IMAGE_BYTES,
   MAX_IMAGE_PIXELS,
   PLAN_QUOTAS,
+  LOCAL_DEV_ORIGINS,
   normalizePlan,
+  normalizeEmail,
+  normalizeOrigin,
+  parseAdminEmails,
+  getAllowedCorsOrigins,
+  getAdminOrigins,
+  createCorsOriginDelegate,
   createPlanRateLimiter,
+  createAdminRateLimiter,
   createImageUpload,
   createRequireAuth,
   requirePremium,
+  requireAdmin,
+  requireAdminOrigin,
+  isAdminUser,
   getUserPlan,
   getBearerToken,
+  extractRequestOrigin,
   handleUploadError,
   sniffImageMime,
   setSecurityHeaders,

@@ -21,6 +21,7 @@ const {
   createPlanRateLimiter,
   createImageUpload,
   createRequireAuth,
+  createCorsOriginDelegate,
   requirePremium,
   getUserPlan,
   PLAN_QUOTAS,
@@ -29,6 +30,7 @@ const {
   setSecurityHeaders,
 } = require("./http-security");
 const { createBillingRouter } = require("./billing");
+const { createAdminRouter } = require("./admin-routes");
 const {
   mountPublicConfigRoutes,
 } = require("./public-config");
@@ -72,11 +74,10 @@ app.use((req, res, next) => {
   return res.redirect(301, target);
 });
 
-const allowedOrigin = process.env.CORS_ORIGIN?.trim();
 app.use(
   cors({
-    origin: allowedOrigin || false,
-    methods: ["GET", "POST"],
+    origin: createCorsOriginDelegate(process.env),
+    methods: ["GET", "POST", "OPTIONS"],
   }),
 );
 
@@ -191,6 +192,14 @@ app.post(
 );
 app.use(express.json({ limit: "1mb" }));
 app.use("/api/billing", billing.router);
+app.use(
+  "/api/admin",
+  createAdminRouter({
+    supabase,
+    requireAuth,
+    syncBillingForUserId: billing.syncBillingForUserId,
+  }),
+);
 
 const userInFlightOcr = new Map();
 

@@ -1,15 +1,18 @@
 const path = require("path");
 const express = require("express");
+const cors = require("cors");
 const {
   PLAN_QUOTAS,
   createRequireAuth,
   createPlanRateLimiter,
+  createCorsOriginDelegate,
   requirePremium,
   getUserPlan,
   setSecurityHeaders,
   handleUploadError,
 } = require("../../src/http-security");
 const { createBillingRouter } = require("../../src/billing");
+const { createAdminRouter } = require("../../src/admin-routes");
 const { mountPublicConfigRoutes } = require("../../src/public-config");
 const {
   createLibraryRouter,
@@ -24,6 +27,7 @@ function createTestApp({
   supabase,
   fetchBooks,
   processImage = async () => ({ spines: [] }),
+  syncBillingForUserId,
   env = {},
 } = {}) {
   const previousEnv = { ...process.env };
@@ -32,10 +36,23 @@ function createTestApp({
     else process.env[key] = String(value);
   }
   if (!process.env.APP_BASE_URL) process.env.APP_BASE_URL = "http://127.0.0.1:3000";
+  if (!process.env.CORS_ORIGINS) {
+    process.env.CORS_ORIGINS =
+      "http://127.0.0.1:3000,https://admin.shelfmapper.com";
+  }
+  if (!process.env.ADMIN_ORIGINS) {
+    process.env.ADMIN_ORIGINS = "https://admin.shelfmapper.com";
+  }
 
   const app = express();
   app.disable("x-powered-by");
   app.use(setSecurityHeaders);
+  app.use(
+    cors({
+      origin: createCorsOriginDelegate(process.env),
+      methods: ["GET", "POST", "OPTIONS"],
+    }),
+  );
   app.use(express.json({ limit: "1mb" }));
 
   const requireAuth = createRequireAuth(supabase);
@@ -65,6 +82,15 @@ function createTestApp({
     billing.webhookHandler,
   );
   app.use("/api/billing", billing.router);
+  app.use(
+    "/api/admin",
+    createAdminRouter({
+      supabase,
+      requireAuth,
+      syncBillingForUserId:
+        syncBillingForUserId || billing.syncBillingForUserId,
+    }),
+  );
 
   app.use(
     "/api/ocr",
@@ -127,6 +153,15 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
         const user = Object.values(usersByToken).find((u) => u.id === userId);
         if (!user) return { data: { user: null }, error: { message: "missing" } };
         return { data: { user }, error: null };
+      },
+      async listUsers({ page = 1, perPage = 50 } = {}) {
+        const all = Object.values(usersByToken);
+        const start = (page - 1) * perPage;
+        const users = all.slice(start, start + perPage);
+        return {
+          data: { users, aud: "authenticated" },
+          error: null,
+        };
       },
       async updateUserById(userId, patch) {
         const user = Object.values(usersByToken).find((u) => u.id === userId);

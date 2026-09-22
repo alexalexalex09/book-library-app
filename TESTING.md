@@ -30,10 +30,8 @@ npm run test:e2e
 
 Optional: `E2E_PORT` (default `3100`) if port 3100 is busy.
 
-## Full suite
+## Admin console
 
-```bash
-npm test
-```
+See [ADMIN.md](ADMIN.md) for deploying `admin.shelfmapper.com`, env vars, and bootstrap steps.
 
-Runs server tests, then Playwright.
+Admin API tests live in `server/test/admin.test.js` (covered by `npm run test:server`).
