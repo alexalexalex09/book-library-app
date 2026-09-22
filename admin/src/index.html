@@ -60,6 +60,32 @@
         <p id="detailStatus" class="hint" hidden></p>
       </div>
     </section>
+
+    <section id="signupsPanel" class="panel hidden">
+      <div class="panel-heading">
+        <h2>Recent signups</h2>
+        <button id="refreshSignupsBtn" class="btn secondary" type="button">Refresh</button>
+      </div>
+      <p id="signupsStatus" class="hint" hidden></p>
+      <ul id="signupList" class="signup-list"></ul>
+    </section>
+
+    <section id="notifyPanel" class="panel hidden">
+      <h2>Signup email notifications</h2>
+      <p class="hint">Emails go to <code>SIGNUP_NOTIFY_TO</code> / <code>ADMIN_EMAILS</code> via Resend.</p>
+      <form id="notifyForm" class="stack">
+        <label class="field">
+          <span>When a user signs up</span>
+          <select id="notifyMode">
+            <option value="off">Off</option>
+            <option value="immediate">Immediate email</option>
+            <option value="daily">Daily summary</option>
+          </select>
+        </label>
+        <button class="btn primary" type="submit">Save</button>
+      </form>
+      <p id="notifyStatus" class="hint" hidden></p>
+    </section>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

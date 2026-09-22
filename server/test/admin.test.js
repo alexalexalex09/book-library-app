@@ -178,7 +178,13 @@ describe("admin API", () => {
           app_metadata: { plan: "premium" },
         },
       },
-      tables: { admin_audit_log: [] },
+      tables: {
+        admin_audit_log: [],
+        admin_settings: [
+          { key: "signup_notify_mode", value: { mode: "immediate" } },
+        ],
+        signup_events: [],
+      },
     });
     // Ensure getUserById / listUsers can see target users that are not tokens
     supabase.auth.admin.getUserById = async (userId) => {
@@ -321,5 +327,43 @@ describe("admin API", () => {
       origin: "https://evil.example",
     });
     assert.equal(blocked.headers.get("access-control-allow-origin"), null);
+  });
+
+  it("lists recent signups from auth sync", async () => {
+    const res = await request("/api/admin/signups", { token: "admin-token" });
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(res.data.signups));
+    assert.ok(res.data.signups.length >= 1);
+    assert.ok(res.data.signups.some((row) => row.email === "reader@example.com"));
+  });
+
+  it("reads and updates signup notification mode", async () => {
+    const get = await request("/api/admin/settings/notifications", {
+      token: "admin-token",
+    });
+    assert.equal(get.status, 200);
+    assert.equal(get.data.signupNotifyMode, "immediate");
+
+    const denied = await request("/api/admin/settings/notifications", {
+      token: "admin-token",
+      method: "POST",
+      origin: "https://evil.example",
+      body: { signupNotifyMode: "daily" },
+    });
+    assert.equal(denied.status, 403);
+
+    const ok = await request("/api/admin/settings/notifications", {
+      token: "admin-token",
+      method: "POST",
+      origin: "https://admin.shelfmapper.com",
+      body: { signupNotifyMode: "daily" },
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.data.signupNotifyMode, "daily");
+
+    const again = await request("/api/admin/settings/notifications", {
+      token: "admin-token",
+    });
+    assert.equal(again.data.signupNotifyMode, "daily");
   });
 });

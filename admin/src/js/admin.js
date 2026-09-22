@@ -2,15 +2,21 @@
   const loginPanel = document.getElementById("loginPanel");
   const deniedPanel = document.getElementById("deniedPanel");
   const consolePanel = document.getElementById("consolePanel");
+  const signupsPanel = document.getElementById("signupsPanel");
+  const notifyPanel = document.getElementById("notifyPanel");
   const sessionBar = document.getElementById("sessionBar");
   const sessionEmail = document.getElementById("sessionEmail");
   const loginError = document.getElementById("loginError");
   const searchStatus = document.getElementById("searchStatus");
   const detailStatus = document.getElementById("detailStatus");
+  const signupsStatus = document.getElementById("signupsStatus");
+  const notifyStatus = document.getElementById("notifyStatus");
   const userList = document.getElementById("userList");
+  const signupList = document.getElementById("signupList");
   const userDetail = document.getElementById("userDetail");
   const userDetailFields = document.getElementById("userDetailFields");
   const syncBillingBtn = document.getElementById("syncBillingBtn");
+  const notifyMode = document.getElementById("notifyMode");
 
   let config = null;
   let supabaseClient = null;
@@ -91,10 +97,60 @@
     }
     hide(sessionBar);
     hide(consolePanel);
+    hide(signupsPanel);
+    hide(notifyPanel);
     hide(deniedPanel);
     show(loginPanel);
     userList.innerHTML = "";
+    if (signupList) signupList.innerHTML = "";
     hide(userDetail);
+  }
+
+  function formatWhen(value) {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString();
+  }
+
+  async function loadSignups() {
+    setText(signupsStatus, "Loading…");
+    try {
+      const data = await api("/api/admin/signups");
+      const signups = data.signups || [];
+      signupList.innerHTML = "";
+      if (!signups.length) {
+        setText(signupsStatus, "No signups recorded yet.");
+        return;
+      }
+      setText(signupsStatus, `${signups.length} most recent`);
+      for (const row of signups) {
+        const li = document.createElement("li");
+        const main = document.createElement("span");
+        main.textContent = `${row.email || row.user_id} · ${row.provider || "email"}`;
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = formatWhen(row.created_at);
+        li.appendChild(main);
+        li.appendChild(meta);
+        signupList.appendChild(li);
+      }
+    } catch (error) {
+      setText(signupsStatus, error.message, { error: true });
+      signupList.innerHTML = "";
+    }
+  }
+
+  async function loadNotifySettings() {
+    setText(notifyStatus, "");
+    try {
+      const data = await api("/api/admin/settings/notifications");
+      if (notifyMode && data.signupNotifyMode) {
+        notifyMode.value = data.signupNotifyMode;
+      }
+    } catch (error) {
+      setText(notifyStatus, error.message, { error: true });
+    }
   }
 
   async function verifyAdminSession(session) {
@@ -110,8 +166,13 @@
       await api("/api/admin/me");
       hide(deniedPanel);
       show(consolePanel);
+      show(signupsPanel);
+      show(notifyPanel);
+      await Promise.all([loadSignups(), loadNotifySettings()]);
     } catch (error) {
       hide(consolePanel);
+      hide(signupsPanel);
+      hide(notifyPanel);
       if (error.status === 403) {
         show(deniedPanel);
         return;
@@ -229,6 +290,25 @@
       setText(detailStatus, error.message, { error: true });
     } finally {
       syncBillingBtn.disabled = false;
+    }
+  });
+
+  document.getElementById("refreshSignupsBtn")?.addEventListener("click", () => {
+    loadSignups();
+  });
+
+  document.getElementById("notifyForm")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    setText(notifyStatus, "Saving…");
+    try {
+      const data = await api("/api/admin/settings/notifications", {
+        method: "POST",
+        body: { signupNotifyMode: notifyMode.value },
+      });
+      notifyMode.value = data.signupNotifyMode;
+      setText(notifyStatus, "Saved.");
+    } catch (error) {
+      setText(notifyStatus, error.message, { error: true });
     }
   });
 

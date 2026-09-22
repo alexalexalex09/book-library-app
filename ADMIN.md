@@ -48,9 +48,34 @@ There is **no** public path to become admin.
 
 ## Database
 
-Run [`server/sql/admin_audit_log.sql`](server/sql/admin_audit_log.sql) in the Supabase SQL editor (also included in `schema.sql` / `migrate.sql`).
+Run [`server/sql/admin_audit_log.sql`](server/sql/admin_audit_log.sql) and
+[`server/sql/signup_notifications.sql`](server/sql/signup_notifications.sql)
+in the Supabase SQL editor (also included in `schema.sql` / `migrate.sql`).
 
-## Admin static site config
+## Signup history & email notifications
+
+Admin console shows **Recent signups** (synced from Auth + recorded on first login via `/api/signup-ack`).
+
+Notification mode (persisted in `admin_settings`):
+
+| Mode | Behavior |
+|---|---|
+| `off` | No signup emails |
+| `immediate` | Email on signup ack (first session within 48h of `created_at`) |
+| `daily` | Summary of last 24h via cron |
+
+Mail env (Render API service):
+
+| Variable | Purpose |
+|---|---|
+| `RESEND_API_KEY` | Required to send |
+| `MAIL_FROM` | From address (Resend-verified domain) |
+| `SIGNUP_NOTIFY_TO` | Recipients (defaults to `ADMIN_EMAILS`) |
+| `CRON_SECRET` | Protects `POST /api/internal/signups/digest` |
+
+Daily job: cron `POST https://shelfmapper.com/api/internal/signups/digest` with header `x-cron-secret: $CRON_SECRET` (e.g. once per day).
+
+## Bootstrap an admin user
 
 [`admin/src/config.json`](admin/src/config.json) (public values only — **never** put the service role key here):
 
@@ -118,5 +143,10 @@ Until DNS is attached, use **https://shelfmapper-admin.onrender.com**.
 | `GET` | `/api/admin/users?q=` | Email/UUID search |
 | `GET` | `/api/admin/users/:id` | Safe projection |
 | `POST` | `/api/admin/users/:id/sync-billing` | Stripe retrieve → Auth metadata |
+| `GET` | `/api/admin/signups` | Recent signup history |
+| `GET` | `/api/admin/settings/notifications` | Signup email mode |
+| `POST` | `/api/admin/settings/notifications` | Set mode: `off` / `immediate` / `daily` |
+| `POST` | `/api/signup-ack` | Authenticated; records new signup |
+| `POST` | `/api/internal/signups/digest` | Cron daily summary (`CRON_SECRET`) |
 
 Out of scope for v1: manual plan grants, bans, deletes, refunds, impersonation, Google OAuth on admin.

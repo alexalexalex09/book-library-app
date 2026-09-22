@@ -55,6 +55,7 @@ function createAdminRouter({
   supabase,
   requireAuth,
   syncBillingForUserId,
+  signupNotify,
 }) {
   const router = express.Router();
   const adminRateLimit = createAdminRateLimiter();
@@ -222,6 +223,63 @@ function createAdminRouter({
       }
       console.error("admin sync-billing failed:", error?.message || error);
       return res.status(500).json({ error: "Failed to sync billing" });
+    }
+  });
+
+  router.get("/signups", async (req, res) => {
+    try {
+      if (!signupNotify) {
+        return res.status(503).json({ error: "Signup history unavailable" });
+      }
+      const signups = await signupNotify.listSignupHistory();
+      await writeAudit({
+        actorUserId: req.user.id,
+        action: "admin.signups.list",
+        meta: { count: signups.length },
+        req,
+      });
+      return res.json({ signups });
+    } catch (error) {
+      console.error("admin signups failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to load signups" });
+    }
+  });
+
+  router.get("/settings/notifications", async (req, res) => {
+    try {
+      if (!signupNotify) {
+        return res.status(503).json({ error: "Notification settings unavailable" });
+      }
+      const mode = await signupNotify.getNotifyMode();
+      return res.json({
+        signupNotifyMode: mode,
+        modes: signupNotify.MODES,
+      });
+    } catch (error) {
+      console.error("admin notify settings get failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to load notification settings" });
+    }
+  });
+
+  router.post("/settings/notifications", async (req, res) => {
+    try {
+      if (!signupNotify) {
+        return res.status(503).json({ error: "Notification settings unavailable" });
+      }
+      const mode = await signupNotify.setNotifyMode(req.body?.signupNotifyMode);
+      await writeAudit({
+        actorUserId: req.user.id,
+        action: "admin.settings.notifications",
+        meta: { signupNotifyMode: mode },
+        req,
+      });
+      return res.json({ signupNotifyMode: mode, modes: signupNotify.MODES });
+    } catch (error) {
+      if (error?.code === "INVALID_MODE") {
+        return res.status(400).json({ error: error.message, code: "INVALID_MODE" });
+      }
+      console.error("admin notify settings save failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to save notification settings" });
     }
   });
 

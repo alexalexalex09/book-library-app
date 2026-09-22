@@ -1522,6 +1522,28 @@ googleAuthBtn?.addEventListener("click", async () => {
 // ==========================================
 // 4. AUTH STATE & NAVIGATION
 // ==========================================
+async function ackSignupIfRecent(user) {
+  if (!user?.id || !user.created_at) return;
+  const key = `signup-ack:${user.id}`;
+  try {
+    if (sessionStorage.getItem(key)) return;
+  } catch {
+    /* ignore */
+  }
+  const age = Date.now() - new Date(user.created_at).getTime();
+  if (Number.isNaN(age) || age < 0 || age > 48 * 60 * 60 * 1000) return;
+  try {
+    await authenticatedFetch("/api/signup-ack", { method: "POST" });
+    try {
+      sessionStorage.setItem(key, "1");
+    } catch {
+      /* ignore */
+    }
+  } catch {
+    /* best-effort; admin sync still picks up users */
+  }
+}
+
 async function applyAuthState(session) {
   if (isPublicShareView) return;
   const loggedOutView = document.getElementById("loggedOutView");
@@ -1550,6 +1572,7 @@ async function applyAuthState(session) {
     currentUser = acceptedUser;
     document.getElementById("userEmailDisplay").textContent = currentUser.email;
 
+    ackSignupIfRecent(currentUser).catch(() => {});
     await Promise.all([refreshBillingState(), loadLibraryData(), loadRooms(), loadLibraryMap()]);
     updateScanSteps();
     return;

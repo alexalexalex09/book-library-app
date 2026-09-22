@@ -14,6 +14,11 @@ const {
 const { createBillingRouter } = require("../../src/billing");
 const { createAdminRouter } = require("../../src/admin-routes");
 const { mountPublicConfigRoutes } = require("../../src/public-config");
+const { createMailer } = require("../../src/mail");
+const {
+  createSignupNotify,
+  mountSignupNotifyRoutes,
+} = require("../../src/signup-notify");
 const {
   createLibraryRouter,
   handlePublicShare,
@@ -28,6 +33,7 @@ function createTestApp({
   fetchBooks,
   processImage = async () => ({ spines: [] }),
   syncBillingForUserId,
+  mail,
   env = {},
 } = {}) {
   const previousEnv = { ...process.env };
@@ -82,6 +88,14 @@ function createTestApp({
     billing.webhookHandler,
   );
   app.use("/api/billing", billing.router);
+
+  const mailer = mail || createMailer(process.env);
+  const signupNotify = createSignupNotify({ supabase, mail: mailer });
+  mountSignupNotifyRoutes(app, {
+    requireAuth,
+    signupNotify,
+    env: process.env,
+  });
   app.use(
     "/api/admin",
     createAdminRouter({
@@ -89,6 +103,7 @@ function createTestApp({
       requireAuth,
       syncBillingForUserId:
         syncBillingForUserId || billing.syncBillingForUserId,
+      signupNotify,
     }),
   );
 
@@ -196,6 +211,11 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
         ctx.payload = row;
         return api;
       },
+      upsert(row) {
+        ctx.mode = "upsert";
+        ctx.payload = Array.isArray(row) ? row[0] : row;
+        return api;
+      },
       update(row) {
         ctx.mode = "update";
         ctx.payload = row;
@@ -203,6 +223,10 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
       },
       eq(field, value) {
         ctx.filters.push((row) => row[field] === value);
+        return api;
+      },
+      gte(field, value) {
+        ctx.filters.push((row) => String(row[field] || "") >= String(value));
         return api;
       },
       is(field, value) {
@@ -213,7 +237,12 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
         ctx.filters.push((row) => values.includes(row[field]));
         return api;
       },
-      order() {
+      order(field, { ascending = true } = {}) {
+        ctx.order = { field, ascending };
+        return api;
+      },
+      limit(n) {
+        ctx.limit = Number(n);
         return api;
       },
       single() {
@@ -249,9 +278,41 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
         return { data: project(row), error: null };
       }
 
+      if (ctx.mode === "upsert") {
+        const key = ctx.payload.key != null ? "key" : "user_id";
+        const existing = table.find((row) => row[key] === ctx.payload[key]);
+        if (existing) {
+          Object.assign(existing, ctx.payload);
+          return { data: project(existing), error: null };
+        }
+        const row = {
+          id: table.length + 1,
+          created_at: new Date().toISOString(),
+          ...ctx.payload,
+        };
+        table.push(row);
+        return { data: project(row), error: null };
+      }
+
       let rows = table.filter((row) => ctx.filters.every((fn) => fn(row)));
       if (ctx.mode === "update") {
         for (const row of rows) Object.assign(row, ctx.payload);
+      }
+
+      if (ctx.order?.field) {
+        const { field, ascending } = ctx.order;
+        rows = [...rows].sort((a, b) => {
+          const left = a[field];
+          const right = b[field];
+          if (left === right) return 0;
+          if (left == null) return 1;
+          if (right == null) return -1;
+          if (left < right) return ascending ? -1 : 1;
+          return ascending ? 1 : -1;
+        });
+      }
+      if (ctx.limit != null && Number.isFinite(ctx.limit)) {
+        rows = rows.slice(0, ctx.limit);
       }
 
       if (ctx.wantSingle) {

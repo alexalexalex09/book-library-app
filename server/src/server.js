@@ -31,6 +31,11 @@ const {
 } = require("./http-security");
 const { createBillingRouter } = require("./billing");
 const { createAdminRouter } = require("./admin-routes");
+const { createMailer } = require("./mail");
+const {
+  createSignupNotify,
+  mountSignupNotifyRoutes,
+} = require("./signup-notify");
 const {
   mountPublicConfigRoutes,
 } = require("./public-config");
@@ -192,12 +197,20 @@ app.post(
 );
 app.use(express.json({ limit: "1mb" }));
 app.use("/api/billing", billing.router);
+const mailer = createMailer(process.env);
+const signupNotify = createSignupNotify({ supabase, mail: mailer });
+mountSignupNotifyRoutes(app, {
+  requireAuth,
+  signupNotify,
+  env: process.env,
+});
 app.use(
   "/api/admin",
   createAdminRouter({
     supabase,
     requireAuth,
     syncBillingForUserId: billing.syncBillingForUserId,
+    signupNotify,
   }),
 );
 
