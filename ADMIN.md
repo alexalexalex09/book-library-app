@@ -78,12 +78,37 @@ Authentication → URL configuration — add:
 3. DNS: `admin` CNAME → the Render static hostname.
 4. Confirm `_headers` is deployed (Render Static serves them from the publish root).
 
-## Deploy sequence
+## Go-live status
 
-1. Apply SQL audit migration; set `ADMIN_EMAILS` + `CORS_ORIGINS` on the API service; bootstrap `app_metadata.role`.
-2. Deploy API, then the admin static site + DNS.
-3. Smoke-test: admin login succeeds; a normal user sees “Access denied”.
-4. If any secret was ever pasted into `admin/src`, rotate it.
+| Step | Status |
+|---|---|
+| Admin API on `shelfmapper.com` | Live (`/api/admin/me` returns 401 without auth) |
+| Audit SQL | Applied (Dev + App) |
+| `ADMIN_EMAILS` / `CORS_ORIGINS` / `ADMIN_ORIGINS` | Set on Render web service |
+| Admin `app_metadata.role` | Set for `frogitts@gmail.com` |
+| Render Static Site | Live at [https://shelfmapper-admin.onrender.com](https://shelfmapper-admin.onrender.com) |
+| Custom domain `admin.shelfmapper.com` | **Manual** — add in Render + DNS CNAME |
+| Supabase Auth URL allowlist | **Manual** — add `https://admin.shelfmapper.com` (and onrender URL for interim) |
+| Security headers on CDN | **Manual** — Render ignores `_headers`; set in Dashboard → Headers (see `admin/render.yaml`) |
+
+### Interim URL
+
+Until DNS is attached, use **https://shelfmapper-admin.onrender.com**.  
+`CORS_ORIGINS` / `ADMIN_ORIGINS` already include that host.
+
+### Attach custom domain (Dashboard)
+
+1. Open [shelfmapper-admin → Custom Domains](https://dashboard.render.com/static/srv-dap9nsu0tbcc738tg090) → Add `admin.shelfmapper.com`.
+2. DNS: CNAME `admin` → `shelfmapper-admin.onrender.com` (or the hostname Render shows).
+3. Wait for TLS / Verify in Render.
+4. Supabase → Authentication → URL configuration → Redirect URLs / Site allowlist: add `https://admin.shelfmapper.com` and `https://shelfmapper-admin.onrender.com`.
+5. Dashboard → Headers: paste the headers from [`admin/render.yaml`](admin/render.yaml) (or Sync Blueprint).
+
+### Smoke test
+
+1. Open the admin URL → sign in as `frogitts@gmail.com` (email/password).
+2. Sign out/in once so the JWT includes `role: admin`.
+3. Search a user; confirm a non-admin account sees Access denied.
 
 ## API surface (v1)
 

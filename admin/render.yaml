@@ -1,0 +1,36 @@
+# Optional Blueprint snippet for the admin static site.
+# The live service is already "shelfmapper-admin" (srv-dap9nsu0tbcc738tg090).
+# Use Dashboard → Headers if redeploying from Blueprint is not desired.
+services:
+  - type: web
+    name: shelfmapper-admin
+    runtime: static
+    repo: https://github.com/alexalexalex09/book-library-app
+    branch: main
+    buildCommand: echo "static admin assets"
+    staticPublishPath: admin/src
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=()
+      - path: /*
+        name: Content-Security-Policy
+        value: >-
+          default-src 'self'; script-src 'self' https://cdn.jsdelivr.net;
+          style-src 'self'; img-src 'self' data:;
+          connect-src 'self' https://shelfmapper.com https://*.supabase.co;
+          font-src 'self'; object-src 'none'; base-uri 'self';
+          frame-ancestors 'none'; form-action 'self'
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
