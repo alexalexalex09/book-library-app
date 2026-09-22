@@ -84,12 +84,12 @@ Authentication → URL configuration — add:
 |---|---|
 | Admin API on `shelfmapper.com` | Live (`/api/admin/me` returns 401 without auth) |
 | Audit SQL | Applied (Dev + App) |
-| `ADMIN_EMAILS` / `CORS_ORIGINS` / `ADMIN_ORIGINS` | Set on Render web service |
+| `ADMIN_EMAILS` / `CORS_ORIGINS` / `ADMIN_ORIGINS` | Set — includes `admin.shelfmapper.com` + `shelfmapper-admin.onrender.com` |
 | Admin `app_metadata.role` | Set for `frogitts@gmail.com` |
 | Render Static Site | Live at [https://shelfmapper-admin.onrender.com](https://shelfmapper-admin.onrender.com) |
-| Custom domain `admin.shelfmapper.com` | **Manual** — add in Render + DNS CNAME |
-| Supabase Auth URL allowlist | **Manual** — add `https://admin.shelfmapper.com` (and onrender URL for interim) |
-| Security headers on CDN | **Manual** — Render ignores `_headers`; set in Dashboard → Headers (see `admin/render.yaml`) |
+| Custom domain `admin.shelfmapper.com` | **Manual** — add in Render + DNS CNAME (Namecheap / registrar-servers.com) |
+| Supabase Auth URL allowlist | **Manual** — add `https://admin.shelfmapper.com` and onrender URL |
+| Security headers on CDN | CSP via HTML meta shipped; set remaining headers in Dashboard (see `admin/render.yaml`) |
 
 ### Interim URL
 
