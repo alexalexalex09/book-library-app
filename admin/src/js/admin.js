@@ -1,8 +1,11 @@
 (function () {
   const loginPanel = document.getElementById("loginPanel");
   const deniedPanel = document.getElementById("deniedPanel");
+  const overviewPanel = document.getElementById("overviewPanel");
   const consolePanel = document.getElementById("consolePanel");
+  const supportPanel = document.getElementById("supportPanel");
   const signupsPanel = document.getElementById("signupsPanel");
+  const auditPanel = document.getElementById("auditPanel");
   const notifyPanel = document.getElementById("notifyPanel");
   const sessionBar = document.getElementById("sessionBar");
   const sessionEmail = document.getElementById("sessionEmail");
@@ -11,17 +14,36 @@
   const detailStatus = document.getElementById("detailStatus");
   const signupsStatus = document.getElementById("signupsStatus");
   const notifyStatus = document.getElementById("notifyStatus");
+  const overviewStatus = document.getElementById("overviewStatus");
+  const supportStatus = document.getElementById("supportStatus");
+  const auditStatus = document.getElementById("auditStatus");
   const userList = document.getElementById("userList");
   const signupList = document.getElementById("signupList");
+  const auditList = document.getElementById("auditList");
+  const ticketList = document.getElementById("ticketList");
+  const overviewCards = document.getElementById("overviewCards");
   const userDetail = document.getElementById("userDetail");
   const userDetailFields = document.getElementById("userDetailFields");
   const syncBillingBtn = document.getElementById("syncBillingBtn");
   const notifyMode = document.getElementById("notifyMode");
+  const supportNotifyMode = document.getElementById("supportNotifyMode");
+  const ticketDetail = document.getElementById("ticketDetail");
 
   let config = null;
   let supabaseClient = null;
   let accessToken = null;
   let selectedUserId = null;
+  let selectedTicketId = null;
+  let currentSuggestion = "";
+
+  const authPanels = [
+    overviewPanel,
+    consolePanel,
+    supportPanel,
+    signupsPanel,
+    auditPanel,
+    notifyPanel,
+  ];
 
   function show(el) {
     el?.classList.remove("hidden");
@@ -90,20 +112,23 @@
   async function signOut() {
     accessToken = null;
     selectedUserId = null;
+    selectedTicketId = null;
     try {
       await supabaseClient?.auth.signOut();
     } catch {
       /* ignore */
     }
     hide(sessionBar);
-    hide(consolePanel);
-    hide(signupsPanel);
-    hide(notifyPanel);
+    authPanels.forEach(hide);
     hide(deniedPanel);
     show(loginPanel);
     userList.innerHTML = "";
     if (signupList) signupList.innerHTML = "";
+    if (ticketList) ticketList.innerHTML = "";
+    if (auditList) auditList.innerHTML = "";
+    if (overviewCards) overviewCards.innerHTML = "";
     hide(userDetail);
+    hide(ticketDetail);
   }
 
   function formatWhen(value) {
@@ -111,6 +136,86 @@
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return String(value);
     return date.toLocaleString();
+  }
+
+  function addStatCard(title, lines) {
+    const card = document.createElement("article");
+    card.className = "stat-card";
+    const h = document.createElement("h3");
+    h.textContent = title;
+    card.appendChild(h);
+    const ul = document.createElement("ul");
+    for (const line of lines) {
+      const li = document.createElement("li");
+      li.textContent = line;
+      ul.appendChild(li);
+    }
+    card.appendChild(ul);
+    overviewCards.appendChild(card);
+  }
+
+  async function loadOverview() {
+    setText(overviewStatus, "Loading…");
+    overviewCards.innerHTML = "";
+    try {
+      const data = await api("/api/admin/stats/overview?refresh=1");
+      const g = data.growth || {};
+      const a = data.activation || {};
+      const s = data.sharing || {};
+      const u = data.usage || {};
+      const support = data.support || {};
+      const eng = data.engagement || {};
+      const billing = data.billing || {};
+      const ret = eng.retention || {};
+
+      addStatCard("Growth", [
+        `Signups 24h / 7d: ${g.signups24h ?? 0} / ${g.signups7d ?? 0}`,
+        `Providers (7d): ${JSON.stringify(g.providerMix || {})}`,
+        `Confirmed / unconfirmed (sample ${g.recentSampleSize || 0}): ${g.confirmedAmongRecent ?? 0} / ${g.unconfirmedAmongRecent ?? 0}`,
+      ]);
+      addStatCard("Activation", [
+        `Users w/ library / shelf / book: ${a.usersWithLibrary ?? 0} / ${a.usersWithShelf ?? 0} / ${a.usersWithBook ?? 0}`,
+        `Totals libs / shelves / books: ${a.librariesTotal ?? 0} / ${a.shelvesTotal ?? 0} / ${a.booksTotal ?? 0}`,
+        `Avg books/user: ${a.avgBooksPerUser ?? 0}; empty accounts: ${a.emptyAccountCount ?? 0}`,
+      ]);
+      addStatCard("Sharing", [
+        `Active / revoked: ${s.active ?? 0} / ${s.revoked ?? 0}`,
+        `Created last 7d: ${s.createdLast7d ?? 0}`,
+      ]);
+      addStatCard("Usage", [
+        `OCR ok/err/limit 24h: ${u.last24h?.ocr_ok ?? 0}/${u.last24h?.ocr_error ?? 0}/${u.last24h?.ocr_rate_limit ?? 0}`,
+        `OCR ok/err/limit 7d: ${u.last7d?.ocr_ok ?? 0}/${u.last7d?.ocr_error ?? 0}/${u.last7d?.ocr_rate_limit ?? 0}`,
+        `Books ok/limit 24h: ${u.last24h?.books_ok ?? 0}/${u.last24h?.books_rate_limit ?? 0}`,
+      ]);
+      addStatCard("Support health", [
+        `Open / pending: ${support.open ?? 0} / ${support.pending ?? 0}`,
+        `Oldest open (h): ${support.oldestOpenAgeHours ?? "—"}`,
+        `Opened / resolved 7d: ${support.openedLast7d ?? 0} / ${support.resolvedLast7d ?? 0}`,
+      ]);
+      addStatCard("Engagement", [
+        `Active 24h / 7d: ${eng.activeUsers24h ?? 0} / ${eng.activeUsers7d ?? 0}`,
+        `D1: ${fmtRate(ret.d1)} · D7: ${fmtRate(ret.d7)} · D30: ${fmtRate(ret.d30)}`,
+      ]);
+      if (billing.configured) {
+        addStatCard("Billing", [
+          `Active / trial / past_due: ${billing.counts?.active ?? 0} / ${billing.counts?.trialing ?? 0} / ${billing.counts?.past_due ?? 0}`,
+          `Monthly / annual: ${billing.monthly ?? 0} / ${billing.annual ?? 0}`,
+          `Est. MRR: $${billing.estimatedMrr ?? 0}; new 7d: ${billing.newSubscribers7d ?? 0}; trials ending 7d: ${billing.trialsEnding7d ?? 0}`,
+        ]);
+      } else {
+        addStatCard("Billing", ["Stripe not configured"]);
+      }
+      setText(overviewStatus, `Updated ${formatWhen(data.generatedAt)}`);
+    } catch (error) {
+      setText(overviewStatus, error.message, { error: true });
+    }
+  }
+
+  function fmtRate(bucket) {
+    if (!bucket || bucket.sampleSize === 0 || bucket.rate == null) {
+      return `n/a (n=${bucket?.sampleSize || 0})`;
+    }
+    return `${Math.round(bucket.rate * 100)}% (n=${bucket.sampleSize})`;
   }
 
   async function loadSignups() {
@@ -141,6 +246,34 @@
     }
   }
 
+  async function loadAudit() {
+    setText(auditStatus, "Loading…");
+    try {
+      const data = await api("/api/admin/audit?limit=50");
+      const rows = data.audit || [];
+      auditList.innerHTML = "";
+      if (!rows.length) {
+        setText(auditStatus, "No audit rows yet.");
+        return;
+      }
+      setText(auditStatus, `${rows.length} recent`);
+      for (const row of rows) {
+        const li = document.createElement("li");
+        const main = document.createElement("span");
+        main.textContent = `${row.action}${row.target_user_id ? ` → ${row.target_user_id}` : ""}`;
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = formatWhen(row.created_at);
+        li.appendChild(main);
+        li.appendChild(meta);
+        auditList.appendChild(li);
+      }
+    } catch (error) {
+      setText(auditStatus, error.message, { error: true });
+      auditList.innerHTML = "";
+    }
+  }
+
   async function loadNotifySettings() {
     setText(notifyStatus, "");
     try {
@@ -148,8 +281,69 @@
       if (notifyMode && data.signupNotifyMode) {
         notifyMode.value = data.signupNotifyMode;
       }
+      if (supportNotifyMode && data.supportNotifyMode) {
+        supportNotifyMode.value = data.supportNotifyMode;
+      }
     } catch (error) {
       setText(notifyStatus, error.message, { error: true });
+    }
+  }
+
+  async function loadSupportTickets() {
+    setText(supportStatus, "Loading…");
+    try {
+      const data = await api("/api/admin/support/tickets");
+      const tickets = data.tickets || [];
+      ticketList.innerHTML = "";
+      if (!tickets.length) {
+        setText(supportStatus, "No tickets yet.");
+        hide(ticketDetail);
+        return;
+      }
+      setText(supportStatus, `${tickets.length} ticket(s)`);
+      for (const ticket of tickets) {
+        const li = document.createElement("li");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = `[${ticket.status}] ${ticket.subject} · ${ticket.email}`;
+        btn.addEventListener("click", () => openTicket(ticket.id, btn));
+        li.appendChild(btn);
+        ticketList.appendChild(li);
+      }
+    } catch (error) {
+      setText(supportStatus, error.message, { error: true });
+      ticketList.innerHTML = "";
+    }
+  }
+
+  async function openTicket(id, btn) {
+    selectedTicketId = id;
+    ticketList.querySelectorAll("button").forEach((el) => {
+      el.classList.toggle("is-active", el === btn);
+    });
+    try {
+      const data = await api(`/api/admin/support/tickets/${id}`);
+      const ticket = data.ticket;
+      show(ticketDetail);
+      document.getElementById("ticketSubject").textContent = ticket.subject;
+      document.getElementById("ticketMeta").textContent =
+        `${ticket.email} · ${ticket.category} · ${ticket.public_id} · ${formatWhen(ticket.created_at)}`;
+      document.getElementById("ticketStatus").value = ticket.status;
+      currentSuggestion = ticket.ai_suggestion || "";
+      document.getElementById("aiSuggestionText").textContent =
+        currentSuggestion ||
+        `(${ticket.ai_suggestion_status || "pending"}) No suggestion yet`;
+      const thread = document.getElementById("ticketThread");
+      thread.innerHTML = "";
+      for (const msg of data.messages || []) {
+        const div = document.createElement("div");
+        div.className = `msg msg-${msg.author_type}`;
+        div.innerHTML = `<strong>${msg.author_type}</strong> <span class="meta">${formatWhen(msg.created_at)}</span><p></p>`;
+        div.querySelector("p").textContent = msg.body;
+        thread.appendChild(div);
+      }
+    } catch (error) {
+      setText(supportStatus, error.message, { error: true });
     }
   }
 
@@ -165,14 +359,16 @@
     try {
       await api("/api/admin/me");
       hide(deniedPanel);
-      show(consolePanel);
-      show(signupsPanel);
-      show(notifyPanel);
-      await Promise.all([loadSignups(), loadNotifySettings()]);
+      authPanels.forEach(show);
+      await Promise.all([
+        loadOverview(),
+        loadSignups(),
+        loadNotifySettings(),
+        loadSupportTickets(),
+        loadAudit(),
+      ]);
     } catch (error) {
-      hide(consolePanel);
-      hide(signupsPanel);
-      hide(notifyPanel);
+      authPanels.forEach(hide);
       if (error.status === 403) {
         show(deniedPanel);
         return;
@@ -184,7 +380,7 @@
     }
   }
 
-  function renderUserDetail(user) {
+  function renderUserDetail(user, extras = {}) {
     selectedUserId = user.id;
     const meta = user.app_metadata || {};
     const rows = [
@@ -198,6 +394,8 @@
       ["Trial ends", meta.trial_ends_at || "—"],
       ["Created", user.created_at || "—"],
       ["Last sign-in", user.last_sign_in_at || "—"],
+      ["Support tickets", extras.ticketCount ?? "—"],
+      ["Usage (7d)", JSON.stringify(extras.recentUsage || {})],
     ];
     userDetailFields.innerHTML = "";
     for (const [label, value] of rows) {
@@ -231,7 +429,10 @@
         });
         try {
           const data = await api(`/api/admin/users/${encodeURIComponent(user.id)}`);
-          renderUserDetail(data.user);
+          renderUserDetail(data.user, {
+            ticketCount: data.ticketCount,
+            recentUsage: data.recentUsage,
+          });
         } catch (error) {
           setText(detailStatus, error.message, { error: true });
           show(userDetail);
@@ -296,6 +497,15 @@
   document.getElementById("refreshSignupsBtn")?.addEventListener("click", () => {
     loadSignups();
   });
+  document.getElementById("refreshOverviewBtn")?.addEventListener("click", () => {
+    loadOverview();
+  });
+  document.getElementById("refreshSupportBtn")?.addEventListener("click", () => {
+    loadSupportTickets();
+  });
+  document.getElementById("refreshAuditBtn")?.addEventListener("click", () => {
+    loadAudit();
+  });
 
   document.getElementById("notifyForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -303,12 +513,69 @@
     try {
       const data = await api("/api/admin/settings/notifications", {
         method: "POST",
-        body: { signupNotifyMode: notifyMode.value },
+        body: {
+          signupNotifyMode: notifyMode.value,
+          supportNotifyMode: supportNotifyMode.value,
+        },
       });
       notifyMode.value = data.signupNotifyMode;
+      supportNotifyMode.value = data.supportNotifyMode;
       setText(notifyStatus, "Saved.");
     } catch (error) {
       setText(notifyStatus, error.message, { error: true });
+    }
+  });
+
+  document.getElementById("ticketStatus")?.addEventListener("change", async (e) => {
+    if (!selectedTicketId) return;
+    try {
+      await api(`/api/admin/support/tickets/${selectedTicketId}`, {
+        method: "POST",
+        body: { status: e.target.value },
+      });
+      await loadSupportTickets();
+    } catch (error) {
+      setText(supportStatus, error.message, { error: true });
+    }
+  });
+
+  document.getElementById("useSuggestionBtn")?.addEventListener("click", () => {
+    if (currentSuggestion) {
+      document.getElementById("ticketReplyBody").value = currentSuggestion;
+    }
+  });
+
+  document.getElementById("regenSuggestionBtn")?.addEventListener("click", async () => {
+    if (!selectedTicketId) return;
+    setText(supportStatus, "Generating suggestion…");
+    try {
+      const data = await api(
+        `/api/admin/support/tickets/${selectedTicketId}/suggest`,
+        { method: "POST" },
+      );
+      currentSuggestion = data.suggestion || data.ticket?.ai_suggestion || "";
+      document.getElementById("aiSuggestionText").textContent =
+        currentSuggestion || `(${data.status})`;
+      setText(supportStatus, "");
+    } catch (error) {
+      setText(supportStatus, error.message, { error: true });
+    }
+  });
+
+  document.getElementById("ticketReplyForm")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!selectedTicketId) return;
+    const body = document.getElementById("ticketReplyBody").value.trim();
+    try {
+      await api(`/api/admin/support/tickets/${selectedTicketId}/reply`, {
+        method: "POST",
+        body: { body },
+      });
+      document.getElementById("ticketReplyBody").value = "";
+      await openTicket(selectedTicketId);
+      await loadSupportTickets();
+    } catch (error) {
+      setText(supportStatus, error.message, { error: true });
     }
   });
 

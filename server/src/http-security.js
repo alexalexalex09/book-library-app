@@ -103,7 +103,7 @@ function getBearerToken(authorizationHeader) {
   return match?.[1] || null;
 }
 
-function createRequireAuth(supabase) {
+function createRequireAuth(supabase, { onAuthenticated } = {}) {
   return async function requireAuth(req, res, next) {
     const token = getBearerToken(req.get("authorization"));
     if (!token) {
@@ -120,6 +120,14 @@ function createRequireAuth(supabase) {
     }
 
     req.user = user;
+    if (typeof onAuthenticated === "function") {
+      Promise.resolve(onAuthenticated(user, req)).catch((err) => {
+        console.error(
+          "requireAuth onAuthenticated failed:",
+          err?.message || err,
+        );
+      });
+    }
     return next();
   };
 }
@@ -229,6 +237,7 @@ function createPlanRateLimiter({
   action,
   windowMs,
   message = "Too many requests. Please try again later.",
+  onRateLimited,
 }) {
   return rateLimit({
     windowMs,
@@ -241,6 +250,14 @@ function createPlanRateLimiter({
     standardHeaders: true,
     legacyHeaders: false,
     handler: (req, res) => {
+      if (typeof onRateLimited === "function") {
+        Promise.resolve(onRateLimited(req)).catch((err) => {
+          console.error(
+            "rate limiter onRateLimited failed:",
+            err?.message || err,
+          );
+        });
+      }
       const plan = getUserPlan(req.user);
       res.status(429).json({ error: message, code: "PLAN_LIMIT", plan });
     },

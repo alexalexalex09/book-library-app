@@ -15,6 +15,7 @@ function createOcrRouter({
   rateLimit,
   upload = createImageUpload(),
   processImage,
+  usageAnalytics,
 }) {
   const router = express.Router();
 
@@ -41,11 +42,19 @@ function createOcrRouter({
 
         if (typeof processImage === "function") {
           const result = await processImage(req);
+          if (usageAnalytics) {
+            usageAnalytics.recordEvent(req.user?.id, "ocr_ok", {});
+          }
           return res.json(result);
         }
 
         return res.status(501).json({ error: "OCR processor not configured" });
       } catch (error) {
+        if (usageAnalytics) {
+          usageAnalytics.recordEvent(req.user?.id, "ocr_error", {
+            message: error?.message || "ocr_failed",
+          });
+        }
         return res.status(500).json({ error: "OCR failed" });
       }
     },

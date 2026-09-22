@@ -182,11 +182,20 @@ describe("admin API", () => {
         admin_audit_log: [],
         admin_settings: [
           { key: "signup_notify_mode", value: { mode: "immediate" } },
+          { key: "support_notify_mode", value: { mode: "immediate" } },
         ],
         signup_events: [],
+        support_tickets: [],
+        support_ticket_messages: [],
+        api_usage_events: [],
+        user_engagement: [],
+        libraries: [],
+        shelves: [],
+        user_books: [],
+        library_shares: [],
+        ocr_cache: [],
       },
-    });
-    // Ensure getUserById / listUsers can see target users that are not tokens
+    });    // Ensure getUserById / listUsers can see target users that are not tokens
     supabase.auth.admin.getUserById = async (userId) => {
       const map = {
         [ADMIN_UUID]: adminUser,
@@ -343,6 +352,7 @@ describe("admin API", () => {
     });
     assert.equal(get.status, 200);
     assert.equal(get.data.signupNotifyMode, "immediate");
+    assert.equal(get.data.supportNotifyMode, "immediate");
 
     const denied = await request("/api/admin/settings/notifications", {
       token: "admin-token",
@@ -356,14 +366,16 @@ describe("admin API", () => {
       token: "admin-token",
       method: "POST",
       origin: "https://admin.shelfmapper.com",
-      body: { signupNotifyMode: "daily" },
+      body: { signupNotifyMode: "daily", supportNotifyMode: "off" },
     });
     assert.equal(ok.status, 200);
     assert.equal(ok.data.signupNotifyMode, "daily");
+    assert.equal(ok.data.supportNotifyMode, "off");
 
     const again = await request("/api/admin/settings/notifications", {
       token: "admin-token",
     });
     assert.equal(again.data.signupNotifyMode, "daily");
+    assert.equal(again.data.supportNotifyMode, "off");
   });
 });

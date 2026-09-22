@@ -6,6 +6,11 @@ const {
   normalizeEmail,
   normalizePlan,
 } = require("./http-security");
+const { createAdminStats } = require("./admin-stats");
+const {
+  createSupportNotifyHelpers,
+  STATUSES,
+} = require("./support-routes");
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -56,9 +61,13 @@ function createAdminRouter({
   requireAuth,
   syncBillingForUserId,
   signupNotify,
+  supportAi,
+  env = process.env,
 }) {
   const router = express.Router();
   const adminRateLimit = createAdminRateLimiter();
+  const stats = createAdminStats({ supabase, env });
+  const supportNotify = createSupportNotifyHelpers(supabase);
 
   async function writeAudit({
     actorUserId,
@@ -170,13 +179,42 @@ function createAdminRouter({
       if (error || !data?.user) {
         return res.status(404).json({ error: "User not found" });
       }
+
+      let ticketCount = 0;
+      let recentUsage = {};
+      try {
+        const { data: tickets } = await supabase
+          .from("support_tickets")
+          .select("id")
+          .eq("user_id", userId);
+        ticketCount = (tickets || []).length;
+        const since7d = new Date(
+          Date.now() - 7 * 24 * 60 * 60 * 1000,
+        ).toISOString();
+        const { data: events } = await supabase
+          .from("api_usage_events")
+          .select("action")
+          .eq("user_id", userId)
+          .gte("created_at", since7d)
+          .limit(500);
+        for (const ev of events || []) {
+          recentUsage[ev.action] = (recentUsage[ev.action] || 0) + 1;
+        }
+      } catch (err) {
+        console.error("admin user extras failed:", err?.message || err);
+      }
+
       await writeAudit({
         actorUserId: req.user.id,
         action: "admin.users.get",
         targetUserId: userId,
         req,
       });
-      return res.json({ user: projectUserForAdmin(data.user) });
+      return res.json({
+        user: projectUserForAdmin(data.user),
+        ticketCount,
+        recentUsage,
+      });
     } catch (error) {
       console.error("admin user get failed:", error?.message || error);
       return res.status(500).json({ error: "Failed to load user" });
@@ -248,38 +286,312 @@ function createAdminRouter({
   router.get("/settings/notifications", async (req, res) => {
     try {
       if (!signupNotify) {
-        return res.status(503).json({ error: "Notification settings unavailable" });
+        return res
+          .status(503)
+          .json({ error: "Notification settings unavailable" });
       }
-      const mode = await signupNotify.getNotifyMode();
+      const [signupNotifyMode, supportNotifyMode] = await Promise.all([
+        signupNotify.getNotifyMode(),
+        supportNotify.getSupportNotifyMode(),
+      ]);
       return res.json({
-        signupNotifyMode: mode,
+        signupNotifyMode,
+        supportNotifyMode,
         modes: signupNotify.MODES,
       });
     } catch (error) {
-      console.error("admin notify settings get failed:", error?.message || error);
-      return res.status(500).json({ error: "Failed to load notification settings" });
+      console.error(
+        "admin notify settings get failed:",
+        error?.message || error,
+      );
+      return res
+        .status(500)
+        .json({ error: "Failed to load notification settings" });
     }
   });
 
   router.post("/settings/notifications", async (req, res) => {
     try {
       if (!signupNotify) {
-        return res.status(503).json({ error: "Notification settings unavailable" });
+        return res
+          .status(503)
+          .json({ error: "Notification settings unavailable" });
       }
-      const mode = await signupNotify.setNotifyMode(req.body?.signupNotifyMode);
+      const updates = {};
+      if (req.body?.signupNotifyMode != null) {
+        updates.signupNotifyMode = await signupNotify.setNotifyMode(
+          req.body.signupNotifyMode,
+        );
+      } else {
+        updates.signupNotifyMode = await signupNotify.getNotifyMode();
+      }
+      if (req.body?.supportNotifyMode != null) {
+        updates.supportNotifyMode =
+          await supportNotify.setSupportNotifyMode(req.body.supportNotifyMode);
+      } else {
+        updates.supportNotifyMode =
+          await supportNotify.getSupportNotifyMode();
+      }
       await writeAudit({
         actorUserId: req.user.id,
         action: "admin.settings.notifications",
-        meta: { signupNotifyMode: mode },
+        meta: updates,
         req,
       });
-      return res.json({ signupNotifyMode: mode, modes: signupNotify.MODES });
+      return res.json({ ...updates, modes: signupNotify.MODES });
     } catch (error) {
       if (error?.code === "INVALID_MODE") {
-        return res.status(400).json({ error: error.message, code: "INVALID_MODE" });
+        return res
+          .status(400)
+          .json({ error: error.message, code: "INVALID_MODE" });
       }
-      console.error("admin notify settings save failed:", error?.message || error);
-      return res.status(500).json({ error: "Failed to save notification settings" });
+      console.error(
+        "admin notify settings save failed:",
+        error?.message || error,
+      );
+      return res
+        .status(500)
+        .json({ error: "Failed to save notification settings" });
+    }
+  });
+
+  router.get("/stats/overview", async (req, res) => {
+    try {
+      const overview = await stats.getOverview({
+        force: req.query.refresh === "1",
+      });
+      let billing = null;
+      try {
+        billing = await stats.getBillingStats();
+      } catch (err) {
+        billing = {
+          configured: false,
+          error: err?.message || "billing_error",
+        };
+      }
+      return res.json({ ...overview, billing });
+    } catch (error) {
+      console.error("admin overview failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to load overview" });
+    }
+  });
+
+  router.get("/stats/billing", async (req, res) => {
+    try {
+      const billing = await stats.getBillingStats({
+        force: req.query.refresh === "1",
+      });
+      return res.json(billing);
+    } catch (error) {
+      console.error("admin billing stats failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to load billing stats" });
+    }
+  });
+
+  router.get("/stats/usage", async (req, res) => {
+    try {
+      const usage = await stats.getUsageStats();
+      return res.json(usage);
+    } catch (error) {
+      console.error("admin usage stats failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to load usage stats" });
+    }
+  });
+
+  router.get("/audit", async (req, res) => {
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+      const { data, error } = await supabase
+        .from("admin_audit_log")
+        .select("id,actor_user_id,action,target_user_id,meta,ip,created_at")
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (error) throw new Error(error.message);
+      return res.json({ audit: data || [] });
+    } catch (error) {
+      console.error("admin audit failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to load audit log" });
+    }
+  });
+
+  router.get("/support/tickets", async (req, res) => {
+    try {
+      const status = String(req.query.status || "").trim().toLowerCase();
+      let query = supabase
+        .from("support_tickets")
+        .select(
+          "id,public_id,user_id,email,category,subject,body,status,priority,ai_suggestion,ai_suggestion_status,ai_suggestion_generated_at,created_at,updated_at",
+        )
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (status && STATUSES.has(status)) {
+        query = query.eq("status", status);
+      }
+      const { data, error } = await query;
+      if (error) throw new Error(error.message);
+      return res.json({ tickets: data || [] });
+    } catch (error) {
+      console.error("admin support list failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to list support tickets" });
+    }
+  });
+
+  router.get("/support/tickets/:id", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) {
+        return res.status(400).json({ error: "Invalid ticket id" });
+      }
+      const { data: ticket, error } = await supabase
+        .from("support_tickets")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+      const { data: messages, error: msgError } = await supabase
+        .from("support_ticket_messages")
+        .select("id,author_type,author_user_id,body,created_at")
+        .eq("ticket_id", id)
+        .order("created_at", { ascending: true });
+      if (msgError) throw new Error(msgError.message);
+      return res.json({ ticket, messages: messages || [] });
+    } catch (error) {
+      console.error("admin support get failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to load ticket" });
+    }
+  });
+
+  router.post("/support/tickets/:id", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) {
+        return res.status(400).json({ error: "Invalid ticket id" });
+      }
+      const patch = {};
+      if (req.body?.status != null) {
+        const status = String(req.body.status).trim().toLowerCase();
+        if (!STATUSES.has(status)) {
+          return res.status(400).json({ error: "Invalid status" });
+        }
+        patch.status = status;
+      }
+      if (req.body?.priority != null) {
+        const priority = String(req.body.priority).trim().toLowerCase();
+        if (!["low", "normal", "high"].includes(priority)) {
+          return res.status(400).json({ error: "Invalid priority" });
+        }
+        patch.priority = priority;
+      }
+      if (!Object.keys(patch).length) {
+        return res.status(400).json({ error: "No updates provided" });
+      }
+      patch.updated_at = new Date().toISOString();
+      const { data: ticket, error } = await supabase
+        .from("support_tickets")
+        .update(patch)
+        .eq("id", id)
+        .select("*")
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+      await writeAudit({
+        actorUserId: req.user.id,
+        action: "admin.support.update",
+        meta: { ticketId: id, ...patch },
+        req,
+      });
+      return res.json({ ticket });
+    } catch (error) {
+      console.error("admin support update failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to update ticket" });
+    }
+  });
+
+  router.post("/support/tickets/:id/reply", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const body = String(req.body?.body || "").trim();
+      if (!Number.isFinite(id)) {
+        return res.status(400).json({ error: "Invalid ticket id" });
+      }
+      if (!body || body.length > 8000) {
+        return res.status(400).json({ error: "Reply body is required" });
+      }
+      const { data: ticket, error } = await supabase
+        .from("support_tickets")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+
+      const { data: message, error: msgError } = await supabase
+        .from("support_ticket_messages")
+        .insert({
+          ticket_id: id,
+          author_type: "admin",
+          author_user_id: req.user.id,
+          body,
+        })
+        .select("id,author_type,author_user_id,body,created_at")
+        .maybeSingle();
+      if (msgError) throw new Error(msgError.message);
+
+      const nextStatus =
+        req.body?.status && STATUSES.has(String(req.body.status))
+          ? String(req.body.status)
+          : ticket.status === "open"
+            ? "pending"
+            : ticket.status;
+      await supabase
+        .from("support_tickets")
+        .update({
+          status: nextStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+
+      await writeAudit({
+        actorUserId: req.user.id,
+        action: "admin.support.reply",
+        meta: { ticketId: id, status: nextStatus },
+        req,
+      });
+      return res.status(201).json({ message, status: nextStatus });
+    } catch (error) {
+      console.error("admin support reply failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to reply" });
+    }
+  });
+
+  router.post("/support/tickets/:id/suggest", async (req, res) => {
+    try {
+      if (!supportAi) {
+        return res.status(503).json({ error: "AI suggestions unavailable" });
+      }
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) {
+        return res.status(400).json({ error: "Invalid ticket id" });
+      }
+      const result = await supportAi.generateSuggestion(id);
+      await writeAudit({
+        actorUserId: req.user.id,
+        action: "admin.support.suggest",
+        meta: { ticketId: id, status: result.status },
+        req,
+      });
+      const { data: ticket } = await supabase
+        .from("support_tickets")
+        .select(
+          "id,ai_suggestion,ai_suggestion_status,ai_suggestion_generated_at",
+        )
+        .eq("id", id)
+        .maybeSingle();
+      return res.json({ ...result, ticket });
+    } catch (error) {
+      console.error("admin support suggest failed:", error?.message || error);
+      return res.status(500).json({ error: "Failed to generate suggestion" });
     }
   });
 

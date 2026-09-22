@@ -106,6 +106,7 @@
 
         <nav class="auth-legal-links" aria-label="Policies and pricing">
           <a href="/pricing.html">Pricing</a>
+          <a href="/support.html">Support</a>
           <a href="/terms.html">Terms</a>
           <a href="/privacy.html">Privacy</a>
         </nav>
@@ -316,18 +317,29 @@
             <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
           </button>
           <div class="sidebar-content" id="mobileLibraryContent">
-            <div class="sidebar-actions-row">
-              <button id="exportCsvBtn" class="auth-btn secondary-btn modal-btn" type="button">Export CSV</button>
-              <button id="exportJsonBtn" class="auth-btn secondary-btn modal-btn" type="button">Export JSON</button>
-            </div>
-            <div class="sidebar-actions-row">
-              <select id="roomFilterSelect" class="auth-input modal-input">
-                <option value="">All rooms</option>
-              </select>
-              <button id="newRoomBtn" class="auth-btn secondary-btn modal-btn" type="button">New room</button>
-            </div>
-            <div class="sidebar-actions-row">
-              <button id="shareLibraryBtn" class="auth-btn secondary-btn modal-btn" type="button">Share library</button>
+            <div class="library-toolbar">
+              <div class="library-toolbar-room">
+                <select id="roomFilterSelect" class="library-toolbar-select" aria-label="Filter by room">
+                  <option value="">All rooms</option>
+                </select>
+                <button id="newRoomBtn" class="library-icon-btn" type="button" aria-label="New room" title="New room">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                </button>
+              </div>
+              <div class="library-toolbar-actions" role="toolbar" aria-label="Library actions">
+                <button id="shareLibraryBtn" class="library-icon-btn" type="button" aria-label="Share library" title="Share library">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 3.9M15.4 6.6l-6.8 3.9"/></svg>
+                </button>
+                <div class="library-export-menu">
+                  <button id="exportMenuBtn" class="library-icon-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="exportMenuPanel" aria-label="Export" title="Export">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+                  </button>
+                  <div id="exportMenuPanel" class="library-menu-panel hidden-element" role="menu">
+                    <button id="exportCsvBtn" role="menuitem" type="button">Export CSV</button>
+                    <button id="exportJsonBtn" role="menuitem" type="button">Export JSON</button>
+                  </div>
+                </div>
+              </div>
             </div>
             <input type="text" id="searchInput" class="search-input sidebar-search" placeholder="Filter books by title or author..." />
             <ul id="libraryList" class="library-list"></ul>

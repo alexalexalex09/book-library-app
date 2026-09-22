@@ -44,6 +44,10 @@ const {
   handlePublicShare,
 } = require("./library-routes");
 const { createBooksRouter } = require("./books-routes");
+const { createUsageAnalytics } = require("./usage-analytics");
+const { createSupportAi } = require("./support-ai");
+const { createSupportRouter } = require("./support-routes");
+const { mountOpsDigestRoutes } = require("./ops-digest");
 
 sharp.cache(false);
 
@@ -173,16 +177,27 @@ if (!supabaseKey) {
   );
 }
 const supabase = createClient(supabaseUrl, supabaseKey);
-const requireAuth = createRequireAuth(supabase);
+const usageAnalytics = createUsageAnalytics(supabase);
+const requireAuth = createRequireAuth(supabase, {
+  onAuthenticated(user) {
+    return usageAnalytics.touchEngagement(user.id);
+  },
+});
 const ocrRateLimit = createPlanRateLimiter({
   action: "ocr",
   windowMs: 15 * 60 * 1000,
   message: "OCR limit reached for your plan. Please try again later.",
+  onRateLimited(req) {
+    return usageAnalytics.recordEvent(req.user?.id, "ocr_rate_limit", {});
+  },
 });
 const booksRateLimit = createPlanRateLimiter({
   action: "books",
   windowMs: 60 * 1000,
   message: "Book search limit reached for your plan. Please try again later.",
+  onRateLimited(req) {
+    return usageAnalytics.recordEvent(req.user?.id, "books_rate_limit", {});
+  },
 });
 const billing = createBillingRouter({
   supabase,
@@ -199,11 +214,26 @@ app.use(express.json({ limit: "1mb" }));
 app.use("/api/billing", billing.router);
 const mailer = createMailer(process.env);
 const signupNotify = createSignupNotify({ supabase, mail: mailer });
+const supportAi = createSupportAi({ supabase, env: process.env });
 mountSignupNotifyRoutes(app, {
   requireAuth,
   signupNotify,
   env: process.env,
 });
+mountOpsDigestRoutes(app, {
+  supabase,
+  mail: mailer,
+  signupNotify,
+  env: process.env,
+});
+app.use(
+  "/api/support",
+  createSupportRouter({
+    supabase,
+    mail: mailer,
+    supportAi,
+  }),
+);
 app.use(
   "/api/admin",
   createAdminRouter({
@@ -211,6 +241,7 @@ app.use(
     requireAuth,
     syncBillingForUserId: billing.syncBillingForUserId,
     signupNotify,
+    supportAi,
   }),
 );
 
@@ -225,6 +256,9 @@ async function withOcrConcurrencyLimit(req, res, run) {
   const current = userInFlightOcr.get(userId) || 0;
   const allowed = maxConcurrentOcrForUser(req.user);
   if (current >= allowed) {
+    usageAnalytics.recordEvent(req.user?.id, "ocr_rate_limit", {
+      reason: "concurrency",
+    });
     return res.status(429).json({
       error: "OCR is already running for your account. Please wait and try again.",
       code: "PLAN_LIMIT",
@@ -705,8 +739,12 @@ app.post(
       spines: refinedSpines,
       imageHash,
     });
+    usageAnalytics.recordEvent(req.user?.id, "ocr_ok", {});
   } catch (error) {
     console.error(`[${timestamp}] 💥 Pipeline Error:`, error);
+    usageAnalytics.recordEvent(req.user?.id, "ocr_error", {
+      message: error?.message || "pipeline_error",
+    });
     res.status(500).json({ error: "Failed to process image" });
   }
 }),
@@ -717,6 +755,7 @@ app.use(
   createBooksRouter({
     requireAuth,
     rateLimit: booksRateLimit,
+    usageAnalytics,
   }),
 );
 

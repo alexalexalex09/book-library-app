@@ -32,6 +32,6 @@ Optional: `E2E_PORT` (default `3100`) if port 3100 is busy.
 
 ## Admin console
 
-See [ADMIN.md](ADMIN.md) for deploying `admin.shelfmapper.com`, env vars, and bootstrap steps.
+See [ADMIN.md](ADMIN.md) for deploying `admin.shelfmapper.com`, env vars, support queue, overview stats, and bootstrap steps.
 
-Admin API tests live in `server/test/admin.test.js` (covered by `npm run test:server`).
+Admin / support API tests live in `server/test/admin.test.js` and `server/test/support-ops.test.js` (covered by `npm run test:server`).

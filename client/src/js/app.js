@@ -607,8 +607,18 @@ function renderBillingNav() {
 
   const roomBtn = document.getElementById("newRoomBtn");
   const shareBtn = document.getElementById("shareLibraryBtn");
-  if (roomBtn) roomBtn.textContent = free ? "New room (Premium)" : "New room";
-  if (shareBtn) shareBtn.textContent = free ? "Share (Premium)" : "Share library";
+  if (roomBtn) {
+    roomBtn.classList.toggle("is-premium-locked", free);
+    const roomLabel = free ? "New room — Premium" : "New room";
+    roomBtn.setAttribute("aria-label", roomLabel);
+    roomBtn.setAttribute("title", roomLabel);
+  }
+  if (shareBtn) {
+    shareBtn.classList.toggle("is-premium-locked", free);
+    const shareLabel = free ? "Share library — Premium" : "Share library";
+    shareBtn.setAttribute("aria-label", shareLabel);
+    shareBtn.setAttribute("title", shareLabel);
+  }
 }
 
 function formatRenewalAmount(notice) {
@@ -3985,11 +3995,83 @@ document.getElementById("searchInput")?.addEventListener("input", () => {
 document.getElementById("exportCsvBtn")?.addEventListener("click", () => {
   exportLibraryAsCsv();
   showToast("CSV export downloaded.", "success");
+  closeLibraryExportMenu();
 });
 
 document.getElementById("exportJsonBtn")?.addEventListener("click", () => {
   exportLibraryAsJson();
   showToast("JSON export downloaded.", "success");
+  closeLibraryExportMenu();
+});
+
+let libraryExportMenuHome = null;
+
+function closeLibraryExportMenu() {
+  const panel = document.getElementById("exportMenuPanel");
+  const btn = document.getElementById("exportMenuBtn");
+  panel?.classList.add("hidden-element");
+  btn?.setAttribute("aria-expanded", "false");
+  if (panel && libraryExportMenuHome && panel.parentElement !== libraryExportMenuHome) {
+    libraryExportMenuHome.appendChild(panel);
+  }
+  if (panel) {
+    panel.style.top = "";
+    panel.style.left = "";
+    panel.style.right = "";
+  }
+}
+
+function positionLibraryExportMenu() {
+  const panel = document.getElementById("exportMenuPanel");
+  const btn = document.getElementById("exportMenuBtn");
+  if (!panel || !btn) return;
+  if (!libraryExportMenuHome) {
+    libraryExportMenuHome = panel.parentElement;
+  }
+  // Portal to body so sidebar backdrop-filter / map transforms are not a fixed containing block.
+  if (panel.parentElement !== document.body) {
+    document.body.appendChild(panel);
+  }
+  const rect = btn.getBoundingClientRect();
+  panel.style.position = "fixed";
+  panel.style.top = `${Math.round(rect.bottom + 4)}px`;
+  panel.style.right = "auto";
+  // Measure after visible + in body; align panel's right edge with the button.
+  const width = panel.offsetWidth || 140;
+  panel.style.left = `${Math.round(rect.right - width)}px`;
+}
+
+function toggleLibraryExportMenu() {
+  const panel = document.getElementById("exportMenuPanel");
+  const btn = document.getElementById("exportMenuBtn");
+  if (!panel || !btn) return;
+  const open = panel.classList.contains("hidden-element");
+  panel.classList.toggle("hidden-element", !open);
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    positionLibraryExportMenu();
+  } else {
+    closeLibraryExportMenu();
+  }
+}
+
+document.getElementById("exportMenuBtn")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleLibraryExportMenu();
+});
+
+document.addEventListener("click", (e) => {
+  const menu = document.querySelector(".library-export-menu");
+  const panel = document.getElementById("exportMenuPanel");
+  const btn = document.getElementById("exportMenuBtn");
+  if (panel?.contains(e.target) || btn?.contains(e.target) || menu?.contains(e.target)) {
+    return;
+  }
+  closeLibraryExportMenu();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeLibraryExportMenu();
 });
 
 document.getElementById("roomFilterSelect")?.addEventListener("change", (e) => {

@@ -9,6 +9,7 @@ function createBooksRouter({
   requireAuth,
   rateLimit,
   fetchBooks = defaultFetchBooks,
+  usageAnalytics,
 }) {
   const router = express.Router();
 
@@ -41,6 +42,9 @@ function createBooksRouter({
         { title, author },
         5,
       );
+      if (usageAnalytics) {
+        usageAnalytics.recordEvent(req.user?.id, "books_ok", {});
+      }
       return res.json({
         ...data,
         items: rankedItems,

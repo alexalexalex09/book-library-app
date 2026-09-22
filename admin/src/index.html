@@ -41,6 +41,15 @@
       <button id="deniedSignOutBtn" class="btn secondary" type="button">Sign out</button>
     </section>
 
+    <section id="overviewPanel" class="panel hidden">
+      <div class="panel-heading">
+        <h2>Overview</h2>
+        <button id="refreshOverviewBtn" class="btn secondary" type="button">Refresh</button>
+      </div>
+      <p id="overviewStatus" class="hint" hidden></p>
+      <div id="overviewCards" class="stats-grid"></div>
+    </section>
+
     <section id="consolePanel" class="panel hidden">
       <h2>Users</h2>
       <form id="searchForm" class="search-row">
@@ -61,6 +70,48 @@
       </div>
     </section>
 
+    <section id="supportPanel" class="panel hidden">
+      <div class="panel-heading">
+        <h2>Support queue</h2>
+        <button id="refreshSupportBtn" class="btn secondary" type="button">Refresh</button>
+      </div>
+      <p id="supportStatus" class="hint" hidden></p>
+      <div class="support-layout">
+        <ul id="ticketList" class="ticket-list"></ul>
+        <div id="ticketDetail" class="ticket-detail hidden">
+          <h3 id="ticketSubject"></h3>
+          <p id="ticketMeta" class="hint"></p>
+          <label class="field inline">
+            <span>Status</span>
+            <select id="ticketStatus">
+              <option value="open">open</option>
+              <option value="pending">pending</option>
+              <option value="resolved">resolved</option>
+              <option value="closed">closed</option>
+            </select>
+          </label>
+          <div id="aiSuggestionBox" class="ai-box">
+            <div class="panel-heading">
+              <strong>AI suggestion</strong>
+              <div class="btn-row">
+                <button id="useSuggestionBtn" class="btn secondary" type="button">Use</button>
+                <button id="regenSuggestionBtn" class="btn secondary" type="button">Regenerate</button>
+              </div>
+            </div>
+            <pre id="aiSuggestionText" class="ai-text"></pre>
+          </div>
+          <div id="ticketThread" class="ticket-thread"></div>
+          <form id="ticketReplyForm" class="stack">
+            <label class="field">
+              <span>Reply</span>
+              <textarea id="ticketReplyBody" rows="5" required></textarea>
+            </label>
+            <button class="btn primary" type="submit">Send reply</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
     <section id="signupsPanel" class="panel hidden">
       <div class="panel-heading">
         <h2>Recent signups</h2>
@@ -70,8 +121,17 @@
       <ul id="signupList" class="signup-list"></ul>
     </section>
 
+    <section id="auditPanel" class="panel hidden">
+      <div class="panel-heading">
+        <h2>Audit log</h2>
+        <button id="refreshAuditBtn" class="btn secondary" type="button">Refresh</button>
+      </div>
+      <p id="auditStatus" class="hint" hidden></p>
+      <ul id="auditList" class="signup-list"></ul>
+    </section>
+
     <section id="notifyPanel" class="panel hidden">
-      <h2>Signup email notifications</h2>
+      <h2>Email notifications</h2>
       <p class="hint">Emails go to <code>SIGNUP_NOTIFY_TO</code> / <code>ADMIN_EMAILS</code> via Resend.</p>
       <form id="notifyForm" class="stack">
         <label class="field">
@@ -80,6 +140,14 @@
             <option value="off">Off</option>
             <option value="immediate">Immediate email</option>
             <option value="daily">Daily summary</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>When a support ticket is opened / replied</span>
+          <select id="supportNotifyMode">
+            <option value="off">Off</option>
+            <option value="immediate">Immediate email</option>
+            <option value="daily">Daily ops digest</option>
           </select>
         </label>
         <button class="btn primary" type="submit">Save</button>

@@ -25,6 +25,10 @@ const {
 } = require("../../src/library-routes");
 const { createBooksRouter } = require("../../src/books-routes");
 const { createOcrRouter } = require("../../src/ocr-routes");
+const { createUsageAnalytics } = require("../../src/usage-analytics");
+const { createSupportAi } = require("../../src/support-ai");
+const { createSupportRouter } = require("../../src/support-routes");
+const { mountOpsDigestRoutes } = require("../../src/ops-digest");
 
 const CLIENT_PATH = path.join(__dirname, "../../../client/src");
 
@@ -34,6 +38,7 @@ function createTestApp({
   processImage = async () => ({ spines: [] }),
   syncBillingForUserId,
   mail,
+  supportAi,
   env = {},
 } = {}) {
   const previousEnv = { ...process.env };
@@ -61,16 +66,27 @@ function createTestApp({
   );
   app.use(express.json({ limit: "1mb" }));
 
-  const requireAuth = createRequireAuth(supabase);
+  const usageAnalytics = createUsageAnalytics(supabase);
+  const requireAuth = createRequireAuth(supabase, {
+    onAuthenticated(user) {
+      return usageAnalytics.touchEngagement(user.id);
+    },
+  });
   const booksRateLimit = createPlanRateLimiter({
     action: "books",
     windowMs: 60_000,
     message: "Book search limit reached for your plan. Please try again later.",
+    onRateLimited(req) {
+      return usageAnalytics.recordEvent(req.user?.id, "books_rate_limit", {});
+    },
   });
   const ocrRateLimit = createPlanRateLimiter({
     action: "ocr",
     windowMs: 60_000,
     message: "OCR limit reached for your plan. Please try again later.",
+    onRateLimited(req) {
+      return usageAnalytics.recordEvent(req.user?.id, "ocr_rate_limit", {});
+    },
   });
 
   mountPublicConfigRoutes(app);
@@ -91,11 +107,50 @@ function createTestApp({
 
   const mailer = mail || createMailer(process.env);
   const signupNotify = createSignupNotify({ supabase, mail: mailer });
+  const ai =
+    supportAi ||
+    createSupportAi({
+      supabase,
+      env: process.env,
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      reply: "Thanks for contacting support.",
+                      pathForward: "Confirm account details",
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      }),
+    });
   mountSignupNotifyRoutes(app, {
     requireAuth,
     signupNotify,
     env: process.env,
   });
+  mountOpsDigestRoutes(app, {
+    supabase,
+    mail: mailer,
+    signupNotify,
+    env: process.env,
+  });
+  app.use(
+    "/api/support",
+    createSupportRouter({
+      supabase,
+      mail: mailer,
+      supportAi: ai,
+    }),
+  );
   app.use(
     "/api/admin",
     createAdminRouter({
@@ -104,6 +159,8 @@ function createTestApp({
       syncBillingForUserId:
         syncBillingForUserId || billing.syncBillingForUserId,
       signupNotify,
+      supportAi: ai,
+      env: process.env,
     }),
   );
 
@@ -113,6 +170,7 @@ function createTestApp({
       requireAuth,
       rateLimit: ocrRateLimit,
       processImage,
+      usageAnalytics,
     }),
   );
 
@@ -122,6 +180,7 @@ function createTestApp({
       requireAuth,
       rateLimit: booksRateLimit,
       fetchBooks,
+      usageAnalytics,
     }),
   );
 
@@ -234,7 +293,8 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
         return api;
       },
       in(field, values) {
-        ctx.filters.push((row) => values.includes(row[field]));
+        const set = new Set(values);
+        ctx.filters.push((row) => set.has(row[field]));
         return api;
       },
       order(field, { ascending = true } = {}) {
@@ -269,17 +329,30 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
 
     function execute() {
       if (ctx.mode === "insert") {
-        const row = {
-          id: table.length + 1,
-          created_at: new Date().toISOString(),
-          ...ctx.payload,
-        };
-        table.push(row);
+        const payloads = Array.isArray(ctx.payload)
+          ? ctx.payload
+          : [ctx.payload];
+        const inserted = payloads.map((payload) => {
+          const row = {
+            id: table.length + 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            ...payload,
+          };
+          table.push(row);
+          return row;
+        });
+        const row = inserted[0];
         return { data: project(row), error: null };
       }
 
       if (ctx.mode === "upsert") {
-        const key = ctx.payload.key != null ? "key" : "user_id";
+        const key =
+          ctx.payload.key != null
+            ? "key"
+            : ctx.payload.user_id != null
+              ? "user_id"
+              : "id";
         const existing = table.find((row) => row[key] === ctx.payload[key]);
         if (existing) {
           Object.assign(existing, ctx.payload);

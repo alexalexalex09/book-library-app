@@ -48,21 +48,26 @@ There is **no** public path to become admin.
 
 ## Database
 
-Run [`server/sql/admin_audit_log.sql`](server/sql/admin_audit_log.sql) and
-[`server/sql/signup_notifications.sql`](server/sql/signup_notifications.sql)
-in the Supabase SQL editor (also included in `schema.sql` / `migrate.sql`).
+Run these in the Supabase SQL editor (also included in `schema.sql` / `migrate.sql`):
 
-## Signup history & email notifications
+- [`server/sql/admin_audit_log.sql`](server/sql/admin_audit_log.sql)
+- [`server/sql/signup_notifications.sql`](server/sql/signup_notifications.sql)
+- [`server/sql/support_tickets.sql`](server/sql/support_tickets.sql)
+- [`server/sql/admin_analytics.sql`](server/sql/admin_analytics.sql)
 
-Admin console shows **Recent signups** (synced from Auth + recorded on first login via `/api/signup-ack`).
+Applied via MCP to Dev (`wqxvahmiblqgsjyywxpa`) and App (`cyrdpxukqtruheigcdps`).
 
-Notification mode (persisted in `admin_settings`):
+## Signup / support email notifications
 
-| Mode | Behavior |
-|---|---|
-| `off` | No signup emails |
-| `immediate` | Email on signup ack (first session within 48h of `created_at`) |
-| `daily` | Summary of last 24h via cron |
+Admin console shows **Recent signups**, **Support queue**, **Overview** analytics, and **Audit**.
+
+Notification modes (persisted in `admin_settings`):
+
+| Mode | Signup | Support |
+|---|---|---|
+| `off` | No signup emails | No support emails |
+| `immediate` | Email on signup ack (first session within 48h) | Email on ticket create / user reply |
+| `daily` | Signup digest via cron | Included in ops digest |
 
 Mail env (Render API service):
 
@@ -71,11 +76,17 @@ Mail env (Render API service):
 | `RESEND_API_KEY` | Required to send |
 | `MAIL_FROM` | From address (Resend-verified domain) |
 | `SIGNUP_NOTIFY_TO` | Recipients (defaults to `ADMIN_EMAILS`) |
-| `CRON_SECRET` | Protects `POST /api/internal/signups/digest` |
+| `CRON_SECRET` | Protects internal digest endpoints |
+| `GEMINI_API_KEY` | Optional; AI suggested replies on support tickets |
 
-Daily job: cron `POST https://shelfmapper.com/api/internal/signups/digest` with header `x-cron-secret: $CRON_SECRET` (e.g. once per day).
+Cron jobs (header `x-cron-secret: $CRON_SECRET`):
 
-## Bootstrap an admin user
+- `POST /api/internal/signups/digest` — signup-only daily summary
+- `POST /api/internal/ops/digest` — combined ops digest (open tickets + signup digest when modes are `daily`; optional OCR error spike line)
+
+Prefer **ops digest** once per day when using support notifications.
+
+## Admin config
 
 [`admin/src/config.json`](admin/src/config.json) (public values only — **never** put the service role key here):
 
@@ -109,12 +120,14 @@ Authentication → URL configuration — add:
 |---|---|
 | Admin API on `shelfmapper.com` | Live (`/api/admin/me` returns 401 without auth) |
 | Audit SQL | Applied (Dev + App) |
+| Support + analytics SQL | Applied (Dev + App) |
 | `ADMIN_EMAILS` / `CORS_ORIGINS` / `ADMIN_ORIGINS` | Set — includes `admin.shelfmapper.com` + `shelfmapper-admin.onrender.com` |
 | Admin `app_metadata.role` | Set for `frogitts@gmail.com` |
 | Render Static Site | Live at [https://shelfmapper-admin.onrender.com](https://shelfmapper-admin.onrender.com) |
 | Custom domain `admin.shelfmapper.com` | **Manual** — add in Render + DNS CNAME (Namecheap / registrar-servers.com) |
 | Supabase Auth URL allowlist | **Manual** — add `https://admin.shelfmapper.com` and onrender URL |
 | Security headers on CDN | CSP via HTML meta shipped; set remaining headers in Dashboard (see `admin/render.yaml`) |
+| Ops digest cron | **Manual** — schedule `POST /api/internal/ops/digest` daily |
 
 ### Interim URL
 
@@ -134,19 +147,29 @@ Until DNS is attached, use **https://shelfmapper-admin.onrender.com**.
 1. Open the admin URL → sign in as `frogitts@gmail.com` (email/password).
 2. Sign out/in once so the JWT includes `role: admin`.
 3. Search a user; confirm a non-admin account sees Access denied.
+4. Open Overview / Support / Audit panels.
 
-## API surface (v1)
+## API surface
 
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/api/admin/me` | Session gate |
 | `GET` | `/api/admin/users?q=` | Email/UUID search |
-| `GET` | `/api/admin/users/:id` | Safe projection |
+| `GET` | `/api/admin/users/:id` | Safe projection + ticket/usage extras |
 | `POST` | `/api/admin/users/:id/sync-billing` | Stripe retrieve → Auth metadata |
 | `GET` | `/api/admin/signups` | Recent signup history |
-| `GET` | `/api/admin/settings/notifications` | Signup email mode |
-| `POST` | `/api/admin/settings/notifications` | Set mode: `off` / `immediate` / `daily` |
+| `GET` | `/api/admin/stats/overview` | Product + support + engagement + billing |
+| `GET` | `/api/admin/stats/billing` | Stripe subscription mirror (~10 min cache) |
+| `GET` | `/api/admin/stats/usage` | OCR/books usage buckets |
+| `GET` | `/api/admin/audit` | Recent audit rows |
+| `GET/POST` | `/api/admin/support/tickets…` | Queue, detail, update, reply, suggest |
+| `GET/POST` | `/api/admin/settings/notifications` | Signup + support notify modes |
+| `POST` | `/api/support/tickets` | Public ticket create (optional auth) |
+| `GET` | `/api/support/tickets` | Own tickets (auth) |
 | `POST` | `/api/signup-ack` | Authenticated; records new signup |
-| `POST` | `/api/internal/signups/digest` | Cron daily summary (`CRON_SECRET`) |
+| `POST` | `/api/internal/signups/digest` | Cron signup summary (`CRON_SECRET`) |
+| `POST` | `/api/internal/ops/digest` | Cron ops digest (`CRON_SECRET`) |
 
-Out of scope for v1: manual plan grants, bans, deletes, refunds, impersonation, Google OAuth on admin.
+Public support UI: [`client/src/support.html`](client/src/support.html).
+
+Out of scope: live chat, attachments, auto-sending AI replies, full Stripe Dashboard parity.

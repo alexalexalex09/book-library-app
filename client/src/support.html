@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#2c1f0e">
+  <title>Support · ShelfMapper</title>
+  <link rel="stylesheet" href="css/style.css?v=19">
+  <link rel="stylesheet" href="css/legal.css?v=2">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500;1,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="/img/ShelfMapperLogo.svg" />
+</head>
+<body class="legal-page">
+  <header class="legal-header">
+    <a class="legal-brand" href="/">
+      <img src="/img/ShelfMapperLogo.svg" alt="" />
+      <span class="legal-brand-word">
+        <strong class="brand-lockup-hi">Shelf</strong><span class="brand-lockup-library">Mapper</span>
+      </span>
+    </a>
+    <nav class="legal-nav" aria-label="Legal">
+      <a href="/pricing.html">Pricing</a>
+      <a href="/terms.html">Terms</a>
+      <a href="/privacy.html">Privacy</a>
+      <a href="/support.html" aria-current="page">Support</a>
+      <a href="/">Back to app</a>
+    </nav>
+  </header>
+
+  <main class="legal-main">
+    <h1>Support</h1>
+    <p class="legal-updated">Tell us what you need help with. We read every ticket.</p>
+
+    <form id="supportForm" class="support-form stack">
+      <label class="field">
+        <span>Email</span>
+        <input id="supportEmail" name="email" type="email" required autocomplete="email" />
+      </label>
+      <label class="field">
+        <span>Category</span>
+        <select id="supportCategory" name="category" required>
+          <option value="billing">Billing</option>
+          <option value="ocr">OCR / scanning</option>
+          <option value="account">Account</option>
+          <option value="bug">Bug report</option>
+          <option value="other" selected>Other</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Subject</span>
+        <input id="supportSubject" name="subject" type="text" maxlength="200" required />
+      </label>
+      <label class="field">
+        <span>Message</span>
+        <textarea id="supportBody" name="body" rows="8" maxlength="8000" required></textarea>
+      </label>
+      <button class="auth-btn primary-btn" type="submit">Send message</button>
+    </form>
+    <p id="supportStatus" class="hint" hidden role="status"></p>
+    <div id="supportThanks" class="support-thanks hidden" hidden>
+      <h2>Thanks — we got it</h2>
+      <p>Your ticket id is <code id="supportTicketId"></code>. We’ll follow up by email.</p>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/support.js"></script>
+</body>
+</html>
