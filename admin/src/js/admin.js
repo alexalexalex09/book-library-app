@@ -138,6 +138,60 @@
     return date.toLocaleString();
   }
 
+  const AUDIT_ACTIONS = {
+    "admin.me": {
+      title: "Session check",
+      description:
+        "Confirmed this browser session is an allowlisted admin (role + ADMIN_EMAILS).",
+    },
+    "admin.users.search": {
+      title: "User search",
+      description: "Searched for users by email fragment or UUID.",
+    },
+    "admin.users.get": {
+      title: "Viewed user detail",
+      description:
+        "Opened a user’s billing and account projection (no passwords or secrets).",
+    },
+    "admin.users.sync_billing": {
+      title: "Synced billing from Stripe",
+      description:
+        "Pulled the user’s Stripe subscription into Auth app_metadata (plan, status, IDs).",
+    },
+    "admin.signups.list": {
+      title: "Viewed signup history",
+      description: "Loaded the recent signups list (and may have synced from Auth).",
+    },
+    "admin.settings.notifications": {
+      title: "Changed notification settings",
+      description:
+        "Updated signup and/or support email notify mode (off, immediate, or daily).",
+    },
+    "admin.support.update": {
+      title: "Updated support ticket",
+      description: "Changed a ticket’s status, priority, or other fields.",
+    },
+    "admin.support.reply": {
+      title: "Replied to support ticket",
+      description: "Posted an admin reply on a ticket (may email the requester).",
+    },
+    "admin.support.suggest": {
+      title: "Regenerated AI suggestion",
+      description:
+        "Asked Gemini for a new suggested reply / path-forward on a ticket (not sent to the user).",
+    },
+  };
+
+  function describeAuditAction(action) {
+    const key = String(action || "");
+    return (
+      AUDIT_ACTIONS[key] || {
+        title: key || "Unknown action",
+        description: "No description is defined for this action code yet.",
+      }
+    );
+  }
+
   function addStatCard(title, lines) {
     const card = document.createElement("article");
     card.className = "stat-card";
@@ -258,14 +312,42 @@
       }
       setText(auditStatus, `${rows.length} recent`);
       for (const row of rows) {
+        const info = describeAuditAction(row.action);
         const li = document.createElement("li");
-        const main = document.createElement("span");
-        main.textContent = `${row.action}${row.target_user_id ? ` → ${row.target_user_id}` : ""}`;
+
+        const rowEl = document.createElement("div");
+        rowEl.className = "audit-row";
+
+        const main = document.createElement("div");
+        const title = document.createElement("span");
+        title.className = "audit-title";
+        title.textContent = info.title;
+        const code = document.createElement("span");
+        code.className = "audit-code";
+        code.textContent = row.action || "—";
+        main.appendChild(title);
+        main.appendChild(code);
+
         const meta = document.createElement("span");
         meta.className = "meta";
         meta.textContent = formatWhen(row.created_at);
-        li.appendChild(main);
-        li.appendChild(meta);
+
+        rowEl.appendChild(main);
+        rowEl.appendChild(meta);
+        li.appendChild(rowEl);
+
+        const desc = document.createElement("p");
+        desc.className = "audit-desc";
+        desc.textContent = info.description;
+        li.appendChild(desc);
+
+        if (row.target_user_id) {
+          const target = document.createElement("p");
+          target.className = "audit-target";
+          target.textContent = `Target user: ${row.target_user_id}`;
+          li.appendChild(target);
+        }
+
         auditList.appendChild(li);
       }
     } catch (error) {

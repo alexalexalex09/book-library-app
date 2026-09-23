@@ -170,6 +170,20 @@ Until DNS is attached, use **https://shelfmapper-admin.onrender.com**.
 | `POST` | `/api/internal/signups/digest` | Cron signup summary (`CRON_SECRET`) |
 | `POST` | `/api/internal/ops/digest` | Cron ops digest (`CRON_SECRET`) |
 
+### Audit action codes
+
+| Code | Meaning |
+|---|---|
+| `admin.me` | Session gate succeeded (admin role + email allowlist) |
+| `admin.users.search` | User search by email/UUID |
+| `admin.users.get` | Opened user detail projection |
+| `admin.users.sync_billing` | Stripe → Auth billing metadata sync |
+| `admin.signups.list` | Loaded recent signup history |
+| `admin.settings.notifications` | Changed signup/support notify modes |
+| `admin.support.update` | Updated ticket status/priority/fields |
+| `admin.support.reply` | Admin reply on a ticket |
+| `admin.support.suggest` | Regenerated AI suggested reply (not emailed) |
+
 Public support UI: [`client/src/support.html`](client/src/support.html).
 
 Out of scope: live chat, attachments, auto-sending AI replies, full Stripe Dashboard parity.
