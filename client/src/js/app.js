@@ -5097,7 +5097,9 @@ async function updateShelfName(shelfId, newName, textNode) {
 const initMapDrag = (e) => {
   if (
     e.target.closest(".map-viewport > div") ||
-    e.target.closest(".map-controls")
+    e.target.closest(".map-controls") ||
+    e.target.closest(".map-hint") ||
+    e.target.closest(".map-empty-state")
   )
     return;
 

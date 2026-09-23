@@ -35,6 +35,9 @@
   --focus-ring: 0 0 0 3px rgba(139, 58, 47, 0.25);
   --font-display: "Playfair Display", "Times New Roman", serif;
   --font-sans: "Source Sans 3", "Segoe UI", sans-serif;
+  /* Sticky top nav (~margin + bar); mobile bottom nav chrome */
+  --app-chrome-top: 72px;
+  --app-chrome-bottom: 72px;
 }
 
 /* ==========================================
@@ -643,7 +646,8 @@ input:focus-visible,
 
 /* Sidebar & Detected Spines */
 #pendingContainer {
-  width: 380px;
+  width: 100%;
+  min-width: 0;
   background: #ffffff;
   border-radius: 12px;
   padding: 16px;
@@ -702,8 +706,8 @@ input:focus-visible,
    5. MAP ENGINE & OVERLAYS
    ========================================== */
 #infiniteMap {
-  width: 100vw;
-  height: calc(100dvh - 80px);
+  width: 100%;
+  height: 100%;
   position: relative;
   z-index: 1; /* contain map-controls / map-hint stacking under the library sidebar */
   overflow: hidden;
@@ -776,13 +780,15 @@ input:focus-visible,
 .map-hint {
   position: absolute;
   left: 50%;
+  top: auto;
   bottom: 16px;
   transform: translateX(-50%);
   z-index: 60;
   display: flex;
   align-items: center;
   gap: 12px;
-  max-width: min(92vw, 560px);
+  max-width: min(92%, 560px);
+  box-sizing: border-box;
   background: rgba(15, 23, 42, 0.92);
   color: #f8fafc;
   font-size: 0.82rem;
@@ -885,12 +891,15 @@ input:focus-visible,
 
 #libraryView {
   position: relative;
+  padding: 0;
+  height: calc(100dvh - var(--app-chrome-top));
+  overflow: hidden;
 }
 
 /* Floating Desktop Sidebar */
 #libraryView .sidebar {
   position: absolute;
-  top: 100px; 
+  top: 16px;
   right: 20px;
   width: 320px;
   background: rgba(255, 255, 255, 0.95);
@@ -901,7 +910,7 @@ input:focus-visible,
   z-index: 50;
   display: flex;
   flex-direction: column;
-  max-height: calc(100dvh - 140px);
+  max-height: calc(100% - 32px);
 }
 
 .sidebar-header {
@@ -1769,7 +1778,8 @@ input:focus-visible,
 
 .spine-card-main {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  flex-direction: column;
   gap: 10px;
 }
 
@@ -1793,6 +1803,7 @@ input:focus-visible,
   min-width: 0;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 0;
 }
 
@@ -1825,7 +1836,6 @@ input:focus-visible,
 .spine-actions {
   display: flex;
   gap: 8px;
-  padding-left: 32px;
 }
 
 .spine-btn {
@@ -1849,7 +1859,6 @@ input:focus-visible,
 }
 
 .search-results-col {
-  padding-left: 32px;
   margin-top: 12px;
   display: flex;
   flex-direction: column;
@@ -2434,12 +2443,16 @@ input:focus-visible,
   }
 
   .map-hint {
-    top: 70px;
-    bottom: auto;
+    top: auto;
+    bottom: calc(72px + 16px + env(safe-area-inset-bottom, 0px));
     border-radius: 16px;
     white-space: normal;
     text-align: left;
-    align-items: flex-start;
+    align-items: center;
+  }
+
+  #libraryView {
+    height: calc(100dvh - var(--app-chrome-bottom) - env(safe-area-inset-bottom, 0px));
   }
 
   /* Full-screen Mobile Overlay when Maximized (legacy; shelf-photo toggle preferred) */
@@ -2464,6 +2477,10 @@ input:focus-visible,
     display: inline-flex !important;
     align-items: center;
     justify-content: center;
+    white-space: normal;
+    text-align: center;
+    overflow-wrap: anywhere;
+    line-height: 1.2;
   }
 
   .spines-batch-actions {
@@ -2477,14 +2494,18 @@ input:focus-visible,
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    line-height: 1;
+    line-height: 1.2;
   }
 
   .spines-batch-actions .maximize-spines-btn {
     height: auto;
     width: auto;
     min-width: 7em;
+    max-width: 100%;
     padding: 8px 14px;
+    white-space: normal;
+    text-align: center;
+    overflow-wrap: anywhere;
   }
 
   #uploadView[data-scan-stage="review"].shelf-photo-collapsed #pendingContainer {
@@ -3166,14 +3187,14 @@ body.guest-auth-open {
 }
 
 .main-content {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 22px 20px 60px;
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 #uploadView {
-  padding-top: 0;
-  padding-bottom: 0;
+  padding: 22px 20px 60px;
 }
 
 .scan-shell {
@@ -3181,6 +3202,11 @@ body.guest-auth-open {
   grid-template-columns: 240px minmax(0, 1fr);
   gap: 24px;
   align-items: start;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .scan-folio-sidebar {
@@ -3344,6 +3370,10 @@ body.guest-auth-open {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .scan-wizard-head {
@@ -3382,8 +3412,9 @@ body.guest-auth-open {
 
 .scan-wizard-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
   gap: 18px;
+  min-width: 0;
 }
 
 .scan-main-panel {
@@ -3395,6 +3426,7 @@ body.guest-auth-open {
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  min-width: 0;
   height: 100%;
 }
 
@@ -3692,16 +3724,16 @@ body.guest-auth-open {
 
 @media (max-width: 960px) {
   .scan-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .scan-folio-sidebar {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .scan-wizard-body {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .scan-side-panel {
@@ -3725,6 +3757,10 @@ body.guest-auth-open {
   }
 
   .main-content {
+    padding: 0;
+  }
+
+  #uploadView {
     padding: 12px 12px calc(92px + env(safe-area-inset-bottom, 0px));
   }
 
@@ -3774,5 +3810,7 @@ body.guest-auth-open {
 
   .scan-wizard-card {
     padding: 16px;
+    width: 100%;
+    max-width: 100%;
   }
 }
