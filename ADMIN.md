@@ -14,7 +14,7 @@ Additional controls:
 
 - Exact CORS allowlist via `CORS_ORIGINS`
 - Mutating `/api/admin/*` requires `Origin` in `ADMIN_ORIGINS` (defaults to `admin.*` entries from CORS)
-- Strict rate limit on `/api/admin` (30 / 15 min per user)
+- Strict rate limit on `/api/admin` (default **300 / 15 min** per user; override with `ADMIN_RATE_LIMIT`)
 - Append-only `admin_audit_log` (service role only; no client RLS policies)
 - User projections strip unexpected `app_metadata` fields
 - Search requires `q` ≥ 3 characters; capped result page (no full dump)
@@ -25,6 +25,7 @@ Additional controls:
 | Variable | Purpose |
 |---|---|
 | `ADMIN_EMAILS` | Allowlisted admin emails (required for any admin access) |
+| `ADMIN_RATE_LIMIT` | Max `/api/admin` requests per 15 minutes per admin (default `300`) |
 | `CORS_ORIGINS` | Exact origins, e.g. `https://shelfmapper.com,https://admin.shelfmapper.com` |
 | `ADMIN_ORIGINS` | Optional override for mutating admin Origin checks (defaults to admin hosts) |
 | Existing | `SUPABASE_*` service role, `STRIPE_SECRET_KEY`, `APP_BASE_URL` |

@@ -180,10 +180,13 @@ function requireAdminOrigin(req, res, next) {
   });
 }
 
-function createAdminRateLimiter() {
+function createAdminRateLimiter(env = process.env) {
+  const windowMs = 15 * 60 * 1000;
+  const parsed = Number.parseInt(String(env.ADMIN_RATE_LIMIT || "300"), 10);
+  const limit = Number.isFinite(parsed) && parsed > 0 ? parsed : 300;
   return rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: 30,
+    windowMs,
+    limit,
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => {

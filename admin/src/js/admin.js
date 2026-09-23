@@ -673,6 +673,8 @@
           accessToken = null;
           return;
         }
+        // Skip INITIAL_SESSION — already handled via getSession() above.
+        if (event === "INITIAL_SESSION") return;
         if (session) await verifyAdminSession(session);
       });
     } catch (error) {
