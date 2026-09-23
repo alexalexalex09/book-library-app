@@ -220,9 +220,10 @@
 
             <div class="scan-wizard-body">
               <div class="scan-main-panel">
-                <input type="file" id="imageUpload" accept="image/*" capture="environment" class="visually-hidden-input" multiple />
+                <input type="file" id="imageUpload" accept="image/*" class="visually-hidden-input" multiple />
+                <input type="file" id="imageCapture" accept="image/*" capture="environment" class="visually-hidden-input" />
                 <div class="canvas-container" id="canvasDropzone">
-                  <div id="placeholderText" class="dropzone-empty-state clickable-dropzone" role="button" tabindex="0" aria-label="Upload a shelf photo. Activate to choose an image, or drag and drop an image here.">
+                  <div id="placeholderText" class="dropzone-empty-state clickable-dropzone" role="button" tabindex="0" aria-label="Add a shelf photo. Activate to take a photo or choose from your library, or drag and drop an image here.">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="dropzone-icon" aria-hidden="true">
                       <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                       <circle cx="8.5" cy="8.5" r="1.5"></circle>
@@ -390,6 +391,18 @@
       <div class="modal-actions">
         <button id="confirmModalCancel" class="auth-btn secondary-btn modal-btn" type="button">Cancel</button>
         <button id="confirmModalOk" class="auth-btn primary-btn modal-btn modal-btn-danger" type="button">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="photoSourceModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="photoSourceTitle" aria-describedby="photoSourceMessage">
+    <div class="modal-content modal-dialog" role="document">
+      <h2 id="photoSourceTitle" class="modal-title">Add shelf photo</h2>
+      <p id="photoSourceMessage" class="modal-message">Take a new photo with your camera, or choose an existing image from your library.</p>
+      <div class="modal-actions photo-source-actions">
+        <button id="photoSourceCameraBtn" class="auth-btn primary-btn modal-btn" type="button">Take photo</button>
+        <button id="photoSourceLibraryBtn" class="auth-btn secondary-btn modal-btn" type="button">Choose from library</button>
+        <button id="photoSourceCancelBtn" class="auth-btn secondary-btn modal-btn" type="button">Cancel</button>
       </div>
     </div>
   </div>

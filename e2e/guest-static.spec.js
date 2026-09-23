@@ -43,4 +43,22 @@ test.describe("guest and static pages", () => {
     const title = await page.title();
     expect(title.length).toBeGreaterThan(0);
   });
+
+  test("photo upload separates camera capture from library picker", async ({ page }) => {
+    await page.goto("/");
+
+    const libraryInput = page.locator("#imageUpload");
+    const cameraInput = page.locator("#imageCapture");
+    await expect(libraryInput).toBeAttached();
+    await expect(cameraInput).toBeAttached();
+    await expect(libraryInput).not.toHaveAttribute("capture");
+    await expect(cameraInput).toHaveAttribute("capture", "environment");
+    await expect(libraryInput).toHaveAttribute("accept", "image/*");
+    await expect(cameraInput).toHaveAttribute("accept", "image/*");
+
+    await expect(page.locator("#photoSourceModal")).toBeAttached();
+    await expect(page.locator("#photoSourceCameraBtn")).toHaveText(/Take photo/i);
+    await expect(page.locator("#photoSourceLibraryBtn")).toHaveText(/Choose from library/i);
+    await expect(page.locator("#photoSourceCancelBtn")).toBeAttached();
+  });
 });

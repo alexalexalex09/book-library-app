@@ -1278,6 +1278,15 @@ input:focus-visible,
   margin-top: 8px;
 }
 
+.photo-source-actions {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.photo-source-actions .modal-btn {
+  width: 100%;
+}
+
 .modal-btn {
   width: auto;
   padding: 8px 16px;

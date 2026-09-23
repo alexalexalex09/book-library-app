@@ -1790,6 +1790,7 @@ window.addEventListener("DOMContentLoaded", () => {
 // 5. UPLOAD & SCANNING LOGIC (CANVAS)
 // ==========================================
 const imageUpload = document.getElementById("imageUpload");
+const imageCapture = document.getElementById("imageCapture");
 const shelfCanvas = document.getElementById("shelfCanvas");
 const ctx = shelfCanvas?.getContext("2d");
 const placeholderText = document.getElementById("placeholderText");
@@ -2369,8 +2370,8 @@ async function prepareImageFileForUpload(file) {
   }
 }
 
-imageUpload?.addEventListener("change", async (e) => {
-  const files = Array.from(e.target.files || []).filter((file) =>
+async function handleSelectedImageFiles(fileList) {
+  const files = Array.from(fileList || []).filter((file) =>
     String(file.type || "").startsWith("image/"),
   );
   if (files.length === 0) return;
@@ -2383,7 +2384,72 @@ imageUpload?.addEventListener("change", async (e) => {
   const allowedFiles = isPremiumPlan() ? files : files.slice(0, 1);
   scanQueue = allowedFiles.slice(1);
   beginScanForFile(allowedFiles[0]);
+}
+
+imageUpload?.addEventListener("change", async (e) => {
+  await handleSelectedImageFiles(e.target.files);
 });
+
+imageCapture?.addEventListener("change", async (e) => {
+  await handleSelectedImageFiles(e.target.files);
+});
+
+function isMobilePhotoSourceLayout() {
+  return window.matchMedia("(max-width: 768px)").matches;
+}
+
+function openPhotoSourceChooser() {
+  // Desktop: open the library file picker directly (no camera/library modal).
+  if (!isMobilePhotoSourceLayout()) {
+    imageUpload?.click();
+    return;
+  }
+
+  const modal = document.getElementById("photoSourceModal");
+  const cameraBtn = document.getElementById("photoSourceCameraBtn");
+  const libraryBtn = document.getElementById("photoSourceLibraryBtn");
+  const cancelBtn = document.getElementById("photoSourceCancelBtn");
+  if (!modal || !cameraBtn || !libraryBtn || !cancelBtn) {
+    imageUpload?.click();
+    return;
+  }
+
+  const onKey = (e) => {
+    trapFocusInModal(modal, e);
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      cleanup();
+    }
+  };
+  const onCamera = () => {
+    imageCapture?.click();
+    cleanup();
+  };
+  const onLibrary = () => {
+    imageUpload?.click();
+    cleanup();
+  };
+  const onCancel = () => cleanup();
+  const onOverlay = (e) => {
+    if (e.target === modal) cleanup();
+  };
+
+  function cleanup() {
+    cameraBtn.removeEventListener("click", onCamera);
+    libraryBtn.removeEventListener("click", onLibrary);
+    cancelBtn.removeEventListener("click", onCancel);
+    modal.removeEventListener("keydown", onKey);
+    modal.removeEventListener("click", onOverlay);
+    closeModalAndRestore(modal);
+  }
+
+  cameraBtn.addEventListener("click", onCamera);
+  libraryBtn.addEventListener("click", onLibrary);
+  cancelBtn.addEventListener("click", onCancel);
+  modal.addEventListener("keydown", onKey);
+  modal.addEventListener("click", onOverlay);
+  openModalWithFocus(modal, cameraBtn);
+}
 
 // Empty canvas is the upload target: click, keyboard, and drag & drop.
 function forwardFilesToImageUpload(files) {
@@ -2403,7 +2469,7 @@ function setupCanvasDropzone() {
   const dropzone = document.getElementById("canvasDropzone");
   if (!dropzone || !placeholderText || !imageUpload) return;
 
-  const activateUpload = () => imageUpload.click();
+  const activateUpload = () => openPhotoSourceChooser();
 
   placeholderText.addEventListener("click", (e) => {
     if (e.target.closest("#cropCanvasBtn")) return;
@@ -2904,6 +2970,7 @@ function resetScanWorkspace() {
   if (placeholderText) placeholderText.style.display = "flex";
   setCanvasChromeVisible(false);
   if (imageUpload) imageUpload.value = "";
+  if (imageCapture) imageCapture.value = "";
   document.getElementById("pendingContainer").innerHTML =
     "<p class='empty-state'>Upload a new image to continue.</p>";
   updateScanSteps();

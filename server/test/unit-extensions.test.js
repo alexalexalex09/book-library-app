@@ -116,3 +116,36 @@ describe("billing helpers remain stable", () => {
     assert.equal(normalizeInterval("weekly"), null);
   });
 });
+
+describe("photo source chooser markup", () => {
+  it("keeps library upload free of capture and camera input capture-only", () => {
+    const indexHtml = fs.readFileSync(
+      path.join(__dirname, "../../client/src/index.html"),
+      "utf8",
+    );
+    const appJs = fs.readFileSync(
+      path.join(__dirname, "../../client/src/js/app.js"),
+      "utf8",
+    );
+
+    assert.match(
+      indexHtml,
+      /id="imageUpload"[^>]*accept="image\/\*"[^>]*class="visually-hidden-input"[^>]*multiple/,
+    );
+    assert.doesNotMatch(
+      indexHtml,
+      /id="imageUpload"[^>]*capture=/,
+    );
+    assert.match(
+      indexHtml,
+      /id="imageCapture"[^>]*accept="image\/\*"[^>]*capture="environment"/,
+    );
+    assert.match(indexHtml, /id="photoSourceModal"/);
+    assert.match(indexHtml, /id="photoSourceCameraBtn"/);
+    assert.match(indexHtml, /id="photoSourceLibraryBtn"/);
+    assert.match(appJs, /function openPhotoSourceChooser\(/);
+    assert.match(appJs, /function isMobilePhotoSourceLayout\(/);
+    assert.match(appJs, /max-width:\s*768px/);
+    assert.match(appJs, /activateUpload = \(\) => openPhotoSourceChooser\(\)/);
+  });
+});

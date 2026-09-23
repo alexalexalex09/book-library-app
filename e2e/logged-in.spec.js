@@ -34,9 +34,12 @@ test.describe("logged-in smoke", () => {
     await expect(page.locator("#loggedInView")).toBeVisible({ timeout: 30_000 });
   });
 
-  test("scan view exposes dropzone and file input", async ({ page }) => {
+  test("scan view opens library file picker on desktop without photo chooser", async ({ page }) => {
     await expect(page.locator("#canvasDropzone")).toBeVisible();
     await expect(page.locator("#imageUpload")).toBeAttached();
+    await expect(page.locator("#imageCapture")).toBeAttached();
+    await expect(page.locator("#imageUpload")).not.toHaveAttribute("capture");
+    await expect(page.locator("#imageCapture")).toHaveAttribute("capture", "environment");
     await expect(page.locator("#placeholderText")).toBeVisible();
 
     const [fileChooser] = await Promise.all([
@@ -44,6 +47,7 @@ test.describe("logged-in smoke", () => {
       page.locator(".dropzone-cta-btn").click(),
     ]);
     expect(fileChooser.isMultiple()).toBeTruthy();
+    await expect(page.locator("#photoSourceModal")).toHaveClass(/hidden-view/);
   });
 
   test("library map navigation works", async ({ page }) => {
@@ -130,6 +134,30 @@ test.describe("logged-in mobile library sheet", () => {
     await header.click();
     await expect(content).toHaveClass(/collapsed/);
     await expect(header).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("mobile scan view offers camera or library photo chooser", async ({ page }) => {
+    await expect(page.locator("#canvasDropzone")).toBeVisible();
+    await expect(page.locator("#placeholderText")).toBeVisible();
+
+    await page.locator(".dropzone-cta-btn").click();
+    await expect(page.locator("#photoSourceModal")).toBeVisible();
+    await expect(page.locator("#photoSourceCameraBtn")).toBeVisible();
+    await expect(page.locator("#photoSourceLibraryBtn")).toBeVisible();
+
+    const [libraryChooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.locator("#photoSourceLibraryBtn").click(),
+    ]);
+    expect(libraryChooser.isMultiple()).toBeTruthy();
+
+    await page.locator("#placeholderText").click();
+    await expect(page.locator("#photoSourceModal")).toBeVisible();
+    const [cameraChooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.locator("#photoSourceCameraBtn").click(),
+    ]);
+    expect(cameraChooser.isMultiple()).toBeFalsy();
   });
 });
 
