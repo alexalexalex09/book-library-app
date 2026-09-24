@@ -1817,7 +1817,7 @@ saveShelfBtn?.addEventListener("click", () => {
 });
 
 document.getElementById("hideShelfPhotoBtn")?.addEventListener("click", () => {
-  setShelfPhotoCollapsed(true);
+  setShelfPhotoCollapsed(!shelfPhotoCollapsed);
 });
 
 // Canvas Viewport & Editing State
@@ -1829,6 +1829,11 @@ let canvasState = {
   startX: 0,
   startY: 0,
 };
+
+/** When true, canvas drag draws a new spine rectangle instead of pan/edit. */
+let addSpineDrawMode = false;
+/** @type {{ startX: number, startY: number, endX: number, endY: number } | null} */
+let addSpineDraft = null;
 
 const CANVAS_ZOOM_MIN = 1;
 const CANVAS_ZOOM_MAX = 4;
@@ -1873,12 +1878,12 @@ function setShelfPhotoCollapsed(collapsed) {
 function syncShelfPhotoToggleButtons() {
   const collapsed = shelfPhotoCollapsed;
   const label = collapsed ? "Show shelf photo" : "Hide shelf photo";
-  document.querySelectorAll(".maximize-spines-btn").forEach((btn) => {
-    btn.textContent = label;
-    btn.title = label;
-    btn.setAttribute("aria-label", label);
-    btn.setAttribute("aria-expanded", String(!collapsed));
-  });
+  const btn = document.getElementById("hideShelfPhotoBtn");
+  if (!btn) return;
+  btn.textContent = label;
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
+  btn.setAttribute("aria-expanded", String(!collapsed));
 }
 
 /**
@@ -2074,6 +2079,30 @@ function isPointInNormalizedPolygon(pt, polygon) {
   return inside;
 }
 
+function setAddSpineDrawMode(enabled) {
+  addSpineDrawMode = Boolean(enabled);
+  addSpineDraft = null;
+  if (addSpineDrawMode) {
+    activeEditingSpineIndex = null;
+    activeControlPoint = null;
+    canvasState.isDragging = false;
+  }
+  if (shelfCanvas) {
+    shelfCanvas.classList.toggle("is-adding-spine", addSpineDrawMode);
+    shelfCanvas.style.cursor = addSpineDrawMode ? "crosshair" : "";
+  }
+  document.querySelectorAll(".add-spine-btn").forEach((btn) => {
+    btn.classList.toggle("is-active", addSpineDrawMode);
+    btn.setAttribute("aria-pressed", addSpineDrawMode ? "true" : "false");
+    btn.textContent = addSpineDrawMode ? "Cancel add" : "Add spine";
+  });
+  redrawCanvasOverlays(null);
+}
+
+function clampNorm(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
 function updateSpineBox(spine) {
   if (!spine.polygon || spine.polygon.length === 0) return;
   const xs = spine.polygon.map((p) => p.x);
@@ -2084,6 +2113,54 @@ function updateSpineBox(spine) {
     minY: Math.max(0, Math.min(1, Math.min(...ys))),
     maxY: Math.max(0, Math.min(1, Math.max(...ys))),
   };
+}
+
+function createSpineFromNormalizedRect(minX, minY, maxX, maxY) {
+  const box = {
+    minX: clampNorm(Math.min(minX, maxX)),
+    maxX: clampNorm(Math.max(minX, maxX)),
+    minY: clampNorm(Math.min(minY, maxY)),
+    maxY: clampNorm(Math.max(minY, maxY)),
+  };
+  return {
+    title: "",
+    author: "",
+    score: 1,
+    confirmed: false,
+    box,
+    polygon: [
+      { x: box.minX, y: box.minY },
+      { x: box.maxX, y: box.minY },
+      { x: box.maxX, y: box.maxY },
+      { x: box.minX, y: box.maxY },
+    ],
+  };
+}
+
+function finishAddSpineFromDraft() {
+  if (!addSpineDraft) {
+    setAddSpineDrawMode(false);
+    return;
+  }
+  const { startX, startY, endX, endY } = addSpineDraft;
+  const width = Math.abs(endX - startX);
+  const height = Math.abs(endY - startY);
+  addSpineDraft = null;
+  if (width < 0.01 || height < 0.01) {
+    setAddSpineDrawMode(false);
+    showToast("Drag a larger rectangle to add a spine.", "info");
+    return;
+  }
+  const spine = createSpineFromNormalizedRect(startX, startY, endX, endY);
+  currentDetectedSpines.push(spine);
+  const newIndex = currentDetectedSpines.length - 1;
+  setAddSpineDrawMode(false);
+  activeEditingSpineIndex = newIndex;
+  renderDetectedSpines({ preserveScroll: true, focusSpineIndex: newIndex });
+  if (currentLoadedImage && shelfPhotoCollapsed) {
+    setShelfPhotoCollapsed(false);
+  }
+  showToast("Spine added. Enter a title or match it.", "success");
 }
 
 function redrawCanvasOverlays(highlightedIndex = null) {
@@ -2161,6 +2238,24 @@ function redrawCanvasOverlays(highlightedIndex = null) {
     }
   });
 
+  if (addSpineDraft) {
+    const x =
+      Math.min(addSpineDraft.startX, addSpineDraft.endX) * shelfCanvas.width;
+    const y =
+      Math.min(addSpineDraft.startY, addSpineDraft.endY) * shelfCanvas.height;
+    const w =
+      Math.abs(addSpineDraft.endX - addSpineDraft.startX) * shelfCanvas.width;
+    const h =
+      Math.abs(addSpineDraft.endY - addSpineDraft.startY) * shelfCanvas.height;
+    ctx.fillStyle = "rgba(111, 135, 83, 0.2)";
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = FOLIO_COLORS.success;
+    ctx.lineWidth = (baseThickness * 1.5) / canvasState.scale;
+    ctx.setLineDash([8 / canvasState.scale, 6 / canvasState.scale]);
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+  }
+
   ctx.restore();
 }
 
@@ -2174,6 +2269,18 @@ resetZoomBtn?.addEventListener("click", () => {
 
 const startCanvasDrag = (e) => {
   const norm = getNormalizedCanvasCoords(e);
+
+  if (addSpineDrawMode) {
+    if (e.touches) e.preventDefault();
+    activeControlPoint = null;
+    canvasState.isDragging = false;
+    activeEditingSpineIndex = null;
+    const x = clampNorm(norm.x);
+    const y = clampNorm(norm.y);
+    addSpineDraft = { startX: x, startY: y, endX: x, endY: y };
+    redrawCanvasOverlays(null);
+    return;
+  }
 
   if (activeEditingSpineIndex !== null) {
     const spine = currentDetectedSpines[activeEditingSpineIndex];
@@ -2212,8 +2319,8 @@ const startCanvasDrag = (e) => {
     activeEditingSpineIndex = clickedSpineIdx;
     redrawCanvasOverlays(null);
 
-    const sidebarCards = document.querySelectorAll("#pendingContainer > div");
-    sidebarCards[clickedSpineIdx + 1]?.scrollIntoView({
+    const sidebarCards = document.querySelectorAll("#pendingContainer .spine-card");
+    sidebarCards[clickedSpineIdx]?.scrollIntoView({
       behavior: "smooth",
       block: "nearest",
     });
@@ -2233,6 +2340,15 @@ const startCanvasDrag = (e) => {
 };
 
 const moveCanvasDrag = (e) => {
+  if (addSpineDrawMode && addSpineDraft) {
+    if (e.touches) e.preventDefault();
+    const norm = getNormalizedCanvasCoords(e);
+    addSpineDraft.endX = clampNorm(norm.x);
+    addSpineDraft.endY = clampNorm(norm.y);
+    redrawCanvasOverlays(null);
+    return;
+  }
+
   if (activeControlPoint) {
     if (e.touches) e.preventDefault();
     const norm = getNormalizedCanvasCoords(e);
@@ -2262,6 +2378,10 @@ const moveCanvasDrag = (e) => {
 };
 
 const stopCanvasDrag = () => {
+  if (addSpineDrawMode && addSpineDraft) {
+    finishAddSpineFromDraft();
+    return;
+  }
   activeControlPoint = null;
   canvasState.isDragging = false;
 };
@@ -2274,6 +2394,12 @@ window.addEventListener("mousemove", moveCanvasDrag);
 window.addEventListener("touchmove", moveCanvasDrag, { passive: false });
 window.addEventListener("mouseup", stopCanvasDrag);
 window.addEventListener("touchend", stopCanvasDrag);
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && addSpineDrawMode) {
+    e.preventDefault();
+    setAddSpineDrawMode(false);
+  }
+});
 
 function beginScanForFile(file) {
   if (!file) return;
@@ -2283,6 +2409,7 @@ function beginScanForFile(file) {
   currentUploadedImageHash = null;
   pendingSavedShelfId = null;
   currentDismissedTitles = [];
+  setAddSpineDrawMode(false);
   placeholderText.style.display = "none";
   shelfCanvas.style.display = "block";
   setCanvasChromeVisible(true);
@@ -2505,6 +2632,8 @@ updateScanSteps();
 
 function renderDetectedSpines(options = {}) {
   const preserveScroll = Boolean(options.preserveScroll);
+  const focusSpineIndex =
+    Number.isInteger(options.focusSpineIndex) ? options.focusSpineIndex : null;
   const existingScroll = document.querySelector("#pendingContainer .spines-scroll");
   const savedScrollTop = preserveScroll && existingScroll ? existingScroll.scrollTop : 0;
   const renderConfirmedBookRow = (containerEl, spineData) => {
@@ -2549,11 +2678,6 @@ function renderDetectedSpines(options = {}) {
   updateScanSteps();
   setShelfPhotoCollapsed(shelfPhotoCollapsed);
 
-  if (currentDetectedSpines.length === 0) {
-    container.innerHTML = "<p class='empty-state'>No spines detected.</p>";
-    return;
-  }
-
   redrawCanvasOverlays(null);
 
   // Toolbar
@@ -2563,16 +2687,28 @@ function renderDetectedSpines(options = {}) {
   const confirmedCount = currentDetectedSpines.filter((s) => s.confirmed).length;
   const titleEl = document.createElement("strong");
   titleEl.className = "spines-title";
-  titleEl.textContent = `Matched ${confirmedCount} / ${currentDetectedSpines.length}`;
+  titleEl.textContent =
+    currentDetectedSpines.length === 0
+      ? "No spines yet"
+      : `Matched ${confirmedCount} / ${currentDetectedSpines.length}`;
 
   const batchActions = document.createElement("div");
   batchActions.className = "spines-batch-actions";
 
-  const shelfPhotoBtn = document.createElement("button");
-  shelfPhotoBtn.className = "auth-btn secondary-btn maximize-spines-btn";
-  shelfPhotoBtn.type = "button";
-  shelfPhotoBtn.onclick = () => {
-    setShelfPhotoCollapsed(!shelfPhotoCollapsed);
+  const addSpineBtn = document.createElement("button");
+  addSpineBtn.textContent = addSpineDrawMode ? "Cancel add" : "Add spine";
+  addSpineBtn.className = "auth-btn secondary-btn spine-batch-btn add-spine-btn";
+  addSpineBtn.type = "button";
+  addSpineBtn.setAttribute("aria-label", "Draw a rectangle on the shelf photo to add a spine");
+  addSpineBtn.setAttribute("aria-pressed", addSpineDrawMode ? "true" : "false");
+  if (addSpineDrawMode) addSpineBtn.classList.add("is-active");
+  addSpineBtn.onclick = () => {
+    if (!currentLoadedImage) {
+      showToast("Load a shelf photo before adding a spine.", "info");
+      return;
+    }
+    if (shelfPhotoCollapsed) setShelfPhotoCollapsed(false);
+    setAddSpineDrawMode(!addSpineDrawMode);
   };
 
   const searchAllBtn = document.createElement("button");
@@ -2580,12 +2716,14 @@ function renderDetectedSpines(options = {}) {
   searchAllBtn.className = "auth-btn primary-btn spine-batch-btn";
   searchAllBtn.type = "button";
   searchAllBtn.setAttribute("aria-label", "Match remaining spines in Google Books");
+  searchAllBtn.disabled = currentDetectedSpines.length === 0;
 
   const skipUnlabeledBtn = document.createElement("button");
   skipUnlabeledBtn.textContent = "Skip Unlabeled";
   skipUnlabeledBtn.className = "auth-btn secondary-btn spine-batch-btn";
   skipUnlabeledBtn.type = "button";
   skipUnlabeledBtn.setAttribute("aria-label", "Remove unlabeled spines from the list");
+  skipUnlabeledBtn.disabled = currentDetectedSpines.length === 0;
 
   searchAllBtn.onclick = async () => {
     if (!requireOnline("Book search")) return;
@@ -2617,14 +2755,22 @@ function renderDetectedSpines(options = {}) {
     renderDetectedSpines();
   };
 
+  batchActions.appendChild(addSpineBtn);
   batchActions.appendChild(searchAllBtn);
   batchActions.appendChild(skipUnlabeledBtn);
-  batchActions.appendChild(shelfPhotoBtn);
 
   header.appendChild(titleEl);
   header.appendChild(batchActions);
   container.appendChild(header);
   syncShelfPhotoToggleButtons();
+
+  if (currentDetectedSpines.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "No spines detected. Use Add spine to draw one on the photo.";
+    container.appendChild(empty);
+    return;
+  }
 
   const spinesScroll = document.createElement("div");
   spinesScroll.className = "spines-scroll";
@@ -2805,6 +2951,17 @@ function renderDetectedSpines(options = {}) {
   });
 
   if (preserveScroll) spinesScroll.scrollTop = savedScrollTop;
+
+  if (focusSpineIndex !== null && focusSpineIndex >= 0) {
+    const card = spinesScroll.querySelectorAll(".spine-card")[focusSpineIndex];
+    const input = card?.querySelector(".spine-card-input");
+    card?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    requestAnimationFrame(() => {
+      input?.focus();
+      input?.select?.();
+    });
+    redrawCanvasOverlays(focusSpineIndex);
+  }
 }
 
 // ==========================================

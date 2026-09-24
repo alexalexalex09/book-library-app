@@ -1730,6 +1730,17 @@ input:focus-visible,
   display: flex;
   gap: 6px;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.spine-batch-btn.add-spine-btn.is-active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(139, 58, 47, 0.08);
+}
+
+#shelfCanvas.is-adding-spine {
+  cursor: crosshair;
 }
 
 .spine-icon-btn {
@@ -2096,6 +2107,7 @@ input:focus-visible,
   cursor: grab;
   user-select: none;
   transition: box-shadow 0.2s;
+  font-size: 3rem;
 }
 
 .shelf-card-header {
@@ -2108,7 +2120,6 @@ input:focus-visible,
 
 .shelf-card-name {
   font-weight: 600;
-  font-size: 0.95rem;
   color: #3f3f46;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2444,7 +2455,7 @@ input:focus-visible,
 
   .map-hint {
     top: auto;
-    bottom: calc(72px + 16px + env(safe-area-inset-bottom, 0px));
+    bottom: 16px;
     border-radius: 16px;
     white-space: normal;
     text-align: left;
@@ -2522,18 +2533,23 @@ input:focus-visible,
     top: 12px;
   }
 
-  /* Mobile Library Sidebar Drawer — above bottom .app-nav (z-index 1000) */
-#libraryView .sidebar {
-    position: fixed; /* Locks the drawer to the screen, not the page */
+  /* Mobile Library Sidebar Drawer — inside contained #libraryView */
+  #libraryView .sidebar {
+    position: absolute;
     top: auto;
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    bottom: 12px;
     right: 12px;
     left: 12px;
     width: auto;
+    max-height: calc(100% - 24px);
     border-radius: 16px;
     z-index: 1100;
     box-shadow: 0 -4px 15px rgba(0, 0, 0, 0.1);
     pointer-events: auto;
+  }
+
+  .map-hint {
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   }
   
   .sidebar-header,
@@ -3479,11 +3495,21 @@ body.guest-auth-open {
 .scan-footer-row {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  border-top: 1px solid var(--border);
-  margin-top: 12px;
-  padding-top: 12px;
+  position: sticky;
+  top: var(--app-chrome-top, 72px);
+  z-index: 40;
+  margin: 0;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+  box-shadow: 0 8px 16px -12px rgba(44, 31, 14, 0.35);
+}
+
+#uploadView[data-scan-stage="review"] .scan-footer-row {
+  justify-content: space-between;
 }
 
 .crop-canvas-btn {
@@ -3812,5 +3838,9 @@ body.guest-auth-open {
     padding: 16px;
     width: 100%;
     max-width: 100%;
+  }
+
+  .scan-footer-row {
+    top: 0;
   }
 }

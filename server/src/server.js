@@ -15,6 +15,10 @@ const {
   normalizeBoxFromInference,
 } = require("./image-geometry");
 const {
+  assembleSpineTitle,
+  angleFromVertices,
+} = require("./ocr-reading-order");
+const {
   ALLOWED_IMAGE_TYPES,
   MAX_IMAGE_DIMENSION,
   MAX_IMAGE_PIXELS,
@@ -430,6 +434,7 @@ function mapOcrWordsToSpines(spines, ocrWords) {
           text: word.text,
           y: wordCenter.y,
           x: wordCenter.x,
+          angleDeg: word.angleDeg,
         });
         break;
       }
@@ -437,14 +442,7 @@ function mapOcrWordsToSpines(spines, ocrWords) {
   });
 
   return spineBuckets.map((spine) => {
-    const isHorizontal =
-      spine.box.maxX - spine.box.minX > spine.box.maxY - spine.box.minY;
-    spine.matchedWords.sort((a, b) => (isHorizontal ? a.x - b.x : a.y - b.y));
-
-    const fullTitle = spine.matchedWords
-      .map((w) => w.text)
-      .join(" ")
-      .trim();
+    const fullTitle = assembleSpineTitle(spine.matchedWords, spine.box);
 
     return {
       title: fullTitle || "Unlabeled Spine",
@@ -468,6 +466,7 @@ async function extractTextWithCloudVision(imageBuffer, imgWidth, imgHeight) {
     const vertices = annotation.boundingPoly.vertices;
     const xs = vertices.map((v) => (v.x || 0) / imgWidth);
     const ys = vertices.map((v) => (v.y || 0) / imgHeight);
+    const angleDeg = angleFromVertices(vertices);
 
     return {
       text: annotation.description,
@@ -477,6 +476,7 @@ async function extractTextWithCloudVision(imageBuffer, imgWidth, imgHeight) {
         minY: Math.max(0, Math.min(1, Math.min(...ys))),
         maxY: Math.max(0, Math.min(1, Math.max(...ys))),
       },
+      angleDeg,
     };
   });
 }
