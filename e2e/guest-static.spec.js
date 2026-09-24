@@ -42,6 +42,46 @@ test.describe("guest and static pages", () => {
     await expect(page.locator("body")).toBeVisible();
     const title = await page.title();
     expect(title.length).toBeGreaterThan(0);
+    // Nested /share/:token URLs must still load root assets (not /share/js/...).
+    await expect(page.locator('script[src^="/js/app.js"]')).toHaveCount(1);
+    await expect(page.locator('link[href^="/css/style.css"]')).toHaveCount(1);
+  });
+
+  test("share page treats shelf names as text, not HTML", async ({ page }) => {
+    const xssName = `<img src="x" alt="xss" onerror="window.__shareXss=1">`;
+    await page.route(/\/api\/share\//, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          shelves: [
+            {
+              id: 99,
+              name: xssName,
+              map_x: 40,
+              map_y: 40,
+              map_width: 280,
+            },
+          ],
+          books: [
+            {
+              id: 1,
+              shelf_id: 99,
+              title: "Safe Title",
+              author: "Author",
+            },
+          ],
+        }),
+      });
+    });
+
+    await page.goto("/share/xss-probe-token");
+    const nameEl = page.locator("#mapViewport .shelf-card-name");
+    await expect(nameEl).toHaveText(xssName, { timeout: 15_000 });
+    await expect(nameEl.locator("img")).toHaveCount(0);
+    const fired = await page.evaluate(() => window.__shareXss);
+    expect(fired).toBeUndefined();
+    await expect(page.locator("#mapViewport .empty-state")).toContainText("1 books");
   });
 
   test("photo upload separates camera capture from library picker", async ({ page }) => {

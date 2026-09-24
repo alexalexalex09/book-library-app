@@ -25,7 +25,9 @@ let usageState = {
   ocr: null,
   books: null,
 };
-let isPublicShareView = false;
+// Set before auth listeners run so a logged-in visitor on /share/:token
+// does not load their private library onto the public share page.
+let isPublicShareView = /^\/share\/[^/]+$/.test(window.location.pathname);
 let bookLookupTarget = null;
 let customCoverTarget = null;
 let bookSettingsTarget = null;
@@ -844,14 +846,24 @@ async function maybeRenderPublicShare() {
       card.style.left = `${shelf.map_x ?? index * 340 + 50}px`;
       card.style.top = `${shelf.map_y ?? 50}px`;
       card.style.width = `${shelfDisplayWidth(shelf)}px`;
-      card.innerHTML = `
-        <div class="shelf-card-header">
-          <span class="shelf-card-name">${shelf.name || "Untitled Shelf"}</span>
-        </div>
-        <div class="shelf-img-wrap">
-          <div class="empty-state">Read-only shared shelf (${(booksByShelf.get(String(shelf.id)) || []).length} books)</div>
-        </div>
-      `;
+
+      const header = document.createElement("div");
+      header.className = "shelf-card-header";
+      const nameEl = document.createElement("span");
+      nameEl.className = "shelf-card-name";
+      nameEl.textContent = shelf.name || "Untitled Shelf";
+      header.appendChild(nameEl);
+
+      const imgWrap = document.createElement("div");
+      imgWrap.className = "shelf-img-wrap";
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      const bookCount = (booksByShelf.get(String(shelf.id)) || []).length;
+      empty.textContent = `Read-only shared shelf (${bookCount} books)`;
+      imgWrap.appendChild(empty);
+
+      card.appendChild(header);
+      card.appendChild(imgWrap);
       viewport.appendChild(card);
     });
     updateMapEmptyState((data.shelves || []).length);
@@ -1779,12 +1791,18 @@ function hideLoadingOverlay() {
   if (overlay) overlay.style.display = "none";
 }
 
-window.addEventListener("DOMContentLoaded", () => {
+function bootClientChrome() {
   setOfflineMode(offlineMode);
   maybeRenderPublicShare().then((active) => {
-    isPublicShareView = active;
+    if (active) isPublicShareView = true;
   });
-});
+}
+
+if (document.readyState === "loading") {
+  window.addEventListener("DOMContentLoaded", bootClientChrome);
+} else {
+  bootClientChrome();
+}
 
 // ==========================================
 // 5. UPLOAD & SCANNING LOGIC (CANVAS)
