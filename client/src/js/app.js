@@ -31,6 +31,8 @@ let customCoverTarget = null;
 let bookSettingsTarget = null;
 let currentDismissedTitles = [];
 let lastShelvesSnapshot = [];
+let loggedInDefaultViewApplied = false;
+let userPickedAppView = false;
 let offlineMode = !navigator.onLine;
 const offlineStore = window.HiLibraryOffline || null;
 
@@ -1314,22 +1316,31 @@ const authTermsCheckbox = document.getElementById("authTermsCheckbox");
 function setAuthTermsVisible(visible) {
   if (!authTermsRow || !authTermsCheckbox) return;
   authTermsRow.classList.toggle("hidden-element", !visible);
+  // Avoid HTML5 required so the app toast can run on submit.
+  authTermsCheckbox.removeAttribute("required");
   if (!visible) {
     authTermsCheckbox.checked = false;
-    authTermsCheckbox.removeAttribute("required");
+    authTermsCheckbox.removeAttribute("aria-required");
+    authTermsCheckbox.removeAttribute("aria-invalid");
   } else {
-    authTermsCheckbox.setAttribute("required", "true");
+    authTermsCheckbox.setAttribute("aria-required", "true");
   }
 }
 
 function requireAuthTermsAccepted() {
   if (!authTermsCheckbox?.checked) {
     showToast("Please agree to the Terms of Service and Privacy Policy to continue.", "error");
+    authTermsCheckbox?.setAttribute("aria-invalid", "true");
     authTermsCheckbox?.focus();
     return false;
   }
+  authTermsCheckbox.removeAttribute("aria-invalid");
   return true;
 }
+
+authTermsCheckbox?.addEventListener("change", () => {
+  if (authTermsCheckbox.checked) authTermsCheckbox.removeAttribute("aria-invalid");
+});
 
 authTermsRow?.querySelectorAll("a").forEach((link) => {
   link.addEventListener("click", (e) => e.stopPropagation());
@@ -1584,6 +1595,7 @@ async function applyAuthState(session) {
 
     ackSignupIfRecent(currentUser).catch(() => {});
     await Promise.all([refreshBillingState(), loadLibraryData(), loadRooms(), loadLibraryMap()]);
+    applyLoggedInDefaultView();
     updateScanSteps();
     return;
   }
@@ -1602,11 +1614,14 @@ async function applyAuthState(session) {
       document.getElementById("userEmailDisplay").textContent = `${currentUser.email} (offline)`;
       renderBillingNav();
       await Promise.all([loadLibraryData(), loadLibraryMap()]);
+      applyLoggedInDefaultView();
       updateScanSteps();
       return;
     }
   }
 
+  loggedInDefaultViewApplied = false;
+  userPickedAppView = false;
   currentUser = null;
   myRooms = [];
   selectedRoomId = "";
@@ -1650,6 +1665,8 @@ window.addEventListener("hilibrary:rate-limit", (event) => {
 });
 
 document.getElementById("logoutBtn")?.addEventListener("click", async () => {
+  loggedInDefaultViewApplied = false;
+  userPickedAppView = false;
   const userId = currentUser?.id;
   if (offlineStore && userId) {
     await offlineStore.clearUser(userId).catch(() => {});
@@ -1665,27 +1682,35 @@ document.getElementById("logoutBtn")?.addEventListener("click", async () => {
   }
 });
 
+function activateAppView(targetId, { reloadMap = false } = {}) {
+  if (!targetId) return;
+  document.querySelectorAll(".nav-btn[data-target]").forEach((btn) => {
+    btn.classList.toggle("active", btn.getAttribute("data-target") === targetId);
+  });
+  document.querySelectorAll(".view-section").forEach((view) => {
+    const isTarget = view.id === targetId;
+    view.classList.toggle("active-view", isTarget);
+    view.classList.toggle("hidden-view", !isTarget);
+  });
+  if (reloadMap && targetId === "libraryView") loadLibraryMap();
+}
+
+/** First login this page load: open the map when the account already has a shelf. */
+function applyLoggedInDefaultView() {
+  if (loggedInDefaultViewApplied || userPickedAppView) return;
+  loggedInDefaultViewApplied = true;
+  if (lastShelvesSnapshot.length === 0) return;
+  activateAppView("libraryView");
+  // Map fit bails out while the view is hidden, so fit again once it is shown.
+  requestAnimationFrame(() => applyDefaultMapView());
+}
+
 // View Toggling
 document.querySelectorAll(".nav-btn[data-target]").forEach((btn) => {
   btn.addEventListener("click", (e) => {
-    const targetBtn = e.currentTarget;
-
-    document
-      .querySelectorAll(".nav-btn[data-target]")
-      .forEach((b) => b.classList.remove("active"));
-    document.querySelectorAll(".view-section").forEach((v) => {
-      v.classList.remove("active-view");
-      v.classList.add("hidden-view");
-    });
-
-    targetBtn.classList.add("active");
-    const targetId = targetBtn.getAttribute("data-target");
-    if (!targetId) return;
-
-    document.getElementById(targetId).classList.remove("hidden-view");
-    document.getElementById(targetId).classList.add("active-view");
-
-    if (targetId === "libraryView") loadLibraryMap();
+    userPickedAppView = true;
+    const targetId = e.currentTarget.getAttribute("data-target");
+    activateAppView(targetId, { reloadMap: true });
   });
 });
 

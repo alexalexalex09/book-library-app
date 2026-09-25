@@ -35,6 +35,7 @@ test.describe("logged-in smoke", () => {
   });
 
   test("scan view opens library file picker on desktop without photo chooser", async ({ page }) => {
+    await page.locator("#navUploadBtn").click();
     await expect(page.locator("#canvasDropzone")).toBeVisible();
     await expect(page.locator("#imageUpload")).toBeAttached();
     await expect(page.locator("#imageCapture")).toBeAttached();
@@ -137,6 +138,7 @@ test.describe("logged-in mobile library sheet", () => {
   });
 
   test("mobile scan view offers camera or library photo chooser", async ({ page }) => {
+    await page.locator("#navUploadBtn").click();
     await expect(page.locator("#canvasDropzone")).toBeVisible();
     await expect(page.locator("#placeholderText")).toBeVisible();
 

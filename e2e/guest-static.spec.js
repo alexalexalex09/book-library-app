@@ -31,9 +31,12 @@ test.describe("guest and static pages", () => {
     await page.locator("#confirmPasswordInput").fill("password123");
     await page.locator("#authActionBtn").click();
 
-    // Checkbox required — still on signup panel
+    // App toast, not the browser required bubble — still on signup panel
     await expect(page.locator("#authPanel")).toBeVisible();
     await expect(page.locator("#authTermsCheckbox")).not.toBeChecked();
+    await expect(page.locator(".toast-error .toast-message")).toHaveText(
+      /agree to the Terms of Service and Privacy Policy/i,
+    );
   });
 
   test("invalid share token page does not crash", async ({ page }) => {
