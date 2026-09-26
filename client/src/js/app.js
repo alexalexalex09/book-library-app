@@ -1303,6 +1303,10 @@ function closeAccountDelete() {
 
 function openAccountDelete() {
   closeAccountMenu();
+  const detailsModal = document.getElementById("accountDetailsModal");
+  if (detailsModal && !detailsModal.classList.contains("hidden-view")) {
+    closeAccountDetails();
+  }
   if (!currentUser?.id || !requireOnline("Deleting your account")) return;
   const modal = document.getElementById("accountDeleteModal");
   const input = document.getElementById("accountDeleteConfirmInput");

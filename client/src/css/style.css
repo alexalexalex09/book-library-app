@@ -3221,6 +3221,16 @@ body.guest-auth-open {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  font-family: var(--font-sans);
+  font-size: 0.92rem;
+}
+
+.account-menu-btn,
+.account-menu-link {
+  font-family: var(--font-sans);
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.25;
 }
 
 .account-menu-btn {
@@ -3230,8 +3240,6 @@ body.guest-auth-open {
   color: var(--text-muted);
   border-radius: 6px;
   min-height: 36px;
-  font-weight: 600;
-  font-family: var(--font-sans);
   cursor: pointer;
   text-align: left;
   padding: 8px 10px;
@@ -3260,8 +3268,6 @@ a.account-menu-btn {
   border: none;
   background: transparent;
   color: var(--primary);
-  font-size: 0.82rem;
-  font-weight: 700;
   text-decoration: underline;
   padding: 0 2px 4px;
   cursor: pointer;
@@ -3278,6 +3284,26 @@ a.account-menu-btn {
 
 .account-menu-btn-danger:hover {
   background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.account-details-delete {
+  align-self: flex-start;
+  margin: 2px 0 10px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--danger);
+  font-family: var(--font-sans);
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.account-details-delete:hover,
+.account-details-delete:focus-visible {
   color: var(--danger);
 }
 

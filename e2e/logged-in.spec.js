@@ -68,15 +68,18 @@ test.describe("logged-in smoke", () => {
     ).toBeVisible();
     await expect(page.locator("#accountDetailsBtn")).toBeVisible();
     await expect(page.locator("#accountEmailBtn")).toBeVisible();
-    await expect(page.locator("#accountDeleteBtn")).toBeVisible();
+    await expect(page.locator("#accountMenu #accountDeleteBtn")).toHaveCount(0);
     await expect(page.locator("#accountHelpLink")).toBeVisible();
     await expect(page.locator("#accountHelpLink")).toHaveAttribute("href", "/help.html");
+    await expect(page.locator("#accountSupportLink")).toBeVisible();
+    await expect(page.locator("#accountSupportLink")).toHaveAttribute("href", "/support.html");
 
     await page.locator("#accountDetailsBtn").click();
     await expect(page.locator("#accountDetailsModal")).toBeVisible();
     await expect(page.locator("#accountStatsList")).toContainText(/Plan/i);
     await expect(page.locator("#accountStatsList")).toContainText(/Scans remaining/i);
     await expect(page.locator("#accountDetailsStripeBtn")).toBeVisible();
+    await expect(page.locator("#accountDetailsModal #accountDeleteBtn")).toBeVisible();
     await page.locator("#accountDetailsCloseBtn").click();
     await expect(page.locator("#accountDetailsModal")).toHaveClass(/hidden-view/);
 

@@ -114,12 +114,14 @@ test.describe("guest and static pages", () => {
     await expect(page.locator("#photoSourceCancelBtn")).toBeAttached();
   });
 
-  test("account menu includes details, email, and delete", async ({ page }) => {
+  test("account menu includes details, email, help, and support", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("#accountDetailsBtn")).toBeAttached();
     await expect(page.locator("#accountEmailBtn")).toBeAttached();
-    await expect(page.locator("#accountDeleteBtn")).toBeAttached();
+    await expect(page.locator("#accountMenu #accountDeleteBtn")).toHaveCount(0);
+    await expect(page.locator("#accountDetailsModal #accountDeleteBtn")).toBeAttached();
     await expect(page.locator("#accountHelpLink")).toHaveAttribute("href", "/help.html");
+    await expect(page.locator("#accountSupportLink")).toHaveAttribute("href", "/support.html");
     await expect(page.locator("#accountDetailsModal")).toBeAttached();
     await expect(page.locator("#accountEmailModal")).toBeAttached();
     await expect(page.locator("#accountDeleteModal")).toBeAttached();

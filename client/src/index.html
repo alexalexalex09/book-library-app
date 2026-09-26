@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="ShelfMapper">
   
   <!-- CSS Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=41">
+  <link rel="stylesheet" href="css/style.css?v=42">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500;1,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -157,7 +157,7 @@
           <button id="accountEmailBtn" class="account-menu-btn" type="button" role="menuitem">Email address</button>
           <button id="upgradeBtn" class="account-menu-btn" type="button">Start 7-day trial</button>
           <button id="manageBillingBtn" class="account-menu-btn hidden-element" type="button">Manage billing</button>
-          <button id="accountDeleteBtn" class="account-menu-btn account-menu-btn-danger" type="button" role="menuitem">Delete account</button>
+          <a id="accountSupportLink" class="account-menu-btn" role="menuitem" href="/support.html">Support</a>
           <a id="accountHelpLink" class="account-menu-btn" role="menuitem" href="/help.html">Help</a>
           <button id="logoutBtn" class="account-menu-btn" type="button">Logout</button>
         </div>
@@ -579,6 +579,7 @@
       <h2 id="accountDetailsTitle" class="modal-title">Account details</h2>
       <p id="accountDetailsHint" class="modal-message">Plan, usage, and library totals. Change Premium in Stripe.</p>
       <dl id="accountStatsList" class="account-stats"></dl>
+      <button id="accountDeleteBtn" class="account-details-delete" type="button">Delete account</button>
       <div class="modal-actions">
         <button id="accountDetailsCloseBtn" class="auth-btn secondary-btn modal-btn" type="button">Close</button>
         <button id="accountDetailsStripeBtn" class="auth-btn primary-btn modal-btn" type="button">Change plan in Stripe</button>
@@ -624,6 +625,6 @@
   <script src="js/legal.js?v=1"></script>
   <script src="js/prompt-utils.js?v=1"></script>
   <script src="js/api.js"></script>
-  <script src="js/app.js?v=40"></script>
+  <script src="js/app.js?v=41"></script>
 </body>
 </html>
