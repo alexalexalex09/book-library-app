@@ -41,6 +41,7 @@ const FREE_SEARCH_ALL_LIMIT = 5;
 const SEARCH_CONCURRENCY = 3;
 const AUTO_CONFIRM_SCORE = 0.72;
 const SUGGEST_SCORE = 0.45;
+const LOW_DETECTION_SCORE = 0.6;
 const DEFAULT_SHELF_CARD_WIDTH = 300;
 const MIN_SHELF_CARD_WIDTH = 160;
 const BOOK_COVER_PLACEHOLDER =
@@ -292,9 +293,12 @@ function spinesForStorage(spines) {
     confirmed: Boolean(spine.confirmed),
     confirmedTitle: spine.confirmedTitle || null,
     author: spine.author || null,
+    publisher: spine.publisher || null,
+    rawText: spine.rawText || null,
     thumbnail: toHttpsUrl(spine.thumbnail) || null,
     volumeId: spine.volumeId || null,
     isbn: spine.isbn || null,
+    score: Number.isFinite(spine.score) ? spine.score : null,
   }));
 }
 
@@ -327,6 +331,7 @@ function parseBookSearchItems(data) {
     return {
       title: vol.title || "Unknown Title",
       authors: vol.authors ? vol.authors.join(", ") : "Unknown Author",
+      publisher: vol.publisher || null,
       thumbnail: coverUrlFromVolume(vol),
       year: vol.publishedDate ? String(vol.publishedDate).slice(0, 4) : null,
       isbn,
@@ -392,10 +397,29 @@ function isSearchableSpineTitle(title) {
   return Boolean(cleaned) && cleaned !== "unlabeled spine";
 }
 
+function spineNeedsReview(spine) {
+  if (!spine || spine.confirmed) return false;
+  if (!isSearchableSpineTitle(spine.title)) return true;
+  const score = Number(spine.score);
+  return Number.isFinite(score) && score < LOW_DETECTION_SCORE;
+}
+
+function clearCatalogConfirmation(spine) {
+  if (!spine?.confirmed) return;
+  spine.confirmed = false;
+  delete spine.confirmedTitle;
+  delete spine.thumbnail;
+  delete spine.volumeId;
+  delete spine.isbn;
+  delete spine.bestMatch;
+  delete spine.suggestedMatches;
+}
+
 function applyCatalogMatchToSpine(spine, book, titleInput, cardEl, resultsEl) {
   confirmSpineWithBook(spine, book);
   if (titleInput) titleInput.value = book.title;
   cardEl?.classList.add("is-confirmed");
+  cardEl?.classList.remove("needs-review");
   if (resultsEl) {
     resultsEl.innerHTML = "";
     const selectedRow = document.createElement("div");
@@ -415,6 +439,12 @@ function applyCatalogMatchToSpine(spine, book, titleInput, cardEl, resultsEl) {
       selectedAuthor.textContent = `By ${spine.author}`;
       info.appendChild(selectedAuthor);
     }
+    if (spine.publisher) {
+      const selectedPublisher = document.createElement("span");
+      selectedPublisher.className = "book-result-meta";
+      selectedPublisher.textContent = spine.publisher;
+      info.appendChild(selectedPublisher);
+    }
     const badge = document.createElement("span");
     badge.className = "spine-confirmed-badge";
     badge.textContent = "Confirmed";
@@ -425,15 +455,19 @@ function applyCatalogMatchToSpine(spine, book, titleInput, cardEl, resultsEl) {
   showToast(`"${book.title}" confirmed.`, "success");
 }
 
-async function searchBooksByQuery(query, author = "") {
+async function searchBooksByQuery(query, author = "", options = {}) {
   const title = String(query || "").trim();
   const authorText = String(author || "").trim();
-  if (!isSearchableSpineTitle(title) && !authorText) {
+  const publisher = String(options.publisher || "").trim();
+  const rawText = String(options.rawText || "").trim();
+  if (!isSearchableSpineTitle(title) && !authorText && !rawText) {
     return [];
   }
   const params = new URLSearchParams();
   if (title) params.set("q", title);
   if (authorText) params.set("author", authorText);
+  if (publisher) params.set("publisher", publisher);
+  if (rawText) params.set("rawText", rawText);
   const res = await authenticatedFetch(`/api/books?${params.toString()}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -469,6 +503,7 @@ function confirmSpineWithBook(spine, book) {
   spine.confirmed = true;
   spine.confirmedTitle = book.title;
   spine.author = book.authors;
+  if (book.publisher) spine.publisher = book.publisher;
   spine.thumbnail = book.thumbnail;
   spine.volumeId = book.volumeId || null;
   spine.isbn = book.isbn || null;
@@ -500,7 +535,10 @@ async function autoMatchDetectedSpines({
   await mapPool(targets, SEARCH_CONCURRENCY, async (spine) => {
     if (hitLimit) return;
     try {
-      const books = await searchBooksByQuery(spine.title, spine.author || "");
+      const books = await searchBooksByQuery(spine.title, spine.author || "", {
+        publisher: spine.publisher || "",
+        rawText: spine.rawText || "",
+      });
       const best = books[0];
       if (!best) return;
       const score = Number.isFinite(best.matchScore) ? best.matchScore : 0;
@@ -2205,12 +2243,19 @@ function redrawCanvasOverlays(highlightedIndex = null) {
   currentDetectedSpines.forEach((spine, index) => {
     const isSelected = index === activeEditingSpineIndex;
     const isHighlighted = isSelected || index === highlightedIndex;
+    const needsReview = spineNeedsReview(spine);
     const strokeColor = isSelected
       ? FOLIO_COLORS.success
       : isHighlighted
         ? FOLIO_COLORS.warning
-        : FOLIO_COLORS.primary;
-    const fillColor = isHighlighted ? "rgba(139, 58, 47, 0.24)" : null;
+        : needsReview
+          ? FOLIO_COLORS.warning
+          : FOLIO_COLORS.primary;
+    const fillColor = isHighlighted
+      ? "rgba(139, 58, 47, 0.24)"
+      : needsReview
+        ? "rgba(157, 113, 56, 0.18)"
+        : null;
     const lineWidth =
       (isHighlighted ? baseThickness * 2 : baseThickness) / canvasState.scale;
 
@@ -2686,6 +2731,13 @@ function renderDetectedSpines(options = {}) {
       info.appendChild(selectedAuthor);
     }
 
+    if (spineData.publisher) {
+      const selectedPublisher = document.createElement("span");
+      selectedPublisher.className = "book-result-meta";
+      selectedPublisher.textContent = spineData.publisher;
+      info.appendChild(selectedPublisher);
+    }
+
     const badge = document.createElement("span");
     badge.className = "spine-confirmed-badge";
     badge.textContent = "Confirmed";
@@ -2842,6 +2894,9 @@ function renderDetectedSpines(options = {}) {
     const cardContent = document.createElement("div");
     cardContent.className = "spine-card-content";
 
+    const needsReview = spineNeedsReview(spine);
+    if (needsReview) div.classList.add("needs-review");
+
     const inputRow = document.createElement("div");
     inputRow.className = "spine-input-row";
 
@@ -2852,19 +2907,19 @@ function renderDetectedSpines(options = {}) {
 
     const titleInput = document.createElement("input");
     titleInput.type = "text";
-    titleInput.value = spine.title;
+    titleInput.value = spine.title || "";
     titleInput.className = "auth-input spine-card-input";
+    titleInput.placeholder = "Title";
     titleInput.setAttribute("aria-label", `Spine ${index + 1} title`);
 
     titleInput.addEventListener("input", (e) => {
       spine.title = e.target.value;
       if (spine.confirmed && spine.title !== spine.confirmedTitle) {
-        spine.confirmed = false;
-        delete spine.confirmedTitle;
-        delete spine.author;
-        delete spine.thumbnail;
+        clearCatalogConfirmation(spine);
         div.classList.remove("is-confirmed");
       }
+      div.classList.toggle("needs-review", spineNeedsReview(spine));
+      redrawCanvasOverlays(activeEditingSpineIndex);
     });
 
     titleInput.addEventListener("focus", highlight);
@@ -2878,6 +2933,66 @@ function renderDetectedSpines(options = {}) {
 
     inputRow.appendChild(numberBadge);
     inputRow.appendChild(titleInput);
+
+    if (needsReview) {
+      const reviewBadge = document.createElement("span");
+      reviewBadge.className = "spine-review-badge";
+      reviewBadge.textContent = "Check this";
+      inputRow.appendChild(reviewBadge);
+    }
+
+    const metaRow = document.createElement("div");
+    metaRow.className = "spine-meta-row";
+
+    const authorInput = document.createElement("input");
+    authorInput.type = "text";
+    authorInput.value = spine.author || "";
+    authorInput.className = "auth-input spine-meta-input";
+    authorInput.placeholder = "Author";
+    authorInput.setAttribute("aria-label", `Spine ${index + 1} author`);
+    authorInput.addEventListener("input", (e) => {
+      spine.author = e.target.value;
+      clearCatalogConfirmation(spine);
+      div.classList.remove("is-confirmed");
+      div.classList.toggle("needs-review", spineNeedsReview(spine));
+      redrawCanvasOverlays(activeEditingSpineIndex);
+    });
+    authorInput.addEventListener("focus", highlight);
+    authorInput.addEventListener("blur", unhighlight);
+
+    const publisherInput = document.createElement("input");
+    publisherInput.type = "text";
+    publisherInput.value = spine.publisher || "";
+    publisherInput.className = "auth-input spine-meta-input";
+    publisherInput.placeholder = "Publisher";
+    publisherInput.setAttribute("aria-label", `Spine ${index + 1} publisher`);
+    publisherInput.addEventListener("input", (e) => {
+      spine.publisher = e.target.value;
+      clearCatalogConfirmation(spine);
+      div.classList.remove("is-confirmed");
+      div.classList.toggle("needs-review", spineNeedsReview(spine));
+      redrawCanvasOverlays(activeEditingSpineIndex);
+    });
+    publisherInput.addEventListener("focus", highlight);
+    publisherInput.addEventListener("blur", unhighlight);
+
+    metaRow.appendChild(authorInput);
+    metaRow.appendChild(publisherInput);
+
+    const normalizedTitle = String(spine.title || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    const normalizedRaw = String(spine.rawText || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    let rawEvidence = null;
+    if (normalizedRaw && normalizedRaw !== normalizedTitle) {
+      rawEvidence = document.createElement("p");
+      rawEvidence.className = "spine-raw-text";
+      rawEvidence.textContent = `OCR: ${spine.rawText}`;
+    }
 
     const actionRow = document.createElement("div");
     actionRow.className = "spine-actions";
@@ -2907,6 +3022,8 @@ function renderDetectedSpines(options = {}) {
           div,
           searchResults,
         );
+        if (authorInput) authorInput.value = spine.author || "";
+        if (publisherInput) publisherInput.value = spine.publisher || "";
         renderDetectedSpines({ preserveScroll: true });
       };
       actionRow.appendChild(useBestBtn);
@@ -2946,12 +3063,18 @@ function renderDetectedSpines(options = {}) {
       try {
         const books = await searchBooksByQuery(
           titleInput.value,
-          spine.author || "",
+          authorInput.value || spine.author || "",
+          {
+            publisher: publisherInput.value || spine.publisher || "",
+            rawText: spine.rawText || "",
+          },
         );
         renderBookSearchCards(searchResults, books, {
           confirmLabel: "Use this book",
           onConfirm: (book) => {
             applyCatalogMatchToSpine(spine, book, titleInput, div, searchResults);
+            authorInput.value = spine.author || "";
+            publisherInput.value = spine.publisher || "";
           },
         });
       } catch (err) {
@@ -2967,6 +3090,8 @@ function renderDetectedSpines(options = {}) {
     };
 
     cardContent.appendChild(inputRow);
+    cardContent.appendChild(metaRow);
+    if (rawEvidence) cardContent.appendChild(rawEvidence);
     cardContent.appendChild(actionRow);
     renderConfirmedBookRow(searchResults, spine);
     cardContent.appendChild(searchResults);

@@ -19,6 +19,11 @@ const {
   angleFromVertices,
 } = require("./ocr-reading-order");
 const {
+  buildRefineSpinePayload,
+  buildRefineSpinePrompt,
+  spinesForClientResponse,
+} = require("./spine-ai-refine");
+const {
   ALLOWED_IMAGE_TYPES,
   MAX_IMAGE_DIMENSION,
   MAX_IMAGE_PIXELS,
@@ -443,13 +448,20 @@ function mapOcrWordsToSpines(spines, ocrWords) {
 
   return spineBuckets.map((spine) => {
     const fullTitle = assembleSpineTitle(spine.matchedWords, spine.box);
+    const rawText = spine.matchedWords
+      .map((w) => w.text)
+      .join(" ")
+      .trim();
 
     return {
       title: fullTitle || "Unlabeled Spine",
       author: "",
+      publisher: "",
       score: spine.confidence,
       box: spine.box,
       polygon: spine.polygon,
+      rawText,
+      matchedWords: spine.matchedWords,
     };
   });
 }
@@ -773,26 +785,11 @@ async function refineSpinesWithAI(spines) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.warn("⚠️ GEMINI_API_KEY missing. Skipping AI spine refinement.");
-    return spines;
+    return spinesForClientResponse(spines, null);
   }
 
-  // Build a lightweight batch prompt of raw OCR text for all detected spines
-  const spinePayload = spines.map((s, idx) => ({
-    id: idx,
-    rawText: s.matchedWords?.map((w) => w.text).join(" ") || s.title,
-  }));
-
-  const prompt = `You are an expert librarian AI parsing messy OCR text from book spines.
-For each item, infer the correct book title, author, and publisher (if visible).
-Fix typos, handle vertical text misordering, ignore price tags/logos, and return ONLY a JSON array.
-
-Input:
-${JSON.stringify(spinePayload, null, 2)}
-
-Output format JSON array:
-[
-  { "id": 0, "title": "Clean Title", "author": "Author Name", "publisher": "Publisher Name" }
-]`;
+  const spinePayload = buildRefineSpinePayload(spines);
+  const prompt = buildRefineSpinePrompt(spinePayload);
 
   try {
     const url =
@@ -829,22 +826,10 @@ Output format JSON array:
       ? content
       : content.spines || content.items || [];
 
-    // Merge AI-cleaned results back into the spine objects
-    return spines.map((spine, idx) => {
-      const aiMatch = Array.isArray(parsedList)
-        ? parsedList.find((item) => item.id === idx)
-        : null;
-
-      return {
-        ...spine,
-        title: aiMatch?.title || spine.title,
-        author: aiMatch?.author || "",
-        publisher: aiMatch?.publisher || "",
-      };
-    });
+    return spinesForClientResponse(spines, parsedList);
   } catch (err) {
     console.error("AI spine refinement error (Gemini):", err);
-    return spines; // Fallback to raw OCR titles on error
+    return spinesForClientResponse(spines, null);
   }
 }
 

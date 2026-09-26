@@ -70,13 +70,10 @@ Notification modes (persisted in `admin_settings`):
 | `immediate` | Email on signup ack (first session within 48h) | Email on ticket create / user reply |
 | `daily` | Signup digest via cron | Included in ops digest |
 
-Mail env (Render API service):
+Outbound notification email is disabled. Signup history and the support queue stay in this console.
 
 | Variable | Purpose |
 |---|---|
-| `RESEND_API_KEY` | Required to send |
-| `MAIL_FROM` | From address (Resend-verified domain) |
-| `SIGNUP_NOTIFY_TO` | Recipients (defaults to `ADMIN_EMAILS`) |
 | `CRON_SECRET` | Protects internal digest endpoints |
 | `GEMINI_API_KEY` | Optional; AI suggested replies on support tickets |
 

@@ -1844,6 +1844,44 @@ input:focus-visible,
   flex: 1;
 }
 
+.spine-meta-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.spine-meta-input {
+  padding: 6px 8px;
+  flex: 1;
+  min-width: 120px;
+  font-size: 0.875rem;
+}
+
+.spine-raw-text {
+  margin: 0 0 8px;
+  font-size: 0.75rem;
+  color: #71717a;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.spine-review-badge {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #9d7138;
+  background: rgba(157, 113, 56, 0.14);
+  border: 1px solid rgba(157, 113, 56, 0.35);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.spine-card.needs-review {
+  border-color: rgba(157, 113, 56, 0.45);
+}
+
 .spine-actions {
   display: flex;
   gap: 8px;

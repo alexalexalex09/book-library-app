@@ -2,6 +2,8 @@
  * Google Books query shaping and result ranking for spine OCR titles.
  */
 
+const SUGGEST_SCORE = 0.45;
+
 function normalizeText(value) {
   return String(value || "")
     .toLowerCase()
@@ -25,15 +27,41 @@ function looksLikeIsbn(value) {
   return digits.length === 10 || digits.length === 13;
 }
 
-function buildGoogleBooksQuery(title, author) {
+/** Find a 10- or 13-digit ISBN substring in free text (e.g. OCR rawText). */
+function extractIsbnFromText(value) {
+  const text = String(value || "");
+  const compact = text.replace(/[^0-9Xx]/g, "");
+  if (compact.length === 10 || compact.length === 13) return compact;
+
+  const thirteen = text.match(/(?:97[89][\s-]*)?(?:\d[\s-]*){9}[\dXx]/);
+  if (thirteen) {
+    const digits = thirteen[0].replace(/[^0-9Xx]/g, "");
+    if (digits.length === 10 || digits.length === 13) return digits;
+  }
+
+  const ten = text.match(/\b(?:\d[\s-]*){9}[\dXx]\b/);
+  if (ten) {
+    const digits = ten[0].replace(/[^0-9Xx]/g, "");
+    if (digits.length === 10 || digits.length === 13) return digits;
+  }
+
+  return null;
+}
+
+function buildGoogleBooksQuery(title, author, { rawText } = {}) {
   const cleanedTitle = cleanSearchText(title);
   const cleanedAuthor = cleanSearchText(author);
-
-  if (!cleanedTitle && !cleanedAuthor) return "";
 
   if (cleanedTitle && looksLikeIsbn(cleanedTitle)) {
     return `isbn:${cleanedTitle.replace(/[^0-9Xx]/g, "")}`;
   }
+
+  const isbnFromRaw = extractIsbnFromText(rawText);
+  if (isbnFromRaw) {
+    return `isbn:${isbnFromRaw}`;
+  }
+
+  if (!cleanedTitle && !cleanedAuthor) return "";
 
   const parts = [];
   if (cleanedTitle) {
@@ -68,20 +96,26 @@ function extractIsbn(volumeInfo) {
   return isbn13 || isbn10 || null;
 }
 
-function scoreVolume(volumeInfo, queryTitle, queryAuthor) {
+function scoreVolume(volumeInfo, queryTitle, queryAuthor, queryPublisher) {
   const volTitle = volumeInfo?.title || "";
   const volAuthors = Array.isArray(volumeInfo?.authors)
     ? volumeInfo.authors.join(" ")
     : "";
+  const volPublisher = volumeInfo?.publisher || "";
 
   const qTitleTokens = tokenSet(queryTitle);
   const qAuthorTokens = tokenSet(queryAuthor);
+  const qPublisherTokens = tokenSet(queryPublisher);
   const vTitleTokens = tokenSet(volTitle);
   const vAuthorTokens = tokenSet(volAuthors);
+  const vPublisherTokens = tokenSet(volPublisher);
 
   const titleScore = jaccard(qTitleTokens, vTitleTokens);
   const authorScore = qAuthorTokens.size
     ? jaccard(qAuthorTokens, vAuthorTokens)
+    : 0;
+  const publisherScore = qPublisherTokens.size
+    ? jaccard(qPublisherTokens, vPublisherTokens)
     : 0;
 
   const normTitle = normalizeText(volTitle);
@@ -91,14 +125,19 @@ function scoreVolume(volumeInfo, queryTitle, queryAuthor) {
   else if (normTitle && normQuery && normTitle.includes(normQuery)) bonus += 0.15;
   else if (normTitle && normQuery && normQuery.includes(normTitle)) bonus += 0.1;
 
-  return Math.min(1, titleScore * 0.7 + authorScore * 0.25 + bonus);
+  if (publisherScore > 0) bonus += Math.min(0.08, publisherScore * 0.08);
+
+  return Math.min(
+    1,
+    titleScore * 0.7 + authorScore * 0.25 + bonus,
+  );
 }
 
-function rankBookItems(items, { title, author } = {}, limit = 5) {
+function rankBookItems(items, { title, author, publisher } = {}, limit = 5) {
   if (!Array.isArray(items) || items.length === 0) return [];
   const scored = items.map((item) => {
     const volumeInfo = item.volumeInfo || {};
-    const score = scoreVolume(volumeInfo, title, author);
+    const score = scoreVolume(volumeInfo, title, author, publisher);
     return { item, score };
   });
   scored.sort((a, b) => b.score - a.score);
@@ -108,12 +147,49 @@ function rankBookItems(items, { title, author } = {}, limit = 5) {
   }));
 }
 
+/**
+ * Prefer primary results unless they are empty or the best score is below
+ * threshold and the fallback set is stronger.
+ */
+function preferStrongerBookResults(
+  primary,
+  fallback,
+  threshold = SUGGEST_SCORE,
+) {
+  const primaryList = Array.isArray(primary) ? primary : [];
+  const fallbackList = Array.isArray(fallback) ? fallback : [];
+  if (!primaryList.length) return fallbackList;
+  if (!fallbackList.length) return primaryList;
+
+  const bestPrimary = Number(primaryList[0]?.matchScore);
+  const bestFallback = Number(fallbackList[0]?.matchScore);
+  const primaryScore = Number.isFinite(bestPrimary) ? bestPrimary : -1;
+  const fallbackScore = Number.isFinite(bestFallback) ? bestFallback : -1;
+
+  if (primaryScore < threshold && fallbackScore > primaryScore) {
+    return fallbackList;
+  }
+  return primaryList;
+}
+
+function needsTitleOnlyRetry(rankedItems, author, threshold = SUGGEST_SCORE) {
+  if (!cleanSearchText(author)) return false;
+  const list = Array.isArray(rankedItems) ? rankedItems : [];
+  if (!list.length) return true;
+  const best = Number(list[0]?.matchScore);
+  return !Number.isFinite(best) || best < threshold;
+}
+
 module.exports = {
+  SUGGEST_SCORE,
   normalizeText,
   cleanSearchText,
   looksLikeIsbn,
+  extractIsbnFromText,
   buildGoogleBooksQuery,
   scoreVolume,
   rankBookItems,
   extractIsbn,
+  preferStrongerBookResults,
+  needsTitleOnlyRetry,
 };
