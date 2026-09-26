@@ -543,6 +543,7 @@ input:focus-visible,
   min-height: 0;
   object-fit: contain;
   object-position: center center;
+  image-rendering: auto;
 }
 
 #shelfCanvas.canvas-hidden {
@@ -725,19 +726,17 @@ input:focus-visible,
   position: absolute;
   top: 12px;
   left: 12px;
-  right: 12px;
+  right: auto;
   z-index: 60;
   display: flex;
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
-  pointer-events: none;
+  max-width: calc(100% - 24px);
+  pointer-events: auto;
+  transform: translateZ(0);
   user-select: none;
   -webkit-user-select: none;
-}
-
-.map-controls > * {
-  pointer-events: auto;
 }
 
 .map-zoom-group {
@@ -759,6 +758,7 @@ input:focus-visible,
   font-size: 1.1rem;
   font-weight: 700;
   cursor: pointer;
+  touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -775,6 +775,37 @@ input:focus-visible,
   font-size: 0.82rem;
   font-weight: 700;
   color: #1d4ed8;
+}
+
+.map-arrange-btn {
+  border: 1px solid #d4d4d8;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.map-arrange-btn[aria-pressed="true"] {
+  background: var(--primary, #8b3a2f);
+  border-color: var(--primary, #8b3a2f);
+  color: #ffffff;
+}
+
+.map-arrange-btn[aria-pressed="true"]:hover {
+  background: var(--primary, #8b3a2f);
+  filter: brightness(1.05);
+}
+
+#infiniteMap.is-arranging .shelf-card {
+  cursor: grab;
+}
+
+#infiniteMap:not(.is-arranging) .shelf-card {
+  cursor: grab;
+}
+
+#infiniteMap:not(.is-arranging) .shelf-resize-handle {
+  display: none;
 }
 
 .map-hint {
@@ -856,6 +887,7 @@ input:focus-visible,
   position: absolute;
   top: 0;
   left: 0;
+  z-index: 0;
   transform-origin: 0 0;
   will-change: transform;
 }
@@ -1795,14 +1827,23 @@ input:focus-visible,
 }
 
 .spine-crop-thumb {
-  width: 200px;
-  height: 300px;
+  width: auto;
+  height: auto;
+  max-width: min(100%, 320px);
+  max-height: min(55vh, 480px);
   flex-shrink: 0;
   object-fit: contain;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-muted, #e4e4e7);
   background: #f4f4f5;
   cursor: pointer;
+}
+
+@media (min-width: 961px) {
+  .spine-crop-thumb {
+    max-width: min(100%, 420px);
+    max-height: min(60vh, 620px);
+  }
 }
 
 #uploadView[data-scan-stage="review"]:not(.shelf-photo-collapsed) .spine-crop-thumb {
@@ -3201,6 +3242,12 @@ body.guest-auth-open {
   color: var(--text);
 }
 
+a.account-menu-btn {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+}
+
 .account-menu-meta {
   margin: 0;
   font-size: 0.8rem;
@@ -3222,6 +3269,57 @@ body.guest-auth-open {
 
 .account-menu-link.hidden-element {
   display: none !important;
+}
+
+.account-menu-btn-danger {
+  color: var(--danger);
+  border-color: rgba(166, 74, 60, 0.35);
+}
+
+.account-menu-btn-danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.account-stats {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) minmax(0, 1.2fr);
+  gap: 10px 16px;
+  margin: 4px 0 8px;
+  overflow: auto;
+}
+
+.account-stats dt,
+.account-stats dd {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.account-stats dt {
+  color: var(--text-subtle);
+}
+
+.account-stats dd {
+  text-align: right;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.account-email-current {
+  margin: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.account-panel-note {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+#accountDeleteConfirmBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .nav-user-email {
@@ -3435,6 +3533,50 @@ body.guest-auth-open {
   padding-bottom: 14px;
 }
 
+.scan-wizard-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.scan-wizard-title-row .page-title {
+  margin-top: 0;
+}
+
+.scan-wizard-help-btn {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  margin: 4px 0 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.scan-wizard-help-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.scan-wizard-help-btn:hover,
+.scan-wizard-help-btn[aria-expanded="true"] {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.scan-wizard-help-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .scan-stage-tag {
   margin: 0;
   width: fit-content;
@@ -3458,10 +3600,50 @@ body.guest-auth-open {
 }
 
 .scan-stage-description {
-  margin: 8px 0 0;
-  color: var(--text-subtle);
-  max-width: 520px;
-  line-height: 1.6;
+  position: fixed;
+  z-index: 80;
+  margin: 0;
+  padding: 12px 14px;
+  width: min(320px, calc(100vw - 24px));
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  line-height: 1.5;
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  font-weight: 400;
+}
+
+.scan-stage-description[hidden] {
+  display: none !important;
+}
+
+.scan-stage-description::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: var(--help-arrow-x, 24px);
+  width: 10px;
+  height: 10px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.scan-stage-description.is-above::before {
+  top: auto;
+  bottom: -6px;
+  border-left: none;
+  border-top: none;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.scan-stage-description:focus {
+  outline: none;
 }
 
 .scan-wizard-body {
@@ -3735,7 +3917,8 @@ body.guest-auth-open {
 }
 
 .map-zoom-group,
-.manage-shelves-btn {
+.manage-shelves-btn,
+.map-arrange-btn {
   border-color: var(--border);
   background: rgba(255, 255, 255, 0.94);
 }
@@ -3747,6 +3930,12 @@ body.guest-auth-open {
 
 .map-fit-btn {
   color: var(--primary);
+}
+
+.map-arrange-btn[aria-pressed="true"] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
 }
 
 .map-hint {

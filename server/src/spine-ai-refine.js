@@ -1,3 +1,5 @@
+const { toBookTitleCase } = require("./title-case");
+
 /**
  * Build the Gemini refine payload. Assembled `title` is the title source;
  * `rawText` is only for author/publisher extraction.
@@ -13,6 +15,7 @@ function buildRefineSpinePayload(spines) {
 function buildRefineSpinePrompt(spinePayload) {
   return `You are an expert librarian AI parsing messy OCR text from book spines.
 For each item, "title" is already in reading order — return it with only typo fixes from that string. Do not rebuild or reorder the title from "rawText".
+Return every title in book title case: capitalize each principal word, and leave short function words lowercase (a, an, the, and, but, or, nor, for, of, in, on, to, with, and similar) unless that word is first or last.
 Use "rawText" only to fill author and publisher (if visible). Ignore price tags and logos.
 Return ONLY a JSON array.
 
@@ -34,7 +37,7 @@ function spinesForClientResponse(spines, aiList) {
     const aiMatch = parsedList.find((item) => item.id === idx) || null;
     const aiTitle = aiMatch?.title != null ? String(aiMatch.title).trim() : "";
     return {
-      title: aiTitle || spine.title || "Unlabeled Spine",
+      title: toBookTitleCase(aiTitle || spine.title || "Unlabeled Spine"),
       author: (aiMatch?.author != null ? String(aiMatch.author) : "") || spine.author || "",
       publisher:
         (aiMatch?.publisher != null ? String(aiMatch.publisher) : "") ||

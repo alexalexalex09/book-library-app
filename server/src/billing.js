@@ -188,6 +188,69 @@ function createBillingRouter({
   }
 
   /**
+   * Stop Stripe billing before an account is deleted.
+   * Users with no Stripe customer or subscription are unchanged.
+   * Throws when a paid customer exists but Stripe is not configured.
+   */
+  async function cancelBillingForDeletedUser(user) {
+    const metadata = user?.app_metadata || {};
+    let customerId = metadata.stripe_customer_id || null;
+    const subscriptionId = metadata.stripe_subscription_id || null;
+    if (!customerId && !subscriptionId) return { skipped: true };
+
+    if (!billingConfigured || !stripe) {
+      const err = new Error(
+        "Billing is not configured, so the paid plan could not be canceled.",
+      );
+      err.code = "BILLING_NOT_CONFIGURED";
+      throw err;
+    }
+
+    const terminal = new Set(["canceled", "incomplete_expired"]);
+    const canceledIds = new Set();
+
+    async function cancelSub(sub) {
+      if (!sub?.id || canceledIds.has(sub.id) || terminal.has(sub.status)) return;
+      await stripe.subscriptions.cancel(sub.id);
+      canceledIds.add(sub.id);
+    }
+
+    if (subscriptionId) {
+      try {
+        const sub = await stripe.subscriptions.retrieve(subscriptionId);
+        customerId =
+          customerId ||
+          (typeof sub.customer === "string" ? sub.customer : sub.customer?.id || null);
+        await cancelSub(sub);
+      } catch (error) {
+        if (error?.code !== "resource_missing") throw error;
+      }
+    }
+
+    if (customerId) {
+      try {
+        const listed = await stripe.subscriptions.list({
+          customer: customerId,
+          status: "all",
+          limit: 100,
+        });
+        for (const sub of listed.data || []) await cancelSub(sub);
+      } catch (error) {
+        if (error?.code !== "resource_missing") throw error;
+      }
+      try {
+        await stripe.customers.del(customerId);
+      } catch (error) {
+        if (error?.code !== "resource_missing") {
+          console.warn("Stripe customer delete failed:", error?.message || error);
+        }
+      }
+    }
+
+    return { skipped: false, subscriptionsCanceled: canceledIds.size };
+  }
+
+  /**
    * Re-fetch the user's Stripe subscription and write plan metadata to Auth.
    * Used by the admin console — does not invent a plan without Stripe.
    */
@@ -275,6 +338,8 @@ function createBillingRouter({
         hasUsedTrial = (priorSubs.data || []).length > 0;
       }
       const priceId = interval === "year" ? annualPriceId : monthlyPriceId;
+      // Managed Payments rejects Checkout custom_text, so the renewal reminder
+      // stays in the app and terms instead of the pay button.
       const session = await stripe.checkout.sessions.create({
         mode: "subscription",
         customer: customerId,
@@ -285,12 +350,6 @@ function createBillingRouter({
         metadata: {
           supabase_user_id: user.id,
           interval,
-        },
-        custom_text: {
-          submit: {
-            message:
-              "After any free trial, billing renews automatically until you cancel. We send a renewal reminder before each charge. Cancel anytime via Manage billing.",
-          },
         },
         subscription_data: {
           metadata: { supabase_user_id: user.id, interval },
@@ -405,6 +464,7 @@ function createBillingRouter({
     normalizeInterval,
     syncBillingForUserId,
     syncSubscriptionToSupabase,
+    cancelBillingForDeletedUser,
   };
 }
 

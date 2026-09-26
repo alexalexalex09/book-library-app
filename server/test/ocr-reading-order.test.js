@@ -51,6 +51,25 @@ describe("assembleSpineTitle — vertical T→B R→L", () => {
     assert.equal(title, "RightTop RightBot LeftTop LeftBot");
   });
 
+  it("keeps a tilted single-line spine in top-to-bottom order", () => {
+    // Logged shelf scan: ~64° text drifts in x, previously split into R→L columns.
+    const words = [
+      { text: "LONG", x: 0.457, y: 0.386, angleDeg: 66 },
+      { text: "ACCOMPANY", x: 0.485, y: 0.429, angleDeg: 64 },
+      { text: "THEM", x: 0.505, y: 0.459, angleDeg: 64 },
+      { text: "WITH", x: 0.517, y: 0.479, angleDeg: 63 },
+      { text: "SINGING", x: 0.532, y: 0.502, angleDeg: 64 },
+      { text: "-", x: 0.543, y: 0.519, angleDeg: 65 },
+      { text: "THE", x: 0.549, y: 0.529, angleDeg: 64 },
+      { text: "CHRISTIAN", x: 0.567, y: 0.556, angleDeg: 64 },
+      { text: "FUNERAL", x: 0.59, y: 0.592, angleDeg: 64 },
+    ];
+    assert.equal(
+      assembleSpineTitle(words, tallSpine),
+      "Long Accompany Them with Singing - the Christian Funeral",
+    );
+  });
+
   it("sorts a single vertical column top-to-bottom", () => {
     const words = [
       { text: "C", x: 0.5, y: 0.7, angleDeg: 90 },

@@ -68,6 +68,24 @@ async function createBillingCheckout(interval) {
   return data;
 }
 
+async function fetchAccountSummary() {
+  const response = await authenticatedFetch("/api/account");
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Failed to load account");
+  return data;
+}
+
+async function requestAccountDeletion() {
+  const response = await authenticatedFetch("/api/account/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirm: "DELETE" }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Failed to delete account");
+  return data;
+}
+
 async function createBillingPortal() {
   const response = await authenticatedFetch("/api/billing/portal", {
     method: "POST",

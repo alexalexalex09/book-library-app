@@ -598,6 +598,15 @@ function buildUsageText(action) {
   return `${used}/${snap.limit}`;
 }
 
+function planLabel() {
+  const isTrial = billingState.status === "trialing";
+  const daysLeft = trialDaysLeft();
+  if (isTrial) {
+    return daysLeft === null ? "Trial" : `Trial · ${daysLeft}d`;
+  }
+  return isPremiumPlan() ? "Premium" : "Free";
+}
+
 function renderBillingNav() {
   const badge = document.getElementById("planBadge");
   const usageMeter = document.getElementById("usageMeter");
@@ -610,15 +619,7 @@ function renderBillingNav() {
   const manageBtn = document.getElementById("manageBillingBtn");
   if (!badge || !usageMeter || !upgradeBtn || !manageBtn) return;
 
-  const isTrial = billingState.status === "trialing";
-  const daysLeft = trialDaysLeft();
-  badge.textContent = isTrial
-    ? daysLeft === null
-      ? "Trial"
-      : `Trial · ${daysLeft}d`
-    : isPremiumPlan()
-      ? "Premium"
-      : "Free";
+  badge.textContent = planLabel();
   const ocrUsage = usageState.ocr;
   const ocrLimit = Number.isFinite(ocrUsage?.limit) ? ocrUsage.limit : billingState.quotas?.ocr || 0;
   const ocrRemaining = Number.isFinite(ocrUsage?.remaining) ? ocrUsage.remaining : ocrLimit;
@@ -729,15 +730,17 @@ function renderRenewalBanner() {
   banner.classList.remove("hidden-element");
 }
 
+function closeAccountMenu() {
+  const menuBtn = document.getElementById("accountMenuBtn");
+  const menu = document.getElementById("accountMenu");
+  menu?.classList.add("hidden-element");
+  menuBtn?.setAttribute("aria-expanded", "false");
+}
+
 function setupAccountMenu() {
   const menuBtn = document.getElementById("accountMenuBtn");
   const menu = document.getElementById("accountMenu");
   if (!menuBtn || !menu) return;
-
-  const closeMenu = () => {
-    menu.classList.add("hidden-element");
-    menuBtn.setAttribute("aria-expanded", "false");
-  };
 
   const openMenu = () => {
     menu.classList.remove("hidden-element");
@@ -747,16 +750,16 @@ function setupAccountMenu() {
   menuBtn.addEventListener("click", (event) => {
     event.stopPropagation();
     if (menu.classList.contains("hidden-element")) openMenu();
-    else closeMenu();
+    else closeAccountMenu();
   });
 
   menu.addEventListener("click", (event) => {
     event.stopPropagation();
   });
 
-  window.addEventListener("click", closeMenu);
+  window.addEventListener("click", closeAccountMenu);
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeMenu();
+    if (event.key === "Escape") closeAccountMenu();
   });
 }
 
@@ -1027,6 +1030,361 @@ async function openBillingPortal() {
   }
 }
 
+function quotaSnapshot(action) {
+  const quotaCap = billingState.quotas?.[action];
+  const snap = usageState[action];
+  const limit = Number.isFinite(snap?.limit) ? snap.limit : Number(quotaCap) || 0;
+  const remaining = Number.isFinite(snap?.remaining) ? snap.remaining : limit;
+  return { limit, remaining: Math.max(0, remaining) };
+}
+
+function formatQuota(action) {
+  const { limit, remaining } = quotaSnapshot(action);
+  return `${remaining} of ${limit}`;
+}
+
+function billingIntervalLabel() {
+  if (!isPremiumPlan() || !billingState.interval) return "—";
+  return billingState.interval === "year" ? "Annual" : "Monthly";
+}
+
+function billingStatusLabel() {
+  const raw = String(billingState.status || "")
+    .replaceAll("_", " ")
+    .trim();
+  if (!raw) return "—";
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+function loginProviders(user) {
+  const identities = Array.isArray(user?.identities) ? user.identities : [];
+  return [...new Set(identities.map((identity) => identity?.provider).filter(Boolean))];
+}
+
+function providerDisplayName(provider) {
+  if (provider === "email") return "Email and password";
+  if (provider === "google") return "Google";
+  if (provider === "apple") return "Apple";
+  return provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : "Email";
+}
+
+function canChangeLoginEmail(user) {
+  const providers = loginProviders(user);
+  if (!providers.length) return true;
+  return providers.includes("email");
+}
+
+function pendingLoginEmail(user) {
+  return user?.new_email || null;
+}
+
+function statNumber(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function renderAccountDetails() {
+  const list = document.getElementById("accountStatsList");
+  const stripeBtn = document.getElementById("accountDetailsStripeBtn");
+  if (!list) return;
+
+  const counts = accountSummary?.counts || {};
+  const renewal = billingState.renewalNotice;
+  const renewWhen = formatRenewalDate(renewal);
+  const renewAmount = formatRenewalAmount(renewal);
+  const providers = loginProviders(currentUser);
+  const rows = [
+    ["Plan", planLabel()],
+    ["Billing", isPremiumPlan() ? billingIntervalLabel() : "Free"],
+    ["Status", billingStatusLabel()],
+    ["Scans remaining", formatQuota("ocr")],
+    ["Searches remaining", formatQuota("books")],
+    ["Books", String(statNumber(counts.books, myLibrary.length))],
+    ["Shelves", String(statNumber(counts.shelves, lastShelvesSnapshot.length))],
+    ["Rooms", String(myRooms.length)],
+    [
+      "Member since",
+      formatRenewalDate({
+        renewAt: accountSummary?.createdAt || currentUser?.created_at,
+      }) || "—",
+    ],
+    [
+      "Sign-in",
+      providers.map(providerDisplayName).join(", ") || "Email and password",
+    ],
+  ];
+  if (renewWhen || renewAmount) {
+    rows.splice(3, 0, ["Next renewal", [renewWhen, renewAmount].filter(Boolean).join(" · ")]);
+  }
+
+  list.replaceChildren();
+  for (const [label, value] of rows) {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    list.append(dt, dd);
+  }
+  if (stripeBtn) {
+    stripeBtn.textContent = isPremiumPlan() ? "Manage plan in Stripe" : "Upgrade in Stripe";
+  }
+}
+
+function closeAccountDetails() {
+  const modal = document.getElementById("accountDetailsModal");
+  if (!modal) return;
+  closeModalAndRestore(modal);
+}
+
+async function openAccountDetails() {
+  closeAccountMenu();
+  if (!currentUser?.id || !requireOnline("Account details")) return;
+  const modal = document.getElementById("accountDetailsModal");
+  if (!modal) return;
+  renderAccountDetails();
+  openModalWithFocus(modal, document.getElementById("accountDetailsStripeBtn"));
+  try {
+    accountSummary = await fetchAccountSummary();
+    renderAccountDetails();
+  } catch (error) {
+    showToast(error?.message || "Some account details could not be loaded.", "error");
+  }
+}
+
+function changePlanInStripe() {
+  closeAccountDetails();
+  if (isPremiumPlan()) {
+    openBillingPortal();
+    return;
+  }
+  showUpgradeModal({
+    reason: "Choose a Premium plan in Stripe. Cancel anytime to return to Free.",
+  });
+}
+
+function renderAccountEmail() {
+  const current = document.getElementById("accountEmailCurrent");
+  const status = document.getElementById("accountEmailStatus");
+  const pending = document.getElementById("accountEmailPending");
+  const form = document.getElementById("accountEmailForm");
+  const note = document.getElementById("accountEmailProviderNote");
+  const resend = document.getElementById("accountEmailResendBtn");
+  const email = currentUser?.email || "—";
+  if (current) current.textContent = email;
+  const display = document.getElementById("userEmailDisplay");
+  if (display && currentUser?.email && !isOfflineActive()) {
+    display.textContent = currentUser.email;
+  }
+
+  const confirmed = Boolean(
+    currentUser?.email_confirmed_at || accountSummary?.emailConfirmedAt,
+  );
+  const nextEmail = pendingLoginEmail(currentUser) || accountSummary?.newEmail || "";
+  if (status) status.textContent = confirmed ? "Confirmed" : "Waiting for confirmation";
+  if (pending) {
+    if (nextEmail) {
+      pending.textContent = `Pending change to ${nextEmail}. Confirm it from your inbox.`;
+      pending.classList.remove("hidden-element");
+    } else {
+      pending.textContent = "";
+      pending.classList.add("hidden-element");
+    }
+  }
+
+  const editable = canChangeLoginEmail(currentUser);
+  form?.classList.toggle("hidden-element", !editable);
+  document.getElementById("accountEmailSaveBtn")?.classList.toggle("hidden-element", !editable);
+  note?.classList.toggle("hidden-element", editable);
+  if (note && !editable) {
+    const names = loginProviders(currentUser).map(providerDisplayName).join(" and ");
+    note.textContent = `This account signs in with ${names}. Change that email with the provider.`;
+  }
+  if (resend) {
+    const showResend = editable && (!confirmed || Boolean(nextEmail));
+    resend.classList.toggle("hidden-element", !showResend);
+    resend.textContent = nextEmail ? "Resend change confirmation" : "Resend confirmation email";
+  }
+}
+
+function closeAccountEmail() {
+  const modal = document.getElementById("accountEmailModal");
+  accountEmailModalOpen = false;
+  if (!modal) return;
+  closeModalAndRestore(modal);
+}
+
+function openAccountEmail() {
+  closeAccountMenu();
+  if (!currentUser?.id || !requireOnline("Email address")) return;
+  const modal = document.getElementById("accountEmailModal");
+  if (!modal) return;
+  accountEmailModalOpen = true;
+  const input = document.getElementById("accountEmailInput");
+  if (input) input.value = "";
+  renderAccountEmail();
+  const focusTarget = canChangeLoginEmail(currentUser)
+    ? input
+    : document.getElementById("accountEmailCloseBtn");
+  openModalWithFocus(modal, focusTarget);
+}
+
+async function submitEmailChange(event) {
+  event.preventDefault();
+  if (!requireOnline("Changing your email")) return;
+  if (!canChangeLoginEmail(currentUser)) {
+    showToast("Change this email with the sign-in provider.", "error");
+    return;
+  }
+  const input = document.getElementById("accountEmailInput");
+  const next = String(input?.value || "")
+    .trim()
+    .toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next)) {
+    showToast("Enter a valid email address.", "error");
+    input?.focus();
+    return;
+  }
+  if (next === String(currentUser?.email || "").trim().toLowerCase()) {
+    showToast("That is already your email address.", "error");
+    input?.focus();
+    return;
+  }
+  const btn = document.getElementById("accountEmailSaveBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const { data, error } = await supabaseClient.auth.updateUser(
+      { email: next },
+      { emailRedirectTo: `${window.location.origin}/` },
+    );
+    if (error) throw error;
+    if (data?.user) currentUser = data.user;
+    if (input) input.value = "";
+    renderAccountEmail();
+    renderBillingNav();
+    showToast("Confirmation sent. Check your inbox to confirm the new email.", "success");
+  } catch (error) {
+    showToast(error?.message || "Unable to change email.", "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function resendEmailConfirmation() {
+  if (!requireOnline("Resending confirmation")) return;
+  const nextEmail = pendingLoginEmail(currentUser);
+  const btn = document.getElementById("accountEmailResendBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const { error } = await supabaseClient.auth.resend({
+      type: nextEmail ? "email_change" : "signup",
+      email: currentUser?.email,
+      options: { emailRedirectTo: `${window.location.origin}/` },
+    });
+    if (error) throw error;
+    showToast("Confirmation email sent.", "success");
+  } catch (error) {
+    showToast(error?.message || "Unable to resend confirmation.", "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function syncDeleteConfirmButton() {
+  const input = document.getElementById("accountDeleteConfirmInput");
+  const btn = document.getElementById("accountDeleteConfirmBtn");
+  if (!btn) return;
+  btn.disabled = String(input?.value || "").trim() !== "DELETE";
+}
+
+function closeAccountDelete() {
+  const modal = document.getElementById("accountDeleteModal");
+  if (!modal) return;
+  closeModalAndRestore(modal);
+}
+
+function openAccountDelete() {
+  closeAccountMenu();
+  if (!currentUser?.id || !requireOnline("Deleting your account")) return;
+  const modal = document.getElementById("accountDeleteModal");
+  const input = document.getElementById("accountDeleteConfirmInput");
+  if (!modal || !input) return;
+  input.value = "";
+  syncDeleteConfirmButton();
+  openModalWithFocus(modal, input);
+}
+
+async function submitAccountDelete() {
+  if (!requireOnline("Deleting your account")) return;
+  const input = document.getElementById("accountDeleteConfirmInput");
+  const btn = document.getElementById("accountDeleteConfirmBtn");
+  if (String(input?.value || "").trim() !== "DELETE") {
+    showToast("Type DELETE to confirm.", "error");
+    input?.focus();
+    return;
+  }
+  if (btn) btn.disabled = true;
+  try {
+    await requestAccountDeletion();
+    closeAccountDelete();
+    const userId = currentUser?.id;
+    if (offlineStore && userId) {
+      await offlineStore.clearUser(userId).catch(() => {});
+      await offlineStore.clearMediaCache().catch(() => {});
+    }
+    loggedInDefaultViewApplied = false;
+    userPickedAppView = false;
+    await supabaseClient.auth.signOut({ scope: "local" }).catch(() => {});
+    showToast("Your account has been deleted.", "success");
+  } catch (error) {
+    showToast(error?.message || "Unable to delete account.", "error");
+    syncDeleteConfirmButton();
+  }
+}
+
+function bindAccountModal(modal, onClose) {
+  if (!modal) return;
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) onClose();
+  });
+  modal.addEventListener("keydown", (event) => {
+    trapFocusInModal(modal, event);
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    }
+  });
+}
+
+function setupAccountPanels() {
+  document.getElementById("accountDetailsBtn")?.addEventListener("click", () => {
+    openAccountDetails();
+  });
+  document.getElementById("accountEmailBtn")?.addEventListener("click", () => {
+    openAccountEmail();
+  });
+  document.getElementById("accountDeleteBtn")?.addEventListener("click", () => {
+    openAccountDelete();
+  });
+
+  document.getElementById("accountDetailsCloseBtn")?.addEventListener("click", closeAccountDetails);
+  document.getElementById("accountDetailsStripeBtn")?.addEventListener("click", changePlanInStripe);
+  bindAccountModal(document.getElementById("accountDetailsModal"), closeAccountDetails);
+
+  document.getElementById("accountEmailCloseBtn")?.addEventListener("click", closeAccountEmail);
+  document.getElementById("accountEmailForm")?.addEventListener("submit", submitEmailChange);
+  document.getElementById("accountEmailResendBtn")?.addEventListener("click", () => {
+    resendEmailConfirmation();
+  });
+  bindAccountModal(document.getElementById("accountEmailModal"), closeAccountEmail);
+
+  document.getElementById("accountDeleteCancelBtn")?.addEventListener("click", closeAccountDelete);
+  document.getElementById("accountDeleteConfirmBtn")?.addEventListener("click", () => {
+    submitAccountDelete();
+  });
+  document.getElementById("accountDeleteConfirmInput")?.addEventListener("input", syncDeleteConfirmButton);
+  bindAccountModal(document.getElementById("accountDeleteModal"), closeAccountDelete);
+}
+
 function setupBillingUi() {
   const upgradeBtn = document.getElementById("upgradeBtn");
   const upgradeLink = document.getElementById("accountUpgradeLink");
@@ -1068,11 +1426,14 @@ function setupBillingUi() {
 }
 setupBillingUi();
 setupAccountMenu();
+setupAccountPanels();
 setupLegalAcceptanceUi();
 
 const Legal = window.ShelfMapperLegal || null;
 let legalAcceptResolver = null;
 let legalAcceptModalOpen = false;
+let accountEmailModalOpen = false;
+let accountSummary = null;
 
 function userNeedsLegalAcceptance(user) {
   if (!Legal || !user) return false;
@@ -1506,7 +1867,6 @@ authForm?.addEventListener("submit", async (e) => {
   const email = emailInput.value.trim();
   const password = passwordInput.value;
 
-  const originalText = authActionBtn.textContent;
   authActionBtn.textContent = "Processing...";
   authActionBtn.disabled = true;
 
@@ -1522,6 +1882,7 @@ authForm?.addEventListener("submit", async (e) => {
       const emailRedirectTo = getAuthRedirectTo();
       const legalMeta = Legal?.buildLegalAcceptanceMetadata() || {};
 
+      // Supabase Auth sends the confirmation email; the app does not.
       const { error } = await supabaseClient.auth.signUp({
         email,
         password,
@@ -1533,8 +1894,13 @@ authForm?.addEventListener("submit", async (e) => {
       if (error) {
         showToast("Sign up error: " + error.message, "error");
       } else {
-        showToast("Account created successfully! You can now log in.", "success");
-        authToggleBtn.click();
+        showToast(
+          "Account created! Check your inbox to confirm your account before you log in.",
+          "success",
+          7000,
+        );
+        // Leave Create Account mode so the button shows Log In (user is not signed in yet).
+        if (isSignUpMode) authToggleBtn.click();
       }
     } else {
       const { error } = await supabaseClient.auth.signInWithPassword({
@@ -1546,7 +1912,9 @@ authForm?.addEventListener("submit", async (e) => {
       }
     }
   } finally {
-    authActionBtn.textContent = originalText;
+    // Use current mode, not pre-submit label — otherwise a successful signup's
+    // toggle to "Log In" is overwritten by the saved "Create Account" text.
+    authActionBtn.textContent = isSignUpMode ? "Create Account" : "Log In";
     authActionBtn.disabled = false;
   }
 });
@@ -1670,8 +2038,12 @@ async function applyAuthState(session) {
 }
 
 supabaseClient.auth.onAuthStateChange((event, session) => {
-  if (event === "USER_UPDATED" && legalAcceptModalOpen) {
+  if (event === "USER_UPDATED" && (legalAcceptModalOpen || accountEmailModalOpen)) {
     if (session?.user) currentUser = session.user;
+    if (accountEmailModalOpen) {
+      renderAccountEmail();
+      renderBillingNav();
+    }
     return;
   }
   applyAuthState(session).catch((error) => {
@@ -1731,6 +2103,7 @@ function activateAppView(targetId, { reloadMap = false } = {}) {
     view.classList.toggle("hidden-view", !isTarget);
   });
   if (reloadMap && targetId === "libraryView") loadLibraryMap();
+  if (targetId !== "uploadView") setScanWizardHelpOpen(false);
 }
 
 /** First login this page load: open the map when the account already has a shelf. */
@@ -1800,6 +2173,7 @@ function updateScanSteps() {
       if (wizardStepNumber) wizardStepNumber.textContent = stageMeta.number;
       if (wizardStepName) wizardStepName.textContent = stageMeta.title;
       if (wizardStepDescription) wizardStepDescription.textContent = stageMeta.description;
+      if (wizardStepDescription && !wizardStepDescription.hidden) placeScanWizardHelpPopup();
     }
   }
   if (saveBtn) {
@@ -1820,6 +2194,100 @@ function updateScanSteps() {
     else step.removeAttribute("aria-current");
   });
 }
+
+function setScanWizardHelpOpen(open) {
+  const btn = document.getElementById("scanWizardHelpBtn");
+  const popup = document.getElementById("scanWizardStepDescription");
+  if (!btn || !popup) return;
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+  popup.hidden = !open;
+  if (open) placeScanWizardHelpPopup();
+  else popup.classList.remove("is-above");
+}
+
+function placeScanWizardHelpPopup() {
+  const btn = document.getElementById("scanWizardHelpBtn");
+  const popup = document.getElementById("scanWizardStepDescription");
+  if (!btn || !popup || popup.hidden) return;
+
+  const margin = 12;
+  const gap = 10;
+  const width = Math.min(320, window.innerWidth - margin * 2);
+  popup.style.width = `${width}px`;
+
+  const btnRect = btn.getBoundingClientRect();
+  const rowRect = btn.closest(".scan-wizard-title-row")?.getBoundingClientRect() ?? btnRect;
+  const popupHeight = popup.offsetHeight;
+  let left = btnRect.left + btnRect.width / 2 - width / 2;
+  left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+
+  let top = rowRect.bottom + gap;
+  const spaceBelow = window.innerHeight - rowRect.bottom - gap - margin;
+  const openAbove = popupHeight > spaceBelow && rowRect.top - gap - popupHeight >= margin;
+  popup.classList.toggle("is-above", openAbove);
+  if (openAbove) top = rowRect.top - gap - popupHeight;
+
+  popup.style.left = `${Math.round(left)}px`;
+  popup.style.top = `${Math.round(top)}px`;
+
+  const arrowX = btnRect.left + btnRect.width / 2 - left;
+  popup.style.setProperty(
+    "--help-arrow-x",
+    `${Math.round(Math.max(16, Math.min(arrowX, width - 16)))}px`,
+  );
+}
+
+function initScanWizardHelp() {
+  const btn = document.getElementById("scanWizardHelpBtn");
+  const popup = document.getElementById("scanWizardStepDescription");
+  if (!btn || !popup) return;
+
+  btn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const willOpen = popup.hidden;
+    setScanWizardHelpOpen(willOpen);
+    if (willOpen && event.detail === 0) popup.focus({ preventScroll: true });
+  });
+
+  let swallowNextClick = false;
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (popup.hidden) return;
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (btn.contains(target) || popup.contains(target)) return;
+      setScanWizardHelpOpen(false);
+      swallowNextClick = true;
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!swallowNextClick) return;
+      swallowNextClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    true,
+  );
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || popup.hidden) return;
+    setScanWizardHelpOpen(false);
+    btn.focus();
+  });
+
+  const reposition = () => {
+    if (!popup.hidden) placeScanWizardHelpPopup();
+  };
+  window.addEventListener("resize", reposition);
+  window.addEventListener("scroll", reposition, true);
+}
+
+initScanWizardHelp();
 
 function showLoadingOverlay(message = "Scanning Books...") {
   let overlay = document.getElementById("loadingOverlay");
@@ -1899,7 +2367,188 @@ let addSpineDrawMode = false;
 let addSpineDraft = null;
 
 const CANVAS_ZOOM_MIN = 1;
-const CANVAS_ZOOM_MAX = 4;
+const CANVAS_ZOOM_MAX_FALLBACK = 4;
+const CANVAS_BITMAP_MAX_EDGE = 4096;
+/** Cached stepped-downsample of the shelf photo for sharp fit views. */
+let shelfDownsampleCache = { key: "", canvas: null };
+let shelfCanvasResizeObserver = null;
+
+function getShelfImageSize() {
+  if (!currentLoadedImage) return { w: 0, h: 0 };
+  return {
+    w: currentLoadedImage.naturalWidth || currentLoadedImage.width || 0,
+    h: currentLoadedImage.naturalHeight || currentLoadedImage.height || 0,
+  };
+}
+
+function invalidateShelfDownsampleCache() {
+  shelfDownsampleCache = { key: "", canvas: null };
+}
+
+function getCanvasZoomMax() {
+  if (!shelfCanvas) return CANVAS_ZOOM_MAX_FALLBACK;
+  const { w } = getShelfImageSize();
+  const cssW = shelfCanvas.getBoundingClientRect().width || 0;
+  if (!w || cssW < 1) return CANVAS_ZOOM_MAX_FALLBACK;
+  // Fit→native is w/cssW; allow ~2 CSS pixels per source pixel beyond that.
+  return Math.max(CANVAS_ZOOM_MAX_FALLBACK, (w / cssW) * 2);
+}
+
+function updateZoomSliderRange() {
+  if (!zoomSlider) return;
+  const max = getCanvasZoomMax();
+  zoomSlider.max = String(Number(max.toFixed(2)));
+  zoomSlider.step = max > 10 ? "0.25" : "0.1";
+  const current = Number(zoomSlider.value) || CANVAS_ZOOM_MIN;
+  if (current > max) zoomSlider.value = String(Number(max.toFixed(2)));
+}
+
+/**
+ * Size the on-screen canvas bitmap to the CSS box × DPR (capped),
+ * keeping the source Image at full resolution.
+ */
+function syncShelfCanvasBitmap() {
+  if (!shelfCanvas || !currentLoadedImage) return false;
+  const { w: imgW, h: imgH } = getShelfImageSize();
+  if (!imgW || !imgH) return false;
+
+  const container =
+    document.getElementById("canvasDropzone") || shelfCanvas.parentElement;
+  const maxCssW = Math.max(1, container?.clientWidth || 800);
+  let maxCssH = Math.max(1, container?.clientHeight || 400);
+  if (container) {
+    const style = getComputedStyle(container);
+    const parsedMaxH = Number.parseFloat(style.maxHeight);
+    if (Number.isFinite(parsedMaxH) && parsedMaxH > 0) {
+      maxCssH = Math.min(maxCssH, parsedMaxH);
+    }
+  }
+
+  const fit = Math.min(maxCssW / imgW, maxCssH / imgH);
+  const cssW = Math.max(1, Math.round(imgW * fit));
+  const cssH = Math.max(1, Math.round(imgH * fit));
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  let bw = Math.max(1, Math.round(cssW * dpr));
+  let bh = Math.max(1, Math.round(cssH * dpr));
+  const longEdge = Math.max(bw, bh);
+  if (longEdge > CANVAS_BITMAP_MAX_EDGE) {
+    const s = CANVAS_BITMAP_MAX_EDGE / longEdge;
+    bw = Math.max(1, Math.round(bw * s));
+    bh = Math.max(1, Math.round(bh * s));
+  }
+
+  if (shelfCanvas.width !== bw || shelfCanvas.height !== bh) {
+    shelfCanvas.width = bw;
+    shelfCanvas.height = bh;
+  }
+  shelfCanvas.style.width = `${cssW}px`;
+  shelfCanvas.style.height = `${cssH}px`;
+  updateZoomSliderRange();
+  return true;
+}
+
+function ensureShelfCanvasResizeObserver() {
+  if (shelfCanvasResizeObserver || typeof ResizeObserver === "undefined") return;
+  const container =
+    document.getElementById("canvasDropzone") || shelfCanvas?.parentElement;
+  if (!container) return;
+  shelfCanvasResizeObserver = new ResizeObserver(() => {
+    if (!currentLoadedImage || !shelfCanvas || shelfCanvas.style.display === "none") {
+      return;
+    }
+    syncShelfCanvasBitmap();
+    const zoomMax = getCanvasZoomMax();
+    if (canvasState.scale > zoomMax) canvasState.scale = zoomMax;
+    redrawCanvasOverlays(activeEditingSpineIndex);
+  });
+  shelfCanvasResizeObserver.observe(container);
+}
+
+function getSteppedDownsample(image, targetW, targetH) {
+  const srcW = image.naturalWidth || image.width;
+  const srcH = image.naturalHeight || image.height;
+  const tw = Math.max(1, Math.round(targetW));
+  const th = Math.max(1, Math.round(targetH));
+  const key = `${srcW}x${srcH}->${tw}x${th}`;
+  if (shelfDownsampleCache.key === key && shelfDownsampleCache.canvas) {
+    return shelfDownsampleCache.canvas;
+  }
+
+  let src = image;
+  let w = srcW;
+  let h = srcH;
+  let canvas = null;
+  while (w > tw * 2 && h > th * 2) {
+    const nw = Math.max(tw, Math.floor(w / 2));
+    const nh = Math.max(th, Math.floor(h / 2));
+    canvas = document.createElement("canvas");
+    canvas.width = nw;
+    canvas.height = nh;
+    const c = canvas.getContext("2d");
+    if (!c) break;
+    c.imageSmoothingEnabled = true;
+    c.imageSmoothingQuality = "high";
+    c.drawImage(src, 0, 0, nw, nh);
+    src = canvas;
+    w = nw;
+    h = nh;
+  }
+  if (w !== tw || h !== th) {
+    canvas = document.createElement("canvas");
+    canvas.width = tw;
+    canvas.height = th;
+    const c = canvas.getContext("2d");
+    if (c) {
+      c.imageSmoothingEnabled = true;
+      c.imageSmoothingQuality = "high";
+      c.drawImage(src, 0, 0, tw, th);
+      src = canvas;
+    }
+  }
+  shelfDownsampleCache = { key, canvas: src instanceof HTMLCanvasElement ? src : canvas };
+  return shelfDownsampleCache.canvas || image;
+}
+
+function drawShelfSourceImage(ctx, imgW, imgH) {
+  const cssW = shelfCanvas.getBoundingClientRect().width || 1;
+  const screenScale = (cssW / imgW) * canvasState.scale;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  // Zoomed in enough that CSS≈source: sample the original directly.
+  if (screenScale >= 0.75) {
+    ctx.drawImage(currentLoadedImage, 0, 0, imgW, imgH);
+    return;
+  }
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const targetW = Math.max(1, Math.round(imgW * screenScale * dpr));
+  const targetH = Math.max(1, Math.round(imgH * screenScale * dpr));
+  const down = getSteppedDownsample(currentLoadedImage, targetW, targetH);
+  ctx.drawImage(down, 0, 0, imgW, imgH);
+}
+
+/**
+ * Stroke width in image-user-space so borders stay ~1.5 CSS px (2.5 selected),
+ * capped to ~15% of the spine's shorter side.
+ */
+function spineOverlayLineWidth(spine, { highlighted = false } = {}) {
+  const { w: imgW, h: imgH } = getShelfImageSize();
+  const cssW = shelfCanvas?.getBoundingClientRect().width || 1;
+  const cssTarget = highlighted ? 2.5 : 1.5;
+  const scale = Math.max(0.001, canvasState.scale || 1);
+  let lineWidth = (cssTarget * imgW) / (scale * cssW);
+
+  const box = getSpineBounds(spine);
+  if (box && imgW && imgH) {
+    const shortSide = Math.min(
+      Math.max(1, (box.maxX - box.minX) * imgW),
+      Math.max(1, (box.maxY - box.minY) * imgH),
+    );
+    lineWidth = Math.min(lineWidth, shortSide * 0.15);
+  }
+  return Math.max(0.5, lineWidth);
+}
 
 function getSpineBounds(spine) {
   if (spine?.polygon && spine.polygon.length >= 3) {
@@ -1936,6 +2585,12 @@ function setShelfPhotoCollapsed(collapsed) {
   const uploadView = document.getElementById("uploadView");
   uploadView?.classList.toggle("shelf-photo-collapsed", shelfPhotoCollapsed);
   syncShelfPhotoToggleButtons();
+  if (!shelfPhotoCollapsed && currentLoadedImage) {
+    requestAnimationFrame(() => {
+      syncShelfCanvasBitmap();
+      redrawCanvasOverlays(activeEditingSpineIndex);
+    });
+  }
 }
 
 function syncShelfPhotoToggleButtons() {
@@ -1954,7 +2609,7 @@ function syncShelfPhotoToggleButtons() {
  * with the detection highlighted inside the crop.
  * @returns {string|null}
  */
-function cropSpineThumbnail(image, spine, { pad = 0.08, maxEdge = 400 } = {}) {
+function cropSpineThumbnail(image, spine, { pad = 0.08, maxEdge = 1200 } = {}) {
   const box = getSpineBounds(spine);
   if (!image || !box) return null;
   const natW = image.naturalWidth || image.width;
@@ -1979,6 +2634,7 @@ function cropSpineThumbnail(image, spine, { pad = 0.08, maxEdge = 400 } = {}) {
   const sh = Math.max(1, (maxY - minY) * natH);
   if (sw < 1 || sh < 1) return null;
 
+  // ~2× display size for sharp thumbs (CSS max ~420×620 on desktop).
   const scale = Math.min(1, maxEdge / Math.max(sw, sh));
   const dw = Math.max(1, Math.round(sw * scale));
   const dh = Math.max(1, Math.round(sh * scale));
@@ -1989,16 +2645,48 @@ function cropSpineThumbnail(image, spine, { pad = 0.08, maxEdge = 400 } = {}) {
   const c = canvas.getContext("2d");
   if (!c) return null;
   try {
-    c.drawImage(image, sx, sy, sw, sh, 0, 0, dw, dh);
+    c.imageSmoothingEnabled = true;
+    c.imageSmoothingQuality = "high";
+    if (sw > dw * 2.5 || sh > dh * 2.5) {
+      let cw = Math.round(sw);
+      let ch = Math.round(sh);
+      let srcCanvas = document.createElement("canvas");
+      srcCanvas.width = cw;
+      srcCanvas.height = ch;
+      let srcCtx = srcCanvas.getContext("2d");
+      srcCtx.drawImage(image, sx, sy, sw, sh, 0, 0, cw, ch);
+      while (cw > dw * 2 && ch > dh * 2) {
+        const nw = Math.max(dw, Math.floor(cw / 2));
+        const nh = Math.max(dh, Math.floor(ch / 2));
+        const next = document.createElement("canvas");
+        next.width = nw;
+        next.height = nh;
+        const nctx = next.getContext("2d");
+        nctx.imageSmoothingEnabled = true;
+        nctx.imageSmoothingQuality = "high";
+        nctx.drawImage(srcCanvas, 0, 0, nw, nh);
+        srcCanvas = next;
+        cw = nw;
+        ch = nh;
+      }
+      c.drawImage(srcCanvas, 0, 0, dw, dh);
+    } else {
+      c.drawImage(image, sx, sy, sw, sh, 0, 0, dw, dh);
+    }
 
     const toCrop = (nx, ny) => ({
       x: (nx * natW - sx) * (dw / sw),
       y: (ny * natH - sy) * (dh / sh),
     });
 
+    const spineW = Math.max(1, ((box.maxX - box.minX) / (maxX - minX || 1)) * dw);
+    const spineH = Math.max(1, ((box.maxY - box.minY) / (maxY - minY || 1)) * dh);
+    const shortSide = Math.min(spineW, spineH);
+    const stroke = Math.max(1, Math.min(2.5, shortSide * 0.12));
+
     c.save();
     c.strokeStyle = FOLIO_COLORS.success;
-    c.lineWidth = Math.max(2, Math.round(Math.min(dw, dh) * 0.02));
+    c.lineWidth = stroke;
     c.lineJoin = "round";
 
     const poly = spine.polygon;
@@ -2020,7 +2708,7 @@ function cropSpineThumbnail(image, spine, { pad = 0.08, maxEdge = 400 } = {}) {
     }
     c.restore();
 
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
     const comma = dataUrl.indexOf(",");
     if (comma < 0) return null;
     const bin = atob(dataUrl.slice(comma + 1));
@@ -2035,21 +2723,22 @@ function cropSpineThumbnail(image, spine, { pad = 0.08, maxEdge = 400 } = {}) {
 }
 
 function setCanvasZoom(newScale) {
-  if (!shelfCanvas) return;
+  if (!shelfCanvas || !currentLoadedImage) return;
+  const { w: imgW, h: imgH } = getShelfImageSize();
+  if (!imgW || !imgH) return;
+  const zoomMax = getCanvasZoomMax();
   const oldScale = canvasState.scale || CANVAS_ZOOM_MIN;
-  newScale = Math.min(CANVAS_ZOOM_MAX, Math.max(CANVAS_ZOOM_MIN, newScale));
-  const cw = shelfCanvas.width;
-  const ch = shelfCanvas.height;
+  newScale = Math.min(zoomMax, Math.max(CANVAS_ZOOM_MIN, newScale));
 
   if (newScale <= CANVAS_ZOOM_MIN) {
     canvasState.scale = CANVAS_ZOOM_MIN;
     canvasState.offsetX = 0;
     canvasState.offsetY = 0;
   } else {
-    const viewCx = (cw / 2 - canvasState.offsetX) / oldScale;
-    const viewCy = (ch / 2 - canvasState.offsetY) / oldScale;
-    const imgCx = cw / 2;
-    const imgCy = ch / 2;
+    const viewCx = (imgW / 2 - canvasState.offsetX) / oldScale;
+    const viewCy = (imgH / 2 - canvasState.offsetY) / oldScale;
+    const imgCx = imgW / 2;
+    const imgCy = imgH / 2;
     let targetImgX = viewCx;
     let targetImgY = viewCy;
     if (newScale < oldScale && oldScale > CANVAS_ZOOM_MIN) {
@@ -2058,33 +2747,37 @@ function setCanvasZoom(newScale) {
       targetImgY = imgCy + (viewCy - imgCy) * keep;
     }
     canvasState.scale = newScale;
-    canvasState.offsetX = cw / 2 - targetImgX * newScale;
-    canvasState.offsetY = ch / 2 - targetImgY * newScale;
+    canvasState.offsetX = imgW / 2 - targetImgX * newScale;
+    canvasState.offsetY = imgH / 2 - targetImgY * newScale;
   }
 
-  if (zoomSlider) zoomSlider.value = String(canvasState.scale);
+  if (zoomSlider) zoomSlider.value = String(Number(canvasState.scale.toFixed(2)));
   redrawCanvasOverlays(activeEditingSpineIndex);
 }
 
 function zoomCanvasToSpine(spine) {
-  if (!shelfCanvas || !spine) return;
+  if (!shelfCanvas || !spine || !currentLoadedImage) return;
+  syncShelfCanvasBitmap();
   const box = getSpineBounds(spine);
   if (!box) return;
+  const { w: imgW, h: imgH } = getShelfImageSize();
+  if (!imgW || !imgH) return;
 
-  const w = Math.max(0.02, box.maxX - box.minX) * shelfCanvas.width;
-  const h = Math.max(0.02, box.maxY - box.minY) * shelfCanvas.height;
+  const w = Math.max(0.02, box.maxX - box.minX) * imgW;
+  const h = Math.max(0.02, box.maxY - box.minY) * imgH;
+  const zoomMax = getCanvasZoomMax();
   const scale = Math.min(
-    CANVAS_ZOOM_MAX,
+    zoomMax,
     Math.max(
       CANVAS_ZOOM_MIN,
-      Math.min((shelfCanvas.width * 0.55) / w, (shelfCanvas.height * 0.55) / h),
+      Math.min((imgW * 0.55) / w, (imgH * 0.55) / h),
     ),
   );
-  const cx = ((box.minX + box.maxX) / 2) * shelfCanvas.width;
-  const cy = ((box.minY + box.maxY) / 2) * shelfCanvas.height;
+  const cx = ((box.minX + box.maxX) / 2) * imgW;
+  const cy = ((box.minY + box.maxY) / 2) * imgH;
   canvasState.scale = scale;
-  canvasState.offsetX = shelfCanvas.width / 2 - cx * scale;
-  canvasState.offsetY = shelfCanvas.height / 2 - cy * scale;
+  canvasState.offsetX = imgW / 2 - cx * scale;
+  canvasState.offsetY = imgH / 2 - cy * scale;
   if (zoomSlider) zoomSlider.value = String(Number(scale.toFixed(2)));
   redrawCanvasOverlays(activeEditingSpineIndex);
 }
@@ -2092,14 +2785,17 @@ function zoomCanvasToSpine(spine) {
 let activeEditingSpineIndex = null;
 let activeControlPoint = null; // { spineIndex, pointIndex }
 
+/** CSS pixels → image pixels at the current fit (scale 1) mapping. */
 function getCanvasScaleFactor() {
   if (!shelfCanvas) return 1;
+  const { w } = getShelfImageSize();
   const rect = shelfCanvas.getBoundingClientRect();
-  return rect.width > 0 ? shelfCanvas.width / rect.width : 1;
+  return rect.width > 0 && w > 0 ? w / rect.width : 1;
 }
 
 function getNormalizedCanvasCoords(e) {
   if (!shelfCanvas) return { x: 0, y: 0, imgPxX: 0, imgPxY: 0 };
+  const { w: imgW, h: imgH } = getShelfImageSize();
   const rect = shelfCanvas.getBoundingClientRect();
   const clientX = e.touches
     ? e.touches[0]?.clientX || e.changedTouches[0]?.clientX
@@ -2110,17 +2806,15 @@ function getNormalizedCanvasCoords(e) {
 
   const screenX = clientX - rect.left;
   const screenY = clientY - rect.top;
+  const factorX = imgW / Math.max(1, rect.width);
+  const factorY = imgH / Math.max(1, rect.height);
 
-  const factor = shelfCanvas.width / rect.width;
-  const canvasPxX = screenX * factor;
-  const canvasPxY = screenY * factor;
-
-  const imgPxX = (canvasPxX - canvasState.offsetX) / canvasState.scale;
-  const imgPxY = (canvasPxY - canvasState.offsetY) / canvasState.scale;
+  const imgPxX = (screenX * factorX - canvasState.offsetX) / canvasState.scale;
+  const imgPxY = (screenY * factorY - canvasState.offsetY) / canvasState.scale;
 
   return {
-    x: imgPxX / shelfCanvas.width,
-    y: imgPxY / shelfCanvas.height,
+    x: imgW > 0 ? imgPxX / imgW : 0,
+    y: imgH > 0 ? imgPxY / imgH : 0,
     imgPxX,
     imgPxY,
   };
@@ -2227,18 +2921,25 @@ function finishAddSpineFromDraft() {
 }
 
 function redrawCanvasOverlays(highlightedIndex = null) {
-  if (!currentLoadedImage || !ctx) return;
+  if (!currentLoadedImage || !ctx || !shelfCanvas) return;
+
+  syncShelfCanvasBitmap();
+  const { w: imgW, h: imgH } = getShelfImageSize();
+  if (!imgW || !imgH) return;
+
+  const bw = shelfCanvas.width;
+  const bh = shelfCanvas.height;
+  const sx = bw / imgW;
+  const sy = bh / imgH;
 
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, shelfCanvas.width, shelfCanvas.height);
+  ctx.clearRect(0, 0, bw, bh);
 
-  ctx.translate(canvasState.offsetX, canvasState.offsetY);
-  ctx.scale(canvasState.scale, canvasState.scale);
+  ctx.translate(canvasState.offsetX * sx, canvasState.offsetY * sy);
+  ctx.scale(canvasState.scale * sx, canvasState.scale * sy);
 
-  ctx.drawImage(currentLoadedImage, 0, 0);
-
-  const baseThickness = Math.max(6, Math.round(shelfCanvas.width / 250));
+  drawShelfSourceImage(ctx, imgW, imgH);
 
   currentDetectedSpines.forEach((spine, index) => {
     const isSelected = index === activeEditingSpineIndex;
@@ -2256,14 +2957,13 @@ function redrawCanvasOverlays(highlightedIndex = null) {
       : needsReview
         ? "rgba(157, 113, 56, 0.18)"
         : null;
-    const lineWidth =
-      (isHighlighted ? baseThickness * 2 : baseThickness) / canvasState.scale;
+    const lineWidth = spineOverlayLineWidth(spine, { highlighted: isHighlighted });
 
     if (spine.polygon && spine.polygon.length >= 3) {
       ctx.beginPath();
       spine.polygon.forEach((pt, i) => {
-        const px = pt.x * shelfCanvas.width;
-        const py = pt.y * shelfCanvas.height;
+        const px = pt.x * imgW;
+        const py = pt.y * imgH;
         if (i === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       });
@@ -2275,28 +2975,32 @@ function redrawCanvasOverlays(highlightedIndex = null) {
       }
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = lineWidth;
+      ctx.lineJoin = "round";
       ctx.stroke();
 
       if (isSelected) {
-        const handleRadius = Math.max(10, 16 / canvasState.scale);
+        const handleRadius = Math.max(
+          6,
+          Math.min(14, 12 / canvasState.scale),
+        );
         spine.polygon.forEach((pt) => {
-          const px = pt.x * shelfCanvas.width;
-          const py = pt.y * shelfCanvas.height;
+          const px = pt.x * imgW;
+          const py = pt.y * imgH;
 
           ctx.beginPath();
           ctx.arc(px, py, handleRadius, 0, 2 * Math.PI);
           ctx.fillStyle = "#ffffff";
           ctx.fill();
-          ctx.lineWidth = 4 / canvasState.scale;
+          ctx.lineWidth = Math.max(1, 2 / canvasState.scale);
           ctx.strokeStyle = FOLIO_COLORS.success;
           ctx.stroke();
         });
       }
     } else if (spine.box) {
-      const x = spine.box.minX * shelfCanvas.width;
-      const y = spine.box.minY * shelfCanvas.height;
-      const w = (spine.box.maxX - spine.box.minX) * shelfCanvas.width;
-      const h = (spine.box.maxY - spine.box.minY) * shelfCanvas.height;
+      const x = spine.box.minX * imgW;
+      const y = spine.box.minY * imgH;
+      const w = (spine.box.maxX - spine.box.minX) * imgW;
+      const h = (spine.box.maxY - spine.box.minY) * imgH;
 
       if (fillColor) {
         ctx.fillStyle = fillColor;
@@ -2310,17 +3014,21 @@ function redrawCanvasOverlays(highlightedIndex = null) {
 
   if (addSpineDraft) {
     const x =
-      Math.min(addSpineDraft.startX, addSpineDraft.endX) * shelfCanvas.width;
+      Math.min(addSpineDraft.startX, addSpineDraft.endX) * imgW;
     const y =
-      Math.min(addSpineDraft.startY, addSpineDraft.endY) * shelfCanvas.height;
+      Math.min(addSpineDraft.startY, addSpineDraft.endY) * imgH;
     const w =
-      Math.abs(addSpineDraft.endX - addSpineDraft.startX) * shelfCanvas.width;
+      Math.abs(addSpineDraft.endX - addSpineDraft.startX) * imgW;
     const h =
-      Math.abs(addSpineDraft.endY - addSpineDraft.startY) * shelfCanvas.height;
+      Math.abs(addSpineDraft.endY - addSpineDraft.startY) * imgH;
+    const draftStroke = spineOverlayLineWidth(
+      { box: { minX: 0, maxX: 0.05, minY: 0, maxY: 0.2 } },
+      { highlighted: true },
+    );
     ctx.fillStyle = "rgba(111, 135, 83, 0.2)";
     ctx.fillRect(x, y, w, h);
     ctx.strokeStyle = FOLIO_COLORS.success;
-    ctx.lineWidth = (baseThickness * 1.5) / canvasState.scale;
+    ctx.lineWidth = draftStroke;
     ctx.setLineDash([8 / canvasState.scale, 6 / canvasState.scale]);
     ctx.strokeRect(x, y, w, h);
     ctx.setLineDash([]);
@@ -2358,8 +3066,9 @@ const startCanvasDrag = (e) => {
       const hitRadiusImgPx = Math.max(20, 30 / canvasState.scale);
 
       const pointIdx = spine.polygon.findIndex((pt) => {
-        const px = pt.x * shelfCanvas.width;
-        const py = pt.y * shelfCanvas.height;
+        const { w: imgW, h: imgH } = getShelfImageSize();
+        const px = pt.x * imgW;
+        const py = pt.y * imgH;
         return Math.hypot(px - norm.imgPxX, py - norm.imgPxY) <= hitRadiusImgPx;
       });
 
@@ -2505,9 +3214,18 @@ function beginScanForFile(file) {
         "<p class='scan-loading-text'>Scanning shelf...</p>";
       const img = new Image();
       img.onload = () => {
-        shelfCanvas.width = img.width;
-        shelfCanvas.height = img.height;
+        invalidateShelfDownsampleCache();
         currentLoadedImage = img;
+        canvasState = {
+          scale: 1,
+          offsetX: 0,
+          offsetY: 0,
+          isDragging: false,
+          startX: 0,
+          startY: 0,
+        };
+        syncShelfCanvasBitmap();
+        ensureShelfCanvasResizeObserver();
         redrawCanvasOverlays(null);
         updateScanSteps();
         runShelfOcr(prepared, { forceRescan: false });
@@ -2960,24 +3678,7 @@ function renderDetectedSpines(options = {}) {
     authorInput.addEventListener("focus", highlight);
     authorInput.addEventListener("blur", unhighlight);
 
-    const publisherInput = document.createElement("input");
-    publisherInput.type = "text";
-    publisherInput.value = spine.publisher || "";
-    publisherInput.className = "auth-input spine-meta-input";
-    publisherInput.placeholder = "Publisher";
-    publisherInput.setAttribute("aria-label", `Spine ${index + 1} publisher`);
-    publisherInput.addEventListener("input", (e) => {
-      spine.publisher = e.target.value;
-      clearCatalogConfirmation(spine);
-      div.classList.remove("is-confirmed");
-      div.classList.toggle("needs-review", spineNeedsReview(spine));
-      redrawCanvasOverlays(activeEditingSpineIndex);
-    });
-    publisherInput.addEventListener("focus", highlight);
-    publisherInput.addEventListener("blur", unhighlight);
-
     metaRow.appendChild(authorInput);
-    metaRow.appendChild(publisherInput);
 
     const normalizedTitle = String(spine.title || "")
       .trim()
@@ -3023,7 +3724,6 @@ function renderDetectedSpines(options = {}) {
           searchResults,
         );
         if (authorInput) authorInput.value = spine.author || "";
-        if (publisherInput) publisherInput.value = spine.publisher || "";
         renderDetectedSpines({ preserveScroll: true });
       };
       actionRow.appendChild(useBestBtn);
@@ -3065,7 +3765,7 @@ function renderDetectedSpines(options = {}) {
           titleInput.value,
           authorInput.value || spine.author || "",
           {
-            publisher: publisherInput.value || spine.publisher || "",
+            publisher: spine.publisher || "",
             rawText: spine.rawText || "",
           },
         );
@@ -3074,7 +3774,6 @@ function renderDetectedSpines(options = {}) {
           onConfirm: (book) => {
             applyCatalogMatchToSpine(spine, book, titleInput, div, searchResults);
             authorInput.value = spine.author || "";
-            publisherInput.value = spine.publisher || "";
           },
         });
       } catch (err) {
@@ -3270,14 +3969,31 @@ function resetScanWorkspace() {
   pendingSavedShelfId = null;
   currentDismissedTitles = [];
   revokeSpineCropUrls();
+  invalidateShelfDownsampleCache();
   shelfPhotoCollapsed = true;
+  canvasState = {
+    scale: 1,
+    offsetX: 0,
+    offsetY: 0,
+    isDragging: false,
+    startX: 0,
+    startY: 0,
+  };
 
   if (ctx && shelfCanvas) ctx.clearRect(0, 0, shelfCanvas.width, shelfCanvas.height);
-  if (shelfCanvas) shelfCanvas.style.display = "none";
+  if (shelfCanvas) {
+    shelfCanvas.style.display = "none";
+    shelfCanvas.style.width = "";
+    shelfCanvas.style.height = "";
+  }
   if (placeholderText) placeholderText.style.display = "flex";
   setCanvasChromeVisible(false);
   if (imageUpload) imageUpload.value = "";
   if (imageCapture) imageCapture.value = "";
+  if (zoomSlider) {
+    zoomSlider.max = "4";
+    zoomSlider.value = "1";
+  }
   document.getElementById("pendingContainer").innerHTML =
     "<p class='empty-state'>Upload a new image to continue.</p>";
   updateScanSteps();
@@ -3482,9 +4198,18 @@ applyCropBtn?.addEventListener("click", async () => {
 
       const img = new Image();
       img.onload = () => {
-        shelfCanvas.width = img.width;
-        shelfCanvas.height = img.height;
+        invalidateShelfDownsampleCache();
         currentLoadedImage = img;
+        canvasState = {
+          scale: 1,
+          offsetX: 0,
+          offsetY: 0,
+          isDragging: false,
+          startX: 0,
+          startY: 0,
+        };
+        syncShelfCanvasBitmap();
+        ensureShelfCanvasResizeObserver();
         redrawCanvasOverlays(null);
         updateScanSteps();
       };
@@ -4500,7 +5225,14 @@ let mapState = {
   pinchCenterY: 0,
 };
 const MAP_VIEW_STORAGE_KEY = "hilibrary-map-view";
+const MAP_TAP_MOVE_THRESHOLD_PX = 6;
 let mapViewSaveTimer = null;
+/** Session-only: when true, shelves can be moved/resized. Default pan-first. */
+let mapArrangeMode = false;
+/** Pending book select when arrange is off (tap vs pan). */
+let pendingBookSelect = null;
+/** Touch started under a map control but hit a shelf; click on pointerup. */
+let deferredMapControlClick = null;
 
 function persistMapView(mode) {
   try {
@@ -4552,6 +5284,50 @@ const getPos = (e) => ({
   x: e.touches ? e.touches[0].clientX : e.clientX,
   y: e.touches ? e.touches[0].clientY : e.clientY,
 });
+
+function eventClientPoint(e) {
+  if (e.touches?.[0]) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  if (e.changedTouches?.[0]) {
+    return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+  }
+  return { x: e.clientX, y: e.clientY };
+}
+
+/** True when a map chrome control sits under the pointer (mobile stacking). */
+function mapControlUnderPoint(clientX, clientY) {
+  if (typeof document.elementsFromPoint !== "function") return null;
+  const hits = document.elementsFromPoint(clientX, clientY) || [];
+  for (const el of hits) {
+    if (!(el instanceof Element)) continue;
+    const control = el.closest(
+      ".map-zoom-btn, .map-arrange-btn, .manage-shelves-btn, .map-hint-close",
+    );
+    if (control) return control;
+  }
+  return null;
+}
+
+function setMapArrangeMode(enabled) {
+  mapArrangeMode = Boolean(enabled);
+  infiniteMap?.classList.toggle("is-arranging", mapArrangeMode);
+  const btn = document.getElementById("mapArrangeBtn");
+  if (btn) {
+    btn.setAttribute("aria-pressed", mapArrangeMode ? "true" : "false");
+  }
+  const hintText = document.getElementById("mapHintText");
+  if (hintText) {
+    hintText.textContent = mapArrangeMode
+      ? "Arrange on: drag shelves to move them • Resize from the corner • Turn Arrange off to pan freely"
+      : "Drag to explore • Scroll or pinch to zoom • Select a book to edit it";
+  }
+  if (!mapArrangeMode) {
+    if (activeShelfDrag) {
+      activeShelfDrag.element?.classList.remove("is-dragging");
+      activeShelfDrag = null;
+    }
+    activeShelfResize = null;
+  }
+}
 
 // Deselects active selection and restores default overlays without removing polygon paths
 function deselectAllMapBooks() {
@@ -4776,9 +5552,15 @@ async function loadLibraryMap() {
       shelfRoomRow.appendChild(select);
     }
 
-    // Keyboard: arrows nudge the shelf; Enter renames.
+    // Keyboard: arrows nudge the shelf only in arrange mode; Enter renames.
     shelfWrapper.addEventListener("keydown", (e) => {
       if (e.target.closest("button")) return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        shelfWrapper.querySelector(".edit-name-btn")?.click();
+        return;
+      }
+      if (!mapArrangeMode) return;
       const step = e.shiftKey ? 1 : 10;
       let handled = true;
       let left = parseFloat(shelfWrapper.style.left || "0");
@@ -4787,9 +5569,7 @@ async function loadLibraryMap() {
       else if (e.key === "ArrowRight") left += step;
       else if (e.key === "ArrowUp") top -= step;
       else if (e.key === "ArrowDown") top += step;
-      else if (e.key === "Enter") {
-        shelfWrapper.querySelector(".edit-name-btn")?.click();
-      } else handled = false;
+      else handled = false;
       if (!handled) return;
       e.preventDefault();
       if (e.key.startsWith("Arrow")) {
@@ -4866,9 +5646,18 @@ async function loadLibraryMap() {
           await new Promise((resolve, reject) => {
             const img = new Image();
             img.onload = () => {
-              shelfCanvas.width = img.width;
-              shelfCanvas.height = img.height;
+              invalidateShelfDownsampleCache();
               currentLoadedImage = img;
+              canvasState = {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0,
+                isDragging: false,
+                startX: 0,
+                startY: 0,
+              };
+              syncShelfCanvasBitmap();
+              ensureShelfCanvasResizeObserver();
               redrawCanvasOverlays(null);
               updateScanSteps();
               resolve();
@@ -4997,6 +5786,9 @@ async function loadLibraryMap() {
 
     const resizeHandle = shelfWrapper.querySelector(".shelf-resize-handle");
     const initShelfResize = (e) => {
+      if (!mapArrangeMode) return;
+      const pt = eventClientPoint(e);
+      if (mapControlUnderPoint(pt.x, pt.y)) return;
       e.preventDefault();
       e.stopPropagation();
       const pos = getPos(e);
@@ -5014,13 +5806,25 @@ async function loadLibraryMap() {
     });
 
     const initShelfDrag = (e) => {
+      const pt = eventClientPoint(e);
+      const controlHit = mapControlUnderPoint(pt.x, pt.y);
+      if (controlHit) {
+        const targetWasControl = Boolean(
+          e.target?.closest?.(".map-zoom-btn, .map-arrange-btn, .manage-shelves-btn"),
+        );
+        deferredMapControlClick = targetWasControl ? null : controlHit;
+        return;
+      }
       if (
         e.target.closest("svg") ||
         e.target.closest("button") ||
         e.target.closest(".book-popover") ||
-        e.target.closest(".shelf-resize-handle")
+        e.target.closest(".shelf-resize-handle") ||
+        e.target.closest("select")
       )
         return;
+      // Pan-first: only move shelves while arrange mode is on.
+      if (!mapArrangeMode) return;
       e.stopPropagation();
       const pos = getPos(e);
       activeShelfDrag = {
@@ -5154,6 +5958,11 @@ function setupMapDiscoverability() {
     e.stopPropagation();
     fitMapToShelves();
   });
+  document.getElementById("mapArrangeBtn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setMapArrangeMode(!mapArrangeMode);
+  });
+  setMapArrangeMode(false);
   document.getElementById("emptyScanBtn")?.addEventListener("click", () => {
     const scanNavBtn = document.querySelector('.nav-btn[data-target="uploadView"]');
     if (scanNavBtn) scanNavBtn.click();
@@ -5162,7 +5971,9 @@ function setupMapDiscoverability() {
 
   // Keyboard-accessible map pan/zoom (Step 8).
   infiniteMap?.addEventListener("keydown", (e) => {
-    if (e.target.closest("button, input, [role='dialog'], .shelf-card")) return;
+    if (e.target.closest("button, input, [role='dialog']")) return;
+    // Shelf cards handle their own Enter/arrow keys when arranging.
+    if (e.target.closest(".shelf-card") && mapArrangeMode) return;
     const panStep = e.shiftKey ? 10 : 60;
     let handled = true;
     if (e.key === "ArrowLeft") mapState.x += panStep;
@@ -5328,7 +6139,25 @@ function renderShelfSvgOverlays(
     polyEl.setAttribute("aria-label", `Select book ${book.title || "untitled"}`);
 
     const selectBook = (e) => {
+      const pt = eventClientPoint(e);
+      const controlHit = mapControlUnderPoint(pt.x, pt.y);
+      if (controlHit) {
+        deferredMapControlClick = controlHit;
+        e.stopPropagation();
+        return;
+      }
       e.stopPropagation();
+      // In pan mode, wait for a short tap so a drag does not zoom to the book.
+      if (!mapArrangeMode) {
+        pendingBookSelect = {
+          book,
+          books,
+          startX: pt.x,
+          startY: pt.y,
+          moved: false,
+        };
+        return;
+      }
       zoomToBookOnMap(book, { showHandles: true, books });
     };
 
@@ -5337,7 +6166,7 @@ function renderShelfSvgOverlays(
     polyEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        selectBook(e);
+        zoomToBookOnMap(book, { showHandles: true, books });
       }
     });
     polyEl.addEventListener("focus", () => {
@@ -5365,6 +6194,7 @@ function renderShelfSvgOverlays(
         circle.style.pointerEvents = "auto";
 
         const startPointDrag = (e) => {
+          if (!mapArrangeMode) return;
           e.stopPropagation();
           activeMapEditPoint = {
             book,
@@ -5402,22 +6232,38 @@ async function updateShelfName(shelfId, newName, textNode) {
 }
 
 const initMapDrag = (e) => {
+  const pt = eventClientPoint(e);
+  const controlHit = mapControlUnderPoint(pt.x, pt.y);
+  if (controlHit) {
+    // Only defer a synthetic click when the shelf/map stole the hit target.
+    const targetWasControl = Boolean(
+      e.target?.closest?.(".map-zoom-btn, .map-arrange-btn, .manage-shelves-btn, .map-hint-close"),
+    );
+    deferredMapControlClick = targetWasControl ? null : controlHit;
+    return;
+  }
+  deferredMapControlClick = null;
+
   if (
-    e.target.closest(".map-viewport > div") ||
     e.target.closest(".map-controls") ||
     e.target.closest(".map-hint") ||
     e.target.closest(".map-empty-state")
   )
     return;
 
+  // Arrange mode: shelf card handlers own the gesture (except empty map space).
+  if (mapArrangeMode && e.target.closest(".map-viewport > div")) return;
+
   // Avoid selecting chrome text (e.g. Fit) while panning across the map.
   if (e.cancelable) e.preventDefault();
   window.getSelection?.()?.removeAllRanges?.();
 
-  deselectAllMapBooks();
+  // Keep a pending book tap; deselect only when this is a clear pan start.
+  if (!pendingBookSelect) deselectAllMapBooks();
 
   // Pinch-to-zoom start
   if (e.touches && e.touches.length === 2) {
+    pendingBookSelect = null;
     const dx = e.touches[0].clientX - e.touches[1].clientX;
     const dy = e.touches[0].clientY - e.touches[1].clientY;
     mapState.pinchStartDist = Math.hypot(dx, dy);
@@ -5434,7 +6280,7 @@ const initMapDrag = (e) => {
     return;
   }
 
-  // Standard pan start
+  // Standard pan start (including over shelves when arrange is off)
   const pos = getPos(e);
   mapState.isDragging = true;
   mapState.isPinching = false;
@@ -5527,6 +6373,42 @@ const handleMove = (e) => {
     return;
   }
 
+  if (pendingBookSelect) {
+    const pos = getPos(e);
+    const dist = Math.hypot(
+      pos.x - pendingBookSelect.startX,
+      pos.y - pendingBookSelect.startY,
+    );
+    if (dist > MAP_TAP_MOVE_THRESHOLD_PX) {
+      // Promote the gesture to a map pan from the original press point.
+      if (!mapState.isDragging) {
+        mapState.isDragging = true;
+        mapState.isPinching = false;
+        mapState.startX = pendingBookSelect.startX - mapState.x;
+        mapState.startY = pendingBookSelect.startY - mapState.y;
+        infiniteMap.style.cursor = "grabbing";
+        deselectAllMapBooks();
+      }
+      pendingBookSelect = null;
+    }
+  }
+
+  if (deferredMapControlClick) {
+    const pos = getPos(e);
+    // Cancel deferred control click once the finger moves.
+    const control = deferredMapControlClick;
+    const rect = control.getBoundingClientRect?.();
+    if (
+      rect &&
+      (pos.x < rect.left - 4 ||
+        pos.x > rect.right + 4 ||
+        pos.y < rect.top - 4 ||
+        pos.y > rect.bottom + 4)
+    ) {
+      deferredMapControlClick = null;
+    }
+  }
+
   if (!activeShelfDrag && !mapState.isDragging) return;
   if (e.touches) e.preventDefault();
 
@@ -5552,7 +6434,7 @@ const handleMove = (e) => {
 window.addEventListener("mousemove", handleMove);
 window.addEventListener("touchmove", handleMove, { passive: false });
 
-const handleEnd = async () => {
+const handleEnd = async (e) => {
   if (activeMapEditPoint) {
     const book = activeMapEditPoint.book;
     if (requireOnline("", false)) {
@@ -5598,6 +6480,32 @@ const handleEnd = async () => {
     }
     activeShelfDrag = null;
   }
+
+  if (pendingBookSelect && !pendingBookSelect.moved) {
+    const { book, books } = pendingBookSelect;
+    pendingBookSelect = null;
+    mapState.isDragging = false;
+    infiniteMap.style.cursor = "grab";
+    zoomToBookOnMap(book, { showHandles: true, books });
+    deferredMapControlClick = null;
+    return;
+  }
+  pendingBookSelect = null;
+
+  // Mobile fallback: shelf stole the touch under a map control.
+  if (deferredMapControlClick instanceof HTMLButtonElement) {
+    const btn = deferredMapControlClick;
+    deferredMapControlClick = null;
+    const targetWasControl = Boolean(
+      e?.target?.closest?.(".map-zoom-btn, .map-arrange-btn, .manage-shelves-btn, .map-hint-close"),
+    );
+    if (!targetWasControl && !btn.disabled) btn.click();
+    mapState.isDragging = false;
+    mapState.isPinching = false;
+    infiniteMap.style.cursor = "grab";
+    return;
+  }
+  deferredMapControlClick = null;
 
   if (mapState.isPinching) {
     mapState.isPinching = false;

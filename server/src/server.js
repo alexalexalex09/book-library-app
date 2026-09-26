@@ -39,6 +39,7 @@ const {
   setSecurityHeaders,
 } = require("./http-security");
 const { createBillingRouter } = require("./billing");
+const { createAccountRouter } = require("./account-routes");
 const { createAdminRouter } = require("./admin-routes");
 const { createMailer } = require("./mail");
 const {
@@ -221,6 +222,14 @@ app.post(
 );
 app.use(express.json({ limit: "1mb" }));
 app.use("/api/billing", billing.router);
+app.use(
+  "/api/account",
+  createAccountRouter({
+    supabase,
+    requireAuth,
+    cancelBillingForUser: billing.cancelBillingForDeletedUser,
+  }),
+);
 const mailer = createMailer(process.env);
 const signupNotify = createSignupNotify({ supabase, mail: mailer });
 const supportAi = createSupportAi({ supabase, env: process.env });

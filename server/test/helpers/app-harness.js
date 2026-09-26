@@ -12,6 +12,7 @@ const {
   handleUploadError,
 } = require("../../src/http-security");
 const { createBillingRouter } = require("../../src/billing");
+const { createAccountRouter } = require("../../src/account-routes");
 const { createAdminRouter } = require("../../src/admin-routes");
 const { mountPublicConfigRoutes } = require("../../src/public-config");
 const { createMailer } = require("../../src/mail");
@@ -104,6 +105,14 @@ function createTestApp({
     billing.webhookHandler,
   );
   app.use("/api/billing", billing.router);
+  app.use(
+    "/api/account",
+    createAccountRouter({
+      supabase,
+      requireAuth,
+      cancelBillingForUser: billing.cancelBillingForDeletedUser,
+    }),
+  );
 
   const mailer = mail || createMailer(process.env);
   const signupNotify = createSignupNotify({ supabase, mail: mailer });
@@ -245,6 +254,15 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
         }
         return { data: { user }, error: null };
       },
+      async deleteUser(userId) {
+        const token = Object.keys(usersByToken).find(
+          (key) => usersByToken[key]?.id === userId,
+        );
+        if (!token) return { data: { user: null }, error: { message: "missing" } };
+        const user = usersByToken[token];
+        delete usersByToken[token];
+        return { data: { user }, error: null };
+      },
     },
   };
 
@@ -278,6 +296,10 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
       update(row) {
         ctx.mode = "update";
         ctx.payload = row;
+        return api;
+      },
+      delete() {
+        ctx.mode = "delete";
         return api;
       },
       eq(field, value) {
@@ -368,6 +390,16 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
       }
 
       let rows = table.filter((row) => ctx.filters.every((fn) => fn(row)));
+      if (ctx.mode === "delete") {
+        const removed = [];
+        for (let i = table.length - 1; i >= 0; i -= 1) {
+          if (ctx.filters.every((fn) => fn(table[i]))) {
+            removed.push(table.splice(i, 1)[0]);
+          }
+        }
+        return { data: removed.map(project), error: null };
+      }
+
       if (ctx.mode === "update") {
         for (const row of rows) Object.assign(row, ctx.payload);
       }
@@ -401,7 +433,20 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
     return api;
   }
 
-  return { auth, from, _tables: tables };
+  const storage = {
+    from() {
+      return {
+        async list() {
+          return { data: [], error: null };
+        },
+        async remove(paths) {
+          return { data: paths || [], error: null };
+        },
+      };
+    },
+  };
+
+  return { auth, from, storage, _tables: tables };
 }
 
 async function listen(app) {

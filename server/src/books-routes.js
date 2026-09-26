@@ -4,7 +4,7 @@ const {
   cleanSearchText,
   rankBookItems,
   preferStrongerBookResults,
-  needsTitleOnlyRetry,
+  needsSearchFallback,
   SUGGEST_SCORE,
 } = require("./book-search-rank");
 
@@ -56,14 +56,18 @@ function createBooksRouter({
         5,
       );
 
-      if (needsTitleOnlyRetry(rankedItems, author, SUGGEST_SCORE)) {
-        const titleOnlyQuery = buildGoogleBooksQuery(title, "", { rawText });
-        if (titleOnlyQuery && titleOnlyQuery !== googleQuery) {
-          const fallback = await fetchBooks(titleOnlyQuery);
+      if (needsSearchFallback(rankedItems, SUGGEST_SCORE)) {
+        // intitle: can miss catalog entries; retry as a general volumes search.
+        const generalQuery = buildGoogleBooksQuery(title, author, {
+          rawText,
+          mode: "general",
+        });
+        if (generalQuery && generalQuery !== googleQuery) {
+          const fallback = await fetchBooks(generalQuery);
           if (fallback.status === 200) {
             const fallbackRanked = rankBookItems(
               fallback.data?.items || [],
-              { title, author: "", publisher },
+              { title, author, publisher },
               5,
             );
             rankedItems = preferStrongerBookResults(

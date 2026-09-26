@@ -1,3 +1,5 @@
+const { toBookTitleCase } = require("./title-case");
+
 /**
  * Orientation-aware reading order for OCR words on book spines.
  * Words may include optional angleDeg (from Vision boundingPoly); missing
@@ -93,18 +95,58 @@ function clusterByY(words, thresh = LINE_CLUSTER_THRESH) {
   return lines;
 }
 
-function clusterByX(words, thresh = LINE_CLUSTER_THRESH) {
-  const sorted = [...words].sort((a, b) => a.x - b.x);
-  const cols = [];
+function clusterByAdjacent(words, key, thresh) {
+  const sorted = [...words].sort((a, b) => a[key] - b[key]);
+  const groups = [];
   for (const w of sorted) {
-    const last = cols[cols.length - 1];
-    if (last && Math.abs(last[0].x - w.x) <= thresh) {
+    const last = groups[groups.length - 1];
+    if (last && Math.abs(last[last.length - 1][key] - w[key]) <= thresh) {
       last.push(w);
     } else {
-      cols.push([w]);
+      groups.push([w]);
     }
   }
-  return cols;
+  return groups;
+}
+
+/** Circular mean of word angles, or null when none are known. */
+function meanAngleDeg(words) {
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (const w of words) {
+    if (!Number.isFinite(w.angleDeg)) continue;
+    const rad = (w.angleDeg * Math.PI) / 180;
+    sx += Math.cos(rad);
+    sy += Math.sin(rad);
+    n++;
+  }
+  if (!n) return null;
+  return normalizeAngleDeg((Math.atan2(sy, sx) * 180) / Math.PI);
+}
+
+/**
+ * Angle whose reading vector points downward (image +y).
+ * Bottom-to-top spines are flipped so column order stays top-to-bottom
+ * before sortVerticalUp reverses it.
+ */
+function downwardReadingAngle(words) {
+  const angle = meanAngleDeg(words);
+  if (angle == null) return 90;
+  const rad = (angle * Math.PI) / 180;
+  if (Math.sin(rad) < 0) return normalizeAngleDeg(angle + 180);
+  return angle;
+}
+
+function projectOntoReadingAngle(word, angleDeg) {
+  const rad = (angleDeg * Math.PI) / 180;
+  const alongX = Math.cos(rad);
+  const alongY = Math.sin(rad);
+  return {
+    ...word,
+    along: word.x * alongX + word.y * alongY,
+    across: word.x * -alongY + word.y * alongX,
+  };
 }
 
 /** Horizontal upright: lines T→B, words L→R within line. */
@@ -124,17 +166,25 @@ function sortHorizontalUpsideDown(words) {
 }
 
 /**
- * Vertical reading down the spine (T→B). If multiple columns (x spread),
- * columns are read R→L, then T→B within each column.
+ * Vertical reading down the spine (T→B). Columns are separated on the axis
+ * perpendicular to the text angle. A tilted single line drifts in x and must
+ * not be split into right-to-left columns. Multiple real columns are still
+ * read R→L, then along the reading direction within each column.
  */
 function sortVerticalDown(words) {
   if (words.length <= 1) return [...words];
-  const xs = words.map((w) => w.x);
-  const spread = Math.max(...xs) - Math.min(...xs);
+  const angle = downwardReadingAngle(words);
+  const projected = words.map((w) => projectOntoReadingAngle(w, angle));
+  const acrossValues = projected.map((w) => w.across);
+  const spread = Math.max(...acrossValues) - Math.min(...acrossValues);
   if (spread < COLUMN_SPREAD_THRESH) {
-    return [...words].sort((a, b) => a.y - b.y || a.x - b.x);
+    return projected.sort((a, b) => a.along - b.along || a.x - b.x);
   }
-  const cols = clusterByX(words, Math.max(LINE_CLUSTER_THRESH, spread / 4));
+  const cols = clusterByAdjacent(
+    projected,
+    "across",
+    Math.max(LINE_CLUSTER_THRESH, spread / 4),
+  );
   // Right-to-left columns
   cols.sort((a, b) => {
     const ax = a.reduce((s, w) => s + w.x, 0) / a.length;
@@ -143,7 +193,7 @@ function sortVerticalDown(words) {
   });
   const ordered = [];
   for (const col of cols) {
-    col.sort((a, b) => a.y - b.y);
+    col.sort((a, b) => a.along - b.along || a.y - b.y);
     ordered.push(...col);
   }
   return ordered;
@@ -186,10 +236,12 @@ function assembleSpineTitleLegacy(matchedWords, spineBox) {
     spineBox &&
     spineBox.maxX - spineBox.minX > spineBox.maxY - spineBox.minY;
   words.sort((a, b) => (isHorizontal ? a.x - b.x : a.y - b.y));
-  return words
-    .map((w) => w.text)
-    .join(" ")
-    .trim();
+  return toBookTitleCase(
+    words
+      .map((w) => w.text)
+      .join(" ")
+      .trim(),
+  );
 }
 
 /**
@@ -264,7 +316,7 @@ function assembleSpineTitle(matchedWords, spineBox) {
     if (text) parts.push(text);
   }
 
-  return parts.join(" ").trim();
+  return toBookTitleCase(parts.join(" ").trim());
 }
 
 module.exports = {

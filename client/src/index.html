@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="ShelfMapper">
   
   <!-- CSS Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=38">
+  <link rel="stylesheet" href="css/style.css?v=41">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500;1,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -106,6 +106,7 @@
 
         <nav class="auth-legal-links" aria-label="Policies and pricing">
           <a href="/pricing.html">Pricing</a>
+          <a href="/help.html">Help</a>
           <a href="/support.html">Support</a>
           <a href="/terms.html">Terms</a>
           <a href="/privacy.html">Privacy</a>
@@ -152,8 +153,12 @@
           <span id="planBadge" class="plan-badge">Free</span>
           <p id="accountScansRemaining" class="account-menu-meta">Scans remaining: --</p>
           <button id="accountUpgradeLink" class="account-menu-link" type="button">Upgrade to Premium</button>
+          <button id="accountDetailsBtn" class="account-menu-btn" type="button" role="menuitem">Account details</button>
+          <button id="accountEmailBtn" class="account-menu-btn" type="button" role="menuitem">Email address</button>
           <button id="upgradeBtn" class="account-menu-btn" type="button">Start 7-day trial</button>
           <button id="manageBillingBtn" class="account-menu-btn hidden-element" type="button">Manage billing</button>
+          <button id="accountDeleteBtn" class="account-menu-btn account-menu-btn-danger" type="button" role="menuitem">Delete account</button>
+          <a id="accountHelpLink" class="account-menu-btn" role="menuitem" href="/help.html">Help</a>
           <button id="logoutBtn" class="account-menu-btn" type="button">Logout</button>
         </div>
       </div>
@@ -214,8 +219,24 @@
           <section class="scan-wizard-card">
             <header class="scan-wizard-head">
               <p id="scanWizardStepNumber" class="scan-stage-tag">Step 1 of 2</p>
-              <h2 id="scanWizardStepName" class="page-title">Photograph your shelf</h2>
-              <p id="scanWizardStepDescription" class="scan-stage-description">Take a straight-on shot of one shelf with spines facing forward. Decent light, no glare. That's all it takes.</p>
+              <div class="scan-wizard-title-row">
+                <h2 id="scanWizardStepName" class="page-title">Photograph your shelf</h2>
+                <button
+                  id="scanWizardHelpBtn"
+                  class="scan-wizard-help-btn"
+                  type="button"
+                  aria-expanded="false"
+                  aria-controls="scanWizardStepDescription"
+                  aria-label="About this step"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                  </svg>
+                </button>
+              </div>
+              <p id="scanWizardStepDescription" class="scan-stage-description" role="dialog" aria-label="About this step" tabindex="-1" hidden>Take a straight-on shot of one shelf with spines facing forward. Decent light, no glare. That's all it takes.</p>
             </header>
 
             <div class="scan-footer-row">
@@ -296,12 +317,13 @@
               <button id="mapZoomIn" class="map-zoom-btn" type="button" aria-label="Zoom map in">+</button>
               <button id="mapFitBtn" class="map-zoom-btn map-fit-btn" type="button">Fit</button>
             </div>
+            <button id="mapArrangeBtn" class="map-zoom-btn map-arrange-btn" type="button" aria-pressed="false" aria-label="Arrange shelves. Off: drag pans the map. On: drag moves shelves.">Arrange</button>
           </div>
           <div class="map-viewport" id="mapViewport">
             <!-- Draggable shelf objects will be dynamically injected here via app.js -->
           </div>
           <div id="mapHint" class="map-hint" role="status">
-            <span>Drag to explore &bull; Scroll or pinch to zoom &bull; Select a book to edit it</span>
+            <span id="mapHintText">Drag to explore &bull; Scroll or pinch to zoom &bull; Select a book to edit it</span>
             <button id="mapHintClose" class="map-hint-close" type="button">Got it</button>
           </div>
           <div id="mapEmptyState" class="map-empty-state hidden-element">
@@ -552,11 +574,56 @@
     </div>
   </div>
 
+  <div id="accountDetailsModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="accountDetailsTitle">
+    <div class="modal-content modal-dialog account-panel-dialog" role="document">
+      <h2 id="accountDetailsTitle" class="modal-title">Account details</h2>
+      <p id="accountDetailsHint" class="modal-message">Plan, usage, and library totals. Change Premium in Stripe.</p>
+      <dl id="accountStatsList" class="account-stats"></dl>
+      <div class="modal-actions">
+        <button id="accountDetailsCloseBtn" class="auth-btn secondary-btn modal-btn" type="button">Close</button>
+        <button id="accountDetailsStripeBtn" class="auth-btn primary-btn modal-btn" type="button">Change plan in Stripe</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="accountEmailModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="accountEmailTitle" aria-describedby="accountEmailHint">
+    <div class="modal-content modal-dialog account-panel-dialog" role="document">
+      <h2 id="accountEmailTitle" class="modal-title">Email address</h2>
+      <p id="accountEmailHint" class="modal-message">This is the address you use to sign in. A new address takes effect after you confirm it from your inbox.</p>
+      <p id="accountEmailCurrent" class="account-email-current"></p>
+      <p id="accountEmailStatus" class="account-menu-meta"></p>
+      <p id="accountEmailPending" class="account-panel-note hidden-element"></p>
+      <p id="accountEmailProviderNote" class="account-panel-note hidden-element"></p>
+      <form id="accountEmailForm">
+        <label class="modal-input-label" for="accountEmailInput">New email address</label>
+        <input id="accountEmailInput" class="auth-input modal-input" type="email" autocomplete="email" required />
+      </form>
+      <div class="modal-actions">
+        <button id="accountEmailCloseBtn" class="auth-btn secondary-btn modal-btn" type="button">Close</button>
+        <button id="accountEmailSaveBtn" class="auth-btn primary-btn modal-btn" type="submit" form="accountEmailForm">Send confirmation</button>
+      </div>
+      <button id="accountEmailResendBtn" class="account-menu-link hidden-element" type="button">Resend confirmation email</button>
+    </div>
+  </div>
+
+  <div id="accountDeleteModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="accountDeleteTitle" aria-describedby="accountDeleteMessage">
+    <div class="modal-content modal-dialog account-panel-dialog" role="document">
+      <h2 id="accountDeleteTitle" class="modal-title">Delete account</h2>
+      <p id="accountDeleteMessage" class="modal-message">This permanently deletes your ShelfMapper account, library, shelves, and photos. An active Premium plan is canceled in Stripe so you are not billed again. This cannot be undone.</p>
+      <label class="modal-input-label" for="accountDeleteConfirmInput">Type DELETE to confirm</label>
+      <input id="accountDeleteConfirmInput" class="auth-input modal-input" type="text" autocomplete="off" spellcheck="false" />
+      <div class="modal-actions">
+        <button id="accountDeleteCancelBtn" class="auth-btn secondary-btn modal-btn" type="button">Cancel</button>
+        <button id="accountDeleteConfirmBtn" class="auth-btn primary-btn modal-btn modal-btn-danger" type="button" disabled>Delete account</button>
+      </div>
+    </div>
+  </div>
+
   <script src="js/offline-store.js?v=14"></script>
   <script src="js/pwa.js?v=2"></script>
   <script src="js/legal.js?v=1"></script>
   <script src="js/prompt-utils.js?v=1"></script>
   <script src="js/api.js"></script>
-  <script src="js/app.js?v=36"></script>
+  <script src="js/app.js?v=40"></script>
 </body>
 </html>

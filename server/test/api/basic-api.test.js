@@ -119,6 +119,7 @@ describe("API integration", () => {
       ["GET", "/api/rooms"],
       ["GET", "/api/shares"],
       ["GET", "/api/billing/status"],
+      ["GET", "/api/account"],
     ]) {
       it(`returns 401 for ${route[0]} ${route[1]} without Bearer`, async () => {
         const response = await fetch(`${baseUrl}${route[1]}`, {

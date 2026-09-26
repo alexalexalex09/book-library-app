@@ -288,8 +288,8 @@ alter table public.support_tickets enable row level security;
 alter table public.support_ticket_messages enable row level security;
 revoke all on public.support_tickets from anon, authenticated;
 revoke all on public.support_ticket_messages from anon, authenticated;
-grant select, insert, update on public.support_tickets to service_role;
-grant select, insert on public.support_ticket_messages to service_role;
+grant select, insert, update, delete on public.support_tickets to service_role;
+grant select, insert, delete on public.support_ticket_messages to service_role;
 
 insert into public.admin_settings (key, value)
 values ('support_notify_mode', '{"mode":"immediate"}'::jsonb)

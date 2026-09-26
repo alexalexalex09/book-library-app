@@ -33,6 +33,8 @@ describe("spine-ai-refine", () => {
     assert.match(prompt, /already in reading order/);
     assert.match(prompt, /Do not rebuild or reorder the title from "rawText"/);
     assert.match(prompt, /Use "rawText" only to fill author and publisher/);
+    assert.match(prompt, /book title case/);
+    assert.match(prompt, /a, an, the/);
     assert.match(prompt, /"title": "The Hobbit"/);
     assert.match(prompt, /"rawText": "The Hobbit Tolkien"/);
   });
@@ -82,5 +84,25 @@ describe("spine-ai-refine", () => {
     assert.equal(result[0].rawText, "Dune Herbert");
     assert.equal(result[0].score, 0.5);
     assert.equal("matchedWords" in result[0], false);
+  });
+
+  it("returns titles in book title case", () => {
+    const result = spinesForClientResponse(
+      [
+        {
+          title: "THE LORD OF THE RINGS",
+          author: "",
+          publisher: "",
+          rawText: "THE LORD OF THE RINGS TOLKIEN",
+          score: 0.8,
+          box: null,
+          polygon: null,
+          matchedWords: [],
+        },
+      ],
+      [{ id: 0, title: "FOR WHOM THE BELL TOLLS", author: "Ernest Hemingway", publisher: "" }],
+    );
+    assert.equal(result[0].title, "For Whom the Bell Tolls");
+    assert.equal(result[0].author, "Ernest Hemingway");
   });
 });
