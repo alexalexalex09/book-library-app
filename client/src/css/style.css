@@ -3287,19 +3287,39 @@ a.account-menu-btn {
   color: var(--danger);
 }
 
-.account-details-delete {
-  align-self: flex-start;
+.account-details-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
   margin: 2px 0 10px;
+}
+
+.account-details-action,
+.account-details-delete {
+  margin: 0;
   padding: 0;
   border: none;
   background: none;
-  color: var(--danger);
   font-family: var(--font-sans);
   font-size: 0.92rem;
   font-weight: 600;
   line-height: 1.25;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.account-details-action {
+  color: var(--primary);
+}
+
+.account-details-action:hover,
+.account-details-action:focus-visible {
+  color: var(--primary);
+}
+
+.account-details-delete {
+  color: var(--danger);
 }
 
 .account-details-delete:hover,

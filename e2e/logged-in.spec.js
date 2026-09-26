@@ -67,7 +67,7 @@ test.describe("logged-in smoke", () => {
       page.locator("#upgradeBtn, #manageBillingBtn").first(),
     ).toBeVisible();
     await expect(page.locator("#accountDetailsBtn")).toBeVisible();
-    await expect(page.locator("#accountEmailBtn")).toBeVisible();
+    await expect(page.locator("#accountMenu #accountEmailBtn")).toHaveCount(0);
     await expect(page.locator("#accountMenu #accountDeleteBtn")).toHaveCount(0);
     await expect(page.locator("#accountHelpLink")).toBeVisible();
     await expect(page.locator("#accountHelpLink")).toHaveAttribute("href", "/help.html");
@@ -79,15 +79,13 @@ test.describe("logged-in smoke", () => {
     await expect(page.locator("#accountStatsList")).toContainText(/Plan/i);
     await expect(page.locator("#accountStatsList")).toContainText(/Scans remaining/i);
     await expect(page.locator("#accountDetailsStripeBtn")).toBeVisible();
+    await expect(page.locator("#accountDetailsModal #accountEmailBtn")).toBeVisible();
     await expect(page.locator("#accountDetailsModal #accountDeleteBtn")).toBeVisible();
-    await page.locator("#accountDetailsCloseBtn").click();
-    await expect(page.locator("#accountDetailsModal")).toHaveClass(/hidden-view/);
-
-    await page.locator("#accountMenuBtn").click();
     await page.locator("#accountEmailBtn").click();
     await expect(page.locator("#accountEmailModal")).toBeVisible();
     await expect(page.locator("#accountEmailCurrent")).not.toBeEmpty();
     await page.locator("#accountEmailCloseBtn").click();
+    await expect(page.locator("#accountDetailsModal")).toHaveClass(/hidden-view/);
   });
 });
 

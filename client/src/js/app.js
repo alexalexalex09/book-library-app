@@ -1214,6 +1214,10 @@ function closeAccountEmail() {
 
 function openAccountEmail() {
   closeAccountMenu();
+  const detailsModal = document.getElementById("accountDetailsModal");
+  if (detailsModal && !detailsModal.classList.contains("hidden-view")) {
+    closeAccountDetails();
+  }
   if (!currentUser?.id || !requireOnline("Email address")) return;
   const modal = document.getElementById("accountEmailModal");
   if (!modal) return;

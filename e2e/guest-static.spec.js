@@ -114,10 +114,11 @@ test.describe("guest and static pages", () => {
     await expect(page.locator("#photoSourceCancelBtn")).toBeAttached();
   });
 
-  test("account menu includes details, email, help, and support", async ({ page }) => {
+  test("account menu includes details, help, and support", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator("#accountDetailsBtn")).toBeAttached();
-    await expect(page.locator("#accountEmailBtn")).toBeAttached();
+    await expect(page.locator("#accountMenu #accountEmailBtn")).toHaveCount(0);
+    await expect(page.locator("#accountDetailsModal #accountEmailBtn")).toBeAttached();
     await expect(page.locator("#accountMenu #accountDeleteBtn")).toHaveCount(0);
     await expect(page.locator("#accountDetailsModal #accountDeleteBtn")).toBeAttached();
     await expect(page.locator("#accountHelpLink")).toHaveAttribute("href", "/help.html");
