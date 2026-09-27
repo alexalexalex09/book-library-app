@@ -121,15 +121,19 @@ function createAccountRouter({ supabase, requireAuth, cancelBillingForUser }) {
     }
 
     try {
-      await removeUserStorage(supabase, user.id);
+      // Auth deletion cascades library rows. Wipe storage only after that
+      // commits so a later Auth failure cannot leave an active account
+      // without its shelf photos.
       await purgeSupportTickets(supabase, user.id);
       const { error } = await supabase.auth.admin.deleteUser(user.id);
       if (error) throw new Error(error.message || "Failed to delete account");
-      return res.json({ ok: true });
     } catch (error) {
       console.error("Account delete failed:", error?.message || error);
       return res.status(500).json({ error: "Failed to delete account" });
     }
+
+    await removeUserStorage(supabase, user.id);
+    return res.json({ ok: true });
   });
 
   return router;
