@@ -224,7 +224,14 @@ function createTestApp({
   };
 }
 
-function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
+function createMockSupabase({
+  usersByToken = {},
+  tables = {},
+  storageObjects = [],
+} = {}) {
+  const storageFiles = storageObjects.map((item) => ({ ...item }));
+  const removedStoragePaths = [];
+  const failDeleteUserIds = new Set();
   const auth = {
     async getUser(token) {
       const user = usersByToken[token];
@@ -255,6 +262,9 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
         return { data: { user }, error: null };
       },
       async deleteUser(userId) {
+        if (failDeleteUserIds.has(userId)) {
+          return { data: { user: null }, error: { message: "auth unavailable" } };
+        }
         const token = Object.keys(usersByToken).find(
           (key) => usersByToken[key]?.id === userId,
         );
@@ -436,17 +446,47 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
   const storage = {
     from() {
       return {
-        async list() {
-          return { data: [], error: null };
+        async list(prefix = "", { limit = 100, offset = 0 } = {}) {
+          const prefixNorm = String(prefix || "");
+          const items = storageFiles
+            .filter((file) => {
+              const path = String(file.path || "");
+              if (!prefixNorm) return !path.includes("/");
+              return (
+                path.startsWith(`${prefixNorm}/`) &&
+                !path.slice(prefixNorm.length + 1).includes("/")
+              );
+            })
+            .map((file) => ({
+              id: file.id || file.path,
+              name: String(file.path || "").split("/").pop(),
+            }));
+          return {
+            data: items.slice(offset, offset + limit),
+            error: null,
+          };
         },
         async remove(paths) {
-          return { data: paths || [], error: null };
+          const doomed = new Set(paths || []);
+          removedStoragePaths.push(...doomed);
+          for (let i = storageFiles.length - 1; i >= 0; i -= 1) {
+            if (doomed.has(storageFiles[i].path)) storageFiles.splice(i, 1);
+          }
+          return { data: [...doomed], error: null };
         },
       };
     },
   };
 
-  return { auth, from, storage, _tables: tables };
+  return {
+    auth,
+    from,
+    storage,
+    _tables: tables,
+    _storageFiles: storageFiles,
+    _removedStoragePaths: removedStoragePaths,
+    _failDeleteUserIds: failDeleteUserIds,
+  };
 }
 
 async function listen(app) {

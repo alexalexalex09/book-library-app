@@ -28,6 +28,15 @@ const PAID_USER = {
   identities: [{ provider: "email" }],
 };
 
+const PHOTO_USER = {
+  id: "user-photos",
+  email: "photos@example.com",
+  created_at: "2026-03-01T00:00:00.000Z",
+  email_confirmed_at: "2026-03-01T01:00:00.000Z",
+  app_metadata: { plan: "free" },
+  identities: [{ provider: "email" }],
+};
+
 describe("account API", { concurrency: 1 }, () => {
   let baseUrl;
   let close;
@@ -39,7 +48,12 @@ describe("account API", { concurrency: 1 }, () => {
       usersByToken: {
         "token-free": FREE_USER,
         "token-paid": PAID_USER,
+        "token-photos": PHOTO_USER,
       },
+      storageObjects: [
+        { id: "obj-free", path: "user-free/shelf.jpg" },
+        { id: "obj-photos", path: "user-photos/shelf.jpg" },
+      ],
       tables: {
         user_books: [
           { id: 1, user_id: "user-free", title: "One" },
@@ -142,6 +156,29 @@ describe("account API", { concurrency: 1 }, () => {
     );
   });
 
+  it("keeps shelf photos when Auth user deletion fails", async () => {
+    supabase._failDeleteUserIds.add("user-photos");
+    const response = await fetch(`${baseUrl}/api/account/delete`, {
+      method: "POST",
+      headers: {
+        ...authHeaders("token-photos"),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ confirm: "DELETE" }),
+    });
+    assert.equal(response.status, 500);
+    const stillThere = await supabase.auth.getUser("token-photos");
+    assert.equal(stillThere.data.user.id, "user-photos");
+    assert.equal(
+      supabase._removedStoragePaths.includes("user-photos/shelf.jpg"),
+      false,
+    );
+    assert.equal(
+      supabase._storageFiles.some((file) => file.path === "user-photos/shelf.jpg"),
+      true,
+    );
+  });
+
   it("deletes a free account and its support history", async () => {
     const response = await fetch(`${baseUrl}/api/account/delete`, {
       method: "POST",
@@ -159,6 +196,10 @@ describe("account API", { concurrency: 1 }, () => {
     assert.equal(
       supabase._tables.support_tickets.some((row) => row.user_id === "user-free"),
       false,
+    );
+    assert.equal(
+      supabase._removedStoragePaths.includes("user-free/shelf.jpg"),
+      true,
     );
   });
 });
