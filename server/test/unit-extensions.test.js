@@ -127,6 +127,10 @@ describe("photo source chooser markup", () => {
       path.join(__dirname, "../../client/src/js/app.js"),
       "utf8",
     );
+    const styleCss = fs.readFileSync(
+      path.join(__dirname, "../../client/src/css/style.css"),
+      "utf8",
+    );
 
     assert.match(
       indexHtml,
@@ -143,6 +147,9 @@ describe("photo source chooser markup", () => {
     assert.match(indexHtml, /id="photoSourceModal"/);
     assert.match(indexHtml, /id="photoSourceCameraBtn"/);
     assert.match(indexHtml, /id="photoSourceLibraryBtn"/);
+    assert.match(indexHtml, /for="imageCapture"/);
+    assert.match(indexHtml, /for="imageUpload"/);
+    assert.doesNotMatch(styleCss, /\.visually-hidden-input\s*\{[^}]*display:\s*none/);
     assert.match(appJs, /function openPhotoSourceChooser\(/);
     assert.match(appJs, /function isMobilePhotoSourceLayout\(/);
     assert.match(appJs, /max-width:\s*768px/);

@@ -173,6 +173,9 @@ test.describe("logged-in mobile library sheet", () => {
     ]);
     expect(libraryChooser.isMultiple()).toBeTruthy();
 
+    await page.locator("#photoSourceCancelBtn").click();
+    await expect(page.locator("#photoSourceModal")).toHaveClass(/hidden-view/);
+
     await page.locator("#placeholderText").click();
     await expect(page.locator("#photoSourceModal")).toBeVisible();
     const [cameraChooser] = await Promise.all([

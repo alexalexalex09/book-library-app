@@ -937,13 +937,44 @@ function showToast(message, type = "info", durationMs = 4200) {
 }
 
 let lastFocusedBeforeModal = null;
+const modalsLockingScroll = new Set();
+let modalScrollLockY = 0;
+
+function lockBodyScrollForModal(modal) {
+  if (!modal || modalsLockingScroll.has(modal)) return;
+  if (modalsLockingScroll.size === 0) {
+    modalScrollLockY = window.scrollY || document.documentElement.scrollTop || 0;
+    document.body.style.top = `-${modalScrollLockY}px`;
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    document.body.style.width = "100%";
+    document.body.style.position = "fixed";
+  }
+  modalsLockingScroll.add(modal);
+}
+
+function unlockBodyScrollForModal(modal) {
+  if (!modal || !modalsLockingScroll.has(modal)) return false;
+  modalsLockingScroll.delete(modal);
+  if (modalsLockingScroll.size > 0) return false;
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.left = "";
+  document.body.style.right = "";
+  document.body.style.width = "";
+  return true;
+}
 
 function getFocusableIn(container) {
   return Array.from(
     container.querySelectorAll(
       'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
     ),
-  ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+  ).filter(
+    (el) =>
+      !el.classList.contains("visually-hidden-input") &&
+      (el.offsetParent !== null || el === document.activeElement),
+  );
 }
 
 function trapFocusInModal(modal, e) {
@@ -966,6 +997,7 @@ function trapFocusInModal(modal, e) {
 
 function openModalWithFocus(modal, focusTarget) {
   lastFocusedBeforeModal = document.activeElement;
+  lockBodyScrollForModal(modal);
   modal.classList.remove("hidden-view");
   const target = focusTarget || getFocusableIn(modal)[0];
   if (target) setTimeout(() => target.focus(), 0);
@@ -973,10 +1005,13 @@ function openModalWithFocus(modal, focusTarget) {
 
 function closeModalAndRestore(modal) {
   modal.classList.add("hidden-view");
+  const restoreY = modalScrollLockY;
+  const shouldRestoreScroll = unlockBodyScrollForModal(modal);
   if (lastFocusedBeforeModal && document.contains(lastFocusedBeforeModal)) {
     lastFocusedBeforeModal.focus();
   }
   lastFocusedBeforeModal = null;
+  if (shouldRestoreScroll) window.scrollTo(0, restoreY);
 }
 
 let pendingUpgradeFeature = null;
@@ -1000,7 +1035,11 @@ function showUpgradeModal({ reason = "", featureCode = "" } = {}) {
   }
   markCurrentPlanInUpgradeModal();
   pendingUpgradeFeature = featureCode || null;
-  openModalWithFocus(modal, document.getElementById("upgradeMonthlyBtn"));
+  const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
+  openModalWithFocus(
+    modal,
+    coarsePointer ? modal : document.getElementById("upgradeMonthlyBtn"),
+  );
 }
 
 function closeUpgradeModal() {
@@ -3309,12 +3348,61 @@ async function handleSelectedImageFiles(fileList) {
   beginScanForFile(allowedFiles[0]);
 }
 
-imageUpload?.addEventListener("change", async (e) => {
-  await handleSelectedImageFiles(e.target.files);
-});
+const CAPTURE_PENDING_KEY = "shelfmapper-capture-pending";
+let closePhotoSourceChooser = () => {};
 
-imageCapture?.addEventListener("change", async (e) => {
-  await handleSelectedImageFiles(e.target.files);
+function markCapturePending() {
+  try {
+    sessionStorage.setItem(CAPTURE_PENDING_KEY, "1");
+  } catch {
+    // Private mode can block sessionStorage; the photo can still load.
+  }
+}
+
+function clearCapturePending() {
+  try {
+    sessionStorage.removeItem(CAPTURE_PENDING_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function captureStillPending() {
+  try {
+    return sessionStorage.getItem(CAPTURE_PENDING_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+async function consumeImageInput(event) {
+  const input = event.target;
+  const selected = Array.from(input?.files || []);
+  if (input) input.value = "";
+  clearCapturePending();
+  if (!selected.length) return;
+  await handleSelectedImageFiles(selected);
+  closePhotoSourceChooser();
+}
+
+function onImageInputCancel() {
+  clearCapturePending();
+}
+
+imageUpload?.addEventListener("change", consumeImageInput);
+imageCapture?.addEventListener("change", consumeImageInput);
+imageUpload?.addEventListener("cancel", onImageInputCancel);
+imageCapture?.addEventListener("cancel", onImageInputCancel);
+
+window.addEventListener("pageshow", () => {
+  if (!captureStillPending()) return;
+  window.setTimeout(() => {
+    if (!captureStillPending()) return;
+    const hasFile = (imageCapture?.files?.length || 0) + (imageUpload?.files?.length || 0) > 0;
+    if (hasFile) return;
+    clearCapturePending();
+    showToast("That photo didn't come back. Take it again.", "info");
+  }, 1000);
 });
 
 function isMobilePhotoSourceLayout() {
@@ -3345,12 +3433,18 @@ function openPhotoSourceChooser() {
     }
   };
   const onCamera = () => {
-    imageCapture?.click();
-    cleanup();
+    markCapturePending();
   };
-  const onLibrary = () => {
+  const onCameraKey = (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    markCapturePending();
+    imageCapture?.click();
+  };
+  const onLibraryKey = (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
     imageUpload?.click();
-    cleanup();
   };
   const onCancel = () => cleanup();
   const onOverlay = (e) => {
@@ -3359,15 +3453,20 @@ function openPhotoSourceChooser() {
 
   function cleanup() {
     cameraBtn.removeEventListener("click", onCamera);
-    libraryBtn.removeEventListener("click", onLibrary);
+    cameraBtn.removeEventListener("keydown", onCameraKey);
+    libraryBtn.removeEventListener("keydown", onLibraryKey);
     cancelBtn.removeEventListener("click", onCancel);
     modal.removeEventListener("keydown", onKey);
     modal.removeEventListener("click", onOverlay);
+    closePhotoSourceChooser = () => {};
+    clearCapturePending();
     closeModalAndRestore(modal);
   }
 
+  closePhotoSourceChooser = cleanup;
   cameraBtn.addEventListener("click", onCamera);
-  libraryBtn.addEventListener("click", onLibrary);
+  cameraBtn.addEventListener("keydown", onCameraKey);
+  libraryBtn.addEventListener("keydown", onLibraryKey);
   cancelBtn.addEventListener("click", onCancel);
   modal.addEventListener("keydown", onKey);
   modal.addEventListener("click", onOverlay);
@@ -5321,6 +5420,13 @@ function setMapArrangeMode(enabled) {
   const btn = document.getElementById("mapArrangeBtn");
   if (btn) {
     btn.setAttribute("aria-pressed", mapArrangeMode ? "true" : "false");
+    btn.textContent = mapArrangeMode ? "Stop Arranging" : "Arrange";
+    btn.setAttribute(
+      "aria-label",
+      mapArrangeMode
+        ? "Stop Arranging. Drag moves shelves. Turn off to pan the map."
+        : "Arrange shelves. Off: drag pans the map. On: drag moves shelves.",
+    );
   }
   const hintText = document.getElementById("mapHintText");
   if (hintText) {
