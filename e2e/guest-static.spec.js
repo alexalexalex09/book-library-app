@@ -129,4 +129,24 @@ test.describe("guest and static pages", () => {
     await expect(page.locator("#accountDetailsStripeBtn")).toHaveText(/Stripe/i);
     await expect(page.locator("#accountEmailSaveBtn")).toHaveText(/confirmation/i);
   });
+
+  test("legal accept modal unlocks body scroll when closed", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator("#legalAcceptModal")).toBeAttached();
+
+    await page.evaluate(() => {
+      window.scrollTo(0, 240);
+      window.showLegalAcceptModal();
+    });
+    await expect(page.locator("#legalAcceptModal")).not.toHaveClass(/hidden-view/);
+    await expect.poll(async () =>
+      page.evaluate(() => document.body.style.position),
+    ).toBe("fixed");
+
+    await page.evaluate(() => window.closeLegalAcceptModal());
+    await expect(page.locator("#legalAcceptModal")).toHaveClass(/hidden-view/);
+    await expect.poll(async () =>
+      page.evaluate(() => document.body.style.position),
+    ).toBe("");
+  });
 });

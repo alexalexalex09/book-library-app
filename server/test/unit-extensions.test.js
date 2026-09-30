@@ -156,3 +156,25 @@ describe("photo source chooser markup", () => {
     assert.match(appJs, /activateUpload = \(\) => openPhotoSourceChooser\(\)/);
   });
 });
+
+describe("legal accept modal scroll lock", () => {
+  it("closes through closeModalAndRestore so body scroll is unlocked", () => {
+    const appJs = fs.readFileSync(
+      path.join(__dirname, "../../client/src/js/app.js"),
+      "utf8",
+    );
+
+    assert.match(
+      appJs,
+      /function showLegalAcceptModal\([\s\S]*?openModalWithFocus\(modal/,
+    );
+    assert.match(
+      appJs,
+      /function closeLegalAcceptModal\(\) \{[\s\S]*?closeModalAndRestore\(modal\)/,
+    );
+    assert.doesNotMatch(
+      appJs,
+      /function closeLegalAcceptModal\(\) \{[\s\S]*?modal\.classList\.add\("hidden-view"\)/,
+    );
+  });
+});
