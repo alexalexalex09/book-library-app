@@ -1512,9 +1512,11 @@ function closeLegalAcceptModal() {
   const modal = document.getElementById("legalAcceptModal");
   if (!modal) return;
   legalAcceptModalOpen = false;
-  modal.classList.add("hidden-view");
   const checkbox = document.getElementById("legalAcceptCheckbox");
   if (checkbox) checkbox.checked = false;
+  // Must unlock the body scroll lock from openModalWithFocus; hiding the
+  // overlay alone leaves position:fixed and the app cannot scroll.
+  closeModalAndRestore(modal);
 }
 
 function showLegalAcceptModal({ isUpdate = false } = {}) {
