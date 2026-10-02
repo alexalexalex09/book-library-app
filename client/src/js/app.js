@@ -5824,16 +5824,19 @@ async function loadLibraryMap() {
           confirmLabel: "Delete",
         });
         if (!confirmed) return;
-        await supabaseClient
-          .from("user_books")
-          .delete()
-          .eq("shelf_id", shelf.id)
-          .eq("user_id", currentUser.id);
-        await supabaseClient
-          .from("shelves")
-          .delete()
-          .eq("id", shelf.id)
-          .eq("user_id", currentUser.id);
+        let error = null;
+        try {
+          ({ error } = await deleteShelfById(supabaseClient, {
+            shelfId: shelf.id,
+            userId: currentUser.id,
+          }));
+        } catch (err) {
+          error = err;
+        }
+        if (error) {
+          showToast(error.message || "Failed to delete shelf. Try again.", "error");
+          return;
+        }
         shelfWrapper.remove();
         showToast("Shelf deleted.", "success");
         loadLibraryData();
@@ -6851,11 +6854,19 @@ manageShelvesBtn?.addEventListener("click", async () => {
         confirmLabel: "Delete",
       });
       if (!confirmed) return;
-      await supabaseClient
-        .from("shelves")
-        .delete()
-        .eq("id", shelf.id)
-        .eq("user_id", currentUser.id);
+      let error = null;
+      try {
+        ({ error } = await deleteShelfById(supabaseClient, {
+          shelfId: shelf.id,
+          userId: currentUser.id,
+        }));
+      } catch (err) {
+        error = err;
+      }
+      if (error) {
+        showToast(error.message || "Failed to delete shelf. Try again.", "error");
+        return;
+      }
       li.remove();
       showToast("Shelf deleted.", "success");
       loadLibraryMap();
