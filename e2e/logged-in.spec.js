@@ -157,32 +157,89 @@ test.describe("logged-in mobile library sheet", () => {
     await expect(header).toHaveAttribute("aria-expanded", "false");
   });
 
-  test("mobile scan view offers camera or library photo chooser", async ({ page }) => {
-    await page.locator("#navUploadBtn").click();
-    await expect(page.locator("#canvasDropzone")).toBeVisible();
-    await expect(page.locator("#placeholderText")).toBeVisible();
+  test("wide phone opens the in-page camera instead of the system camera", async ({ page }) => {
+    await page.addInitScript(() => {
+      const real = window.matchMedia.bind(window);
+      const stub = (matches, query) => ({
+        matches,
+        media: query,
+        addListener() {},
+        removeListener() {},
+        addEventListener() {},
+        removeEventListener() {},
+        dispatchEvent() {
+          return false;
+        },
+      });
+      window.matchMedia = (query) => {
+        if (query === "(hover: none)") return stub(true, query);
+        if (query === "(pointer: coarse)") return stub(true, query);
+        return real(query);
+      };
+      const track = {
+        kind: "video",
+        label: "Back Camera",
+        stop() {},
+        getSettings: () => ({
+          deviceId: "back-wide",
+          facingMode: "environment",
+          width: 1280,
+          height: 720,
+        }),
+        getCapabilities: () => ({ zoom: { min: 0.5, max: 4, step: 0.1 } }),
+        applyConstraints: async () => {},
+      };
+      const stream = { getVideoTracks: () => [track], getTracks: () => [track] };
+      navigator.mediaDevices.getUserMedia = async () => stream;
+      navigator.mediaDevices.enumerateDevices = async () => [
+        { kind: "videoinput", deviceId: "back-wide", label: "Back Camera" },
+      ];
+    });
+    await page.setViewportSize({ width: 900, height: 800 });
+    await page.reload();
+    await expect(page.locator("#loggedInView")).toBeVisible({ timeout: 30_000 });
 
+    await page.locator("#navUploadBtn").click();
     await page.locator(".dropzone-cta-btn").click();
     await expect(page.locator("#photoSourceModal")).toBeVisible();
-    await expect(page.locator("#photoSourceCameraBtn")).toBeVisible();
-    await expect(page.locator("#photoSourceLibraryBtn")).toBeVisible();
-
-    const [libraryChooser] = await Promise.all([
-      page.waitForEvent("filechooser"),
-      page.locator("#photoSourceLibraryBtn").click(),
-    ]);
-    expect(libraryChooser.isMultiple()).toBeTruthy();
-
-    await page.locator("#photoSourceCancelBtn").click();
+    await page.locator("#photoSourceCameraBtn").click();
+    await expect(page.locator("#shelfCamera")).toBeVisible();
+    await expect(page.locator("#shelfCameraReadout")).toContainText(/zoom 0\.5/);
     await expect(page.locator("#photoSourceModal")).toHaveClass(/hidden-view/);
+  });
 
-    await page.locator("#placeholderText").click();
-    await expect(page.locator("#photoSourceModal")).toBeVisible();
-    const [cameraChooser] = await Promise.all([
+  test("narrow desktop still opens the library file picker", async ({ page }) => {
+    await page.addInitScript(() => {
+      const real = window.matchMedia.bind(window);
+      const stub = (matches, query) => ({
+        matches,
+        media: query,
+        addListener() {},
+        removeListener() {},
+        addEventListener() {},
+        removeEventListener() {},
+        dispatchEvent() {
+          return false;
+        },
+      });
+      window.matchMedia = (query) => {
+        if (query === "(hover: none)") return stub(false, query);
+        if (query === "(pointer: coarse)") return stub(false, query);
+        return real(query);
+      };
+    });
+    await page.setViewportSize({ width: 700, height: 800 });
+    await page.reload();
+    await expect(page.locator("#loggedInView")).toBeVisible({ timeout: 30_000 });
+
+    await page.locator("#navUploadBtn").click();
+    const [fileChooser] = await Promise.all([
       page.waitForEvent("filechooser"),
-      page.locator("#photoSourceCameraBtn").click(),
+      page.locator(".dropzone-cta-btn").click(),
     ]);
-    expect(cameraChooser.isMultiple()).toBeFalsy();
+    expect(fileChooser.isMultiple()).toBeTruthy();
+    await expect(page.locator("#photoSourceModal")).toHaveClass(/hidden-view/);
+    await expect(page.locator("#shelfCamera")).toHaveClass(/hidden-view/);
   });
 });
 

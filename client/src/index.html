@@ -264,7 +264,11 @@
             
                   <canvas id="shelfCanvas" class="canvas-hidden"></canvas>
 
-                  <button id="cropCanvasBtn" class="auth-btn secondary-btn crop-canvas-btn hidden-element" type="button">Crop &amp; re-scan</button>
+                  <div id="canvasToolRow" class="canvas-tool-row hidden-element">
+                    <button id="rotateLeftBtn" class="auth-btn secondary-btn canvas-tool-btn" type="button">Rotate left</button>
+                    <button id="rotateRightBtn" class="auth-btn secondary-btn canvas-tool-btn" type="button">Rotate right</button>
+                    <button id="cropCanvasBtn" class="auth-btn secondary-btn crop-canvas-btn" type="button">Crop &amp; re-scan</button>
+                  </div>
 
                   <div id="canvasControls" class="canvas-controls-bar hidden-element">
                     <label for="zoomSlider">Zoom:</label>
@@ -416,12 +420,27 @@
     </div>
   </div>
 
+  <div id="shelfCamera" class="shelf-camera hidden-view" role="dialog" aria-modal="true" aria-labelledby="shelfCameraTitle">
+    <p id="shelfCameraTitle" class="visually-hidden">Take shelf photo</p>
+    <video id="shelfCameraVideo" class="shelf-camera-video" playsinline autoplay muted></video>
+    <div class="shelf-camera-chrome">
+      <p id="shelfCameraReadout" class="shelf-camera-readout">Opening camera…</p>
+      <label class="shelf-camera-zoom" for="shelfCameraZoom">Zoom
+        <input id="shelfCameraZoom" type="range" min="1" max="1" step="0.1" value="1" disabled />
+      </label>
+      <div class="shelf-camera-actions">
+        <button id="shelfCameraCancel" class="auth-btn secondary-btn" type="button">Cancel</button>
+        <button id="shelfCameraShutter" class="auth-btn primary-btn" type="button">Shutter</button>
+      </div>
+    </div>
+  </div>
+
   <div id="photoSourceModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="photoSourceTitle" aria-describedby="photoSourceMessage">
     <div class="modal-content modal-dialog" role="document">
       <h2 id="photoSourceTitle" class="modal-title">Add shelf photo</h2>
       <p id="photoSourceMessage" class="modal-message">Take a new photo with your camera, or choose an existing image from your library.</p>
       <div class="modal-actions photo-source-actions">
-        <label id="photoSourceCameraBtn" class="auth-btn primary-btn modal-btn" for="imageCapture" tabindex="0">Take photo</label>
+        <button id="photoSourceCameraBtn" class="auth-btn primary-btn modal-btn" type="button">Take photo</button>
         <label id="photoSourceLibraryBtn" class="auth-btn secondary-btn modal-btn" for="imageUpload" tabindex="0">Choose from library</label>
         <button id="photoSourceCancelBtn" class="auth-btn secondary-btn modal-btn" type="button">Cancel</button>
       </div>
@@ -626,7 +645,8 @@
   <script src="js/pwa.js?v=2"></script>
   <script src="js/legal.js?v=1"></script>
   <script src="js/prompt-utils.js?v=1"></script>
+  <script src="js/camera-capture.js?v=1"></script>
   <script src="js/api.js"></script>
-  <script src="js/app.js?v=42"></script>
+  <script src="js/app.js?v=43"></script>
 </body>
 </html>

@@ -140,6 +140,19 @@ html, body {
   font-weight: 500;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .visually-hidden-input {
   position: absolute;
   left: 0;
@@ -568,11 +581,20 @@ input:focus-visible,
 }
 
 /* Crop Button Overlay */
-.crop-canvas-btn {
+.canvas-tool-row {
   position: absolute;
   top: 12px;
   left: 12px;
   z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+}
+
+.canvas-tool-btn,
+.crop-canvas-btn {
+  position: static;
   width: auto;
   margin-top: 0;
   background: #ffffff;
@@ -896,6 +918,58 @@ input:focus-visible,
   padding: 10px 20px;
 }
 
+.shelf-camera {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: flex;
+  flex-direction: column;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.shelf-camera-video {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  object-fit: contain;
+  background: #000;
+}
+
+.shelf-camera-chrome {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.shelf-camera-readout {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.shelf-camera-zoom {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
+}
+
+.shelf-camera-zoom input {
+  flex: 1;
+}
+
+.shelf-camera-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.shelf-camera-actions .auth-btn {
+  flex: 1;
+}
+
 #mapViewport {
   position: absolute;
   top: 0;
@@ -929,9 +1003,13 @@ input:focus-visible,
   gap: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   z-index: 100;
-  pointer-events: auto;
+  pointer-events: none;
   min-width: 180px;
   max-width: 260px;
+}
+
+.book-popover button {
+  pointer-events: auto;
 }
 
 #libraryView {
@@ -3810,6 +3888,7 @@ a.account-menu-btn {
   justify-content: space-between;
 }
 
+.canvas-tool-btn,
 .crop-canvas-btn {
   padding: 4px 10px;
   font-size: 0.8rem;

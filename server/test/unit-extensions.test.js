@@ -147,12 +147,22 @@ describe("photo source chooser markup", () => {
     assert.match(indexHtml, /id="photoSourceModal"/);
     assert.match(indexHtml, /id="photoSourceCameraBtn"/);
     assert.match(indexHtml, /id="photoSourceLibraryBtn"/);
-    assert.match(indexHtml, /for="imageCapture"/);
+    assert.match(indexHtml, /id="shelfCamera"/);
+    assert.match(indexHtml, /id="rotateLeftBtn"/);
+    assert.match(indexHtml, /id="rotateRightBtn"/);
+    assert.doesNotMatch(indexHtml, /for="imageCapture"/);
     assert.match(indexHtml, /for="imageUpload"/);
     assert.doesNotMatch(styleCss, /\.visually-hidden-input\s*\{[^}]*display:\s*none/);
+    assert.match(styleCss, /\.book-popover \{[^}]*pointer-events:\s*none/);
+    assert.match(styleCss, /\.book-popover button \{[^}]*pointer-events:\s*auto/);
     assert.match(appJs, /function openPhotoSourceChooser\(/);
     assert.match(appJs, /function isMobilePhotoSourceLayout\(/);
-    assert.match(appJs, /max-width:\s*768px/);
+    assert.match(appJs, /isPhonePhotoSource\(window\.matchMedia\.bind\(window\)\)/);
+    assert.match(appJs, /function openInPageCamera\(/);
+    assert.doesNotMatch(
+      appJs.match(/function isMobilePhotoSourceLayout\(\) \{[\s\S]*?\n\}/)[0],
+      /768/,
+    );
     assert.match(appJs, /activateUpload = \(\) => openPhotoSourceChooser\(\)/);
   });
 });

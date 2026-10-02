@@ -455,19 +455,13 @@ function applyCatalogMatchToSpine(spine, book, titleInput, cardEl, resultsEl) {
   showToast(`"${book.title}" confirmed.`, "success");
 }
 
-async function searchBooksByQuery(query, author = "", options = {}) {
+async function searchBooksByQuery(query) {
   const title = String(query || "").trim();
-  const authorText = String(author || "").trim();
-  const publisher = String(options.publisher || "").trim();
-  const rawText = String(options.rawText || "").trim();
-  if (!isSearchableSpineTitle(title) && !authorText && !rawText) {
+  if (!isSearchableSpineTitle(title)) {
     return [];
   }
   const params = new URLSearchParams();
-  if (title) params.set("q", title);
-  if (authorText) params.set("author", authorText);
-  if (publisher) params.set("publisher", publisher);
-  if (rawText) params.set("rawText", rawText);
+  params.set("q", title);
   const res = await authenticatedFetch(`/api/books?${params.toString()}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -535,10 +529,7 @@ async function autoMatchDetectedSpines({
   await mapPool(targets, SEARCH_CONCURRENCY, async (spine) => {
     if (hitLimit) return;
     try {
-      const books = await searchBooksByQuery(spine.title, spine.author || "", {
-        publisher: spine.publisher || "",
-        rawText: spine.rawText || "",
-      });
+      const books = await searchBooksByQuery(spine.title);
       const best = books[0];
       if (!best) return;
       const score = Number.isFinite(best.matchScore) ? best.matchScore : 0;
@@ -2229,9 +2220,13 @@ function updateScanSteps() {
       ? `Save shelf (${currentDetectedSpines.length})`
       : "Save shelf";
   }
+  const rotateLeftBtnEl = document.getElementById("rotateLeftBtn");
+  const rotateRightBtnEl = document.getElementById("rotateRightBtn");
   if (cropCanvasBtnEl) {
     cropCanvasBtnEl.disabled = !hasImage;
   }
+  if (rotateLeftBtnEl) rotateLeftBtnEl.disabled = !hasImage;
+  if (rotateRightBtnEl) rotateRightBtnEl.disabled = !hasImage;
   stepsEl.querySelectorAll(".scan-step").forEach((step) => {
     const key = step.getAttribute("data-step");
     step.classList.remove("is-active", "is-done");
@@ -2380,7 +2375,7 @@ const cropCanvasBtn = document.getElementById("cropCanvasBtn");
 
 function setCanvasChromeVisible(visible) {
   canvasControls?.classList.toggle("hidden-element", !visible);
-  cropCanvasBtn?.classList.toggle("hidden-element", !visible);
+  document.getElementById("canvasToolRow")?.classList.toggle("hidden-element", !visible);
 }
 
 let currentUploadedFile = null;
@@ -3296,31 +3291,37 @@ const OCR_JPEG_QUALITY = 0.85;
 async function prepareImageFileForUpload(file) {
   if (!file || !String(file.type || "").startsWith("image/")) return file;
 
-  const objectUrl = URL.createObjectURL(file);
+  let source = null;
+  let objectUrl = null;
   try {
-    const img = await new Promise((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error("Image decode failed"));
-      el.src = objectUrl;
-    });
+    if (typeof createImageBitmap === "function") {
+      try {
+        source = await createImageBitmap(file, { imageOrientation: "from-image" });
+      } catch {
+        source = null;
+      }
+    }
+    if (!source) {
+      objectUrl = URL.createObjectURL(file);
+      source = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error("Image decode failed"));
+        el.src = objectUrl;
+      });
+    }
 
-    const w = img.naturalWidth || img.width;
-    const h = img.naturalHeight || img.height;
+    const w = source.naturalWidth || source.width;
+    const h = source.naturalHeight || source.height;
     if (!w || !h) return file;
 
     const longest = Math.max(w, h);
     const scale = longest > OCR_MAX_EDGE ? OCR_MAX_EDGE / longest : 1;
-    // Skip recompress for already-small JPEGs
-    if (scale >= 1 && file.type === "image/jpeg" && file.size < 1_500_000) {
-      return file;
-    }
-
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(w * scale));
     canvas.height = Math.max(1, Math.round(h * scale));
     const ctx2 = canvas.getContext("2d");
-    ctx2.drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx2.drawImage(source, 0, 0, canvas.width, canvas.height);
 
     const blob = await new Promise((resolve) =>
       canvas.toBlob(resolve, "image/jpeg", OCR_JPEG_QUALITY),
@@ -3328,7 +3329,8 @@ async function prepareImageFileForUpload(file) {
     if (!blob) return file;
     return new File([blob], "shelf_upload.jpg", { type: "image/jpeg" });
   } finally {
-    URL.revokeObjectURL(objectUrl);
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    source?.close?.();
   }
 }
 
@@ -3406,8 +3408,215 @@ window.addEventListener("pageshow", () => {
 });
 
 function isMobilePhotoSourceLayout() {
-  return window.matchMedia("(max-width: 768px)").matches;
+  return isPhonePhotoSource(window.matchMedia.bind(window));
 }
+
+let shelfCameraStream = null;
+
+function fallbackFileCapture() {
+  markCapturePending();
+  imageCapture?.click();
+}
+
+function closeShelfCamera() {
+  shelfCameraStream?.getTracks?.().forEach((track) => track.stop());
+  shelfCameraStream = null;
+  const video = document.getElementById("shelfCameraVideo");
+  if (video) video.srcObject = null;
+  document.getElementById("shelfCamera")?.classList.add("hidden-view");
+}
+
+async function probeVideoInputs(devices) {
+  const probed = [];
+  for (const device of devices) {
+    if (!device?.deviceId) continue;
+    let stream = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { deviceId: { exact: device.deviceId } },
+      });
+      const track = stream.getVideoTracks()[0];
+      const caps = track?.getCapabilities?.() || {};
+      const settings = track?.getSettings?.() || {};
+      probed.push({
+        deviceId: device.deviceId,
+        label: device.label || track?.label || "",
+        kind: "videoinput",
+        facingMode: settings.facingMode || "",
+        zoomMin: caps.zoom?.min,
+        zoomMax: caps.zoom?.max,
+      });
+    } catch {
+      probed.push({
+        deviceId: device.deviceId,
+        label: device.label || "",
+        kind: "videoinput",
+      });
+    } finally {
+      stream?.getTracks?.().forEach((track) => track.stop());
+    }
+  }
+  return probed;
+}
+
+async function bindShelfCameraStream(stream) {
+  shelfCameraStream = stream;
+  const video = document.getElementById("shelfCameraVideo");
+  const readout = document.getElementById("shelfCameraReadout");
+  const zoomInput = document.getElementById("shelfCameraZoom");
+  const track = stream.getVideoTracks()[0];
+  const settings = track?.getSettings?.() || {};
+  const caps = track?.getCapabilities?.() || {};
+  let label = track?.label || "";
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const match = devices.find((device) => device.deviceId === settings.deviceId);
+    if (match?.label) label = match.label;
+  } catch {
+    // Labels can be unavailable; the settings record still stands.
+  }
+  const record = describeCamera(settings, caps, label);
+  const zoomStart = startingZoom(caps.zoom);
+  if (zoomStart != null && track?.applyConstraints) {
+    try {
+      await track.applyConstraints({ advanced: [{ zoom: zoomStart }] });
+      record.appliedZoom = zoomStart;
+    } catch (error) {
+      record.zoomApplyError = error?.message || String(error);
+    }
+  }
+  console.info("Shelf camera", record);
+  if (readout) readout.textContent = formatCameraReadout(record);
+  if (zoomInput) {
+    if (record.zoom) {
+      zoomInput.disabled = false;
+      zoomInput.min = String(record.zoom.min);
+      zoomInput.max = String(record.zoom.max);
+      zoomInput.step = String(record.zoom.step || 0.1);
+      zoomInput.value = String(record.appliedZoom ?? record.zoom.min);
+    } else {
+      zoomInput.disabled = true;
+    }
+  }
+  if (video) {
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+  }
+}
+
+async function openInPageCamera() {
+  closePhotoSourceChooser();
+  if (!navigator.mediaDevices?.getUserMedia) {
+    fallbackFileCapture();
+    return;
+  }
+  const overlay = document.getElementById("shelfCamera");
+  const readout = document.getElementById("shelfCameraReadout");
+  if (!overlay) {
+    fallbackFileCapture();
+    return;
+  }
+  overlay.classList.remove("hidden-view");
+  if (readout) readout.textContent = "Opening camera…";
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: "environment" } },
+    });
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inputs = devices.filter((device) => device.kind === "videoinput");
+    const labeled = inputs.some((device) => String(device.label || "").trim());
+    if (labeled && inputs.length > 1) {
+      stream.getTracks().forEach((track) => track.stop());
+      const probed = await probeVideoInputs(inputs);
+      const choice = chooseBackCamera(probed);
+      const constraints = choice.keepEnvironment || !choice.deviceId
+        ? { facingMode: { ideal: "environment" } }
+        : { deviceId: { exact: choice.deviceId } };
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: constraints,
+      });
+    }
+    await bindShelfCameraStream(stream);
+  } catch (error) {
+    console.error("In-page camera failed:", error);
+    stream?.getTracks?.().forEach((track) => track.stop());
+    closeShelfCamera();
+    fallbackFileCapture();
+  }
+}
+
+function drawVideoFrame(video, rotateDeg, outWidth, outHeight) {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, outWidth);
+  canvas.height = Math.max(1, outHeight);
+  const drawCtx = canvas.getContext("2d");
+  drawCtx.save();
+  if (rotateDeg === 90) {
+    drawCtx.translate(canvas.width, 0);
+    drawCtx.rotate(Math.PI / 2);
+  } else if (rotateDeg === 270) {
+    drawCtx.translate(0, canvas.height);
+    drawCtx.rotate(-Math.PI / 2);
+  } else if (rotateDeg === 180) {
+    drawCtx.translate(canvas.width, canvas.height);
+    drawCtx.rotate(Math.PI);
+  }
+  drawCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+  drawCtx.restore();
+  return canvas;
+}
+
+async function captureShelfCameraFrame() {
+  const video = document.getElementById("shelfCameraVideo");
+  if (!video || !video.videoWidth || !video.videoHeight) {
+    showToast("The camera is not ready yet.", "info");
+    return;
+  }
+  const angle = window.screen?.orientation?.angle ?? window.orientation ?? 0;
+  const transform = captureFrameTransform(video.videoWidth, video.videoHeight, angle);
+  const canvas = drawVideoFrame(
+    video,
+    transform.rotateDeg,
+    transform.outWidth,
+    transform.outHeight,
+  );
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+  if (!blob) {
+    showToast("Could not save that photo.", "error");
+    return;
+  }
+  const file = new File([blob], "shelf_capture.jpg", { type: "image/jpeg" });
+  closeShelfCamera();
+  beginScanForFile(file);
+}
+
+function wireShelfCameraControls() {
+  const zoomInput = document.getElementById("shelfCameraZoom");
+  const cancelBtn = document.getElementById("shelfCameraCancel");
+  const shutterBtn = document.getElementById("shelfCameraShutter");
+  const overlay = document.getElementById("shelfCamera");
+  zoomInput?.addEventListener("input", () => {
+    const track = shelfCameraStream?.getVideoTracks?.()[0];
+    const zoom = Number(zoomInput.value);
+    if (!track?.applyConstraints || !Number.isFinite(zoom)) return;
+    track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
+  });
+  cancelBtn?.addEventListener("click", () => closeShelfCamera());
+  shutterBtn?.addEventListener("click", () => {
+    captureShelfCameraFrame();
+  });
+  overlay?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      closeShelfCamera();
+    }
+  });
+}
+wireShelfCameraControls();
 
 function openPhotoSourceChooser() {
   // Desktop: open the library file picker directly (no camera/library modal).
@@ -3432,14 +3641,14 @@ function openPhotoSourceChooser() {
       cleanup();
     }
   };
-  const onCamera = () => {
-    markCapturePending();
+  const onCamera = (e) => {
+    e.preventDefault();
+    openInPageCamera();
   };
   const onCameraKey = (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
     e.preventDefault();
-    markCapturePending();
-    imageCapture?.click();
+    openInPageCamera();
   };
   const onLibraryKey = (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
@@ -3868,14 +4077,7 @@ function renderDetectedSpines(options = {}) {
       searchResults.innerHTML =
         "<span class='search-status'>Searching Google Books...</span>";
       try {
-        const books = await searchBooksByQuery(
-          titleInput.value,
-          authorInput.value || spine.author || "",
-          {
-            publisher: spine.publisher || "",
-            rawText: spine.rawText || "",
-          },
-        );
+        const books = await searchBooksByQuery(titleInput.value);
         renderBookSearchCards(searchResults, books, {
           confirmLabel: "Use this book",
           onConfirm: (book) => {
@@ -3963,9 +4165,17 @@ async function handleOcrResponse(data) {
   return false;
 }
 
-async function runShelfOcr(file, { forceRescan = false } = {}) {
+let shelfOcrGeneration = 0;
+
+function bumpOcrGeneration() {
+  shelfOcrGeneration += 1;
+  return shelfOcrGeneration;
+}
+
+async function runShelfOcr(file, { forceRescan = false, generation } = {}) {
   if (!file) return;
   if (!requireOnline("Shelf scanning")) return;
+  const gen = generation == null ? bumpOcrGeneration() : generation;
 
   showLoadingOverlay("Scanning shelf...");
   const formData = new FormData();
@@ -3978,6 +4188,7 @@ async function runShelfOcr(file, { forceRescan = false } = {}) {
       body: formData,
     });
     const data = await response.json().catch(() => ({}));
+    if (gen !== shelfOcrGeneration) return;
     if (!response.ok) {
       if (data.code === "PLAN_LIMIT") {
         showUpgradeModal({
@@ -3987,16 +4198,77 @@ async function runShelfOcr(file, { forceRescan = false } = {}) {
       }
       throw new Error(data.error || "Scan failed");
     }
+    if (gen !== shelfOcrGeneration) return;
     await handleOcrResponse(data);
   } catch (err) {
+    if (gen !== shelfOcrGeneration) return;
     console.error("Shelf scan failed:", err);
     showToast(err.message || "Scan failed. Try again.", "error");
     document.getElementById("pendingContainer").innerHTML =
       "<p class='empty-state'>Scan failed. Crop &amp; re-scan, or upload another photo.</p>";
   } finally {
-    hideLoadingOverlay();
-    updateScanSteps();
+    if (gen === shelfOcrGeneration) {
+      hideLoadingOverlay();
+      updateScanSteps();
+    }
   }
+}
+
+function fileFromImageRotation(image, degrees) {
+  const w = image.naturalWidth || image.width;
+  const h = image.naturalHeight || image.height;
+  if (!w || !h) return Promise.resolve(null);
+  const turns = ((Math.round(degrees / 90) % 4) + 4) % 4;
+  const canvas = document.createElement("canvas");
+  const swap = turns % 2 === 1;
+  canvas.width = swap ? h : w;
+  canvas.height = swap ? w : h;
+  const drawCtx = canvas.getContext("2d");
+  drawCtx.translate(canvas.width / 2, canvas.height / 2);
+  drawCtx.rotate((turns * Math.PI) / 2);
+  drawCtx.drawImage(image, -w / 2, -h / 2);
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      if (!blob) resolve(null);
+      else resolve(new File([blob], "shelf_rotated.jpg", { type: "image/jpeg" }));
+    }, "image/jpeg", 0.92);
+  });
+}
+
+async function rotateLoadedShelfPhoto(degrees) {
+  if (!currentLoadedImage) {
+    showToast("Please upload an image first.", "info");
+    return;
+  }
+  const gen = bumpOcrGeneration();
+  const file = await fileFromImageRotation(currentLoadedImage, degrees);
+  if (!file) {
+    showToast("Could not rotate that photo.", "error");
+    return;
+  }
+  currentUploadedFile = file;
+  currentDetectedSpines = [];
+  const img = new Image();
+  img.onload = () => {
+    invalidateShelfDownsampleCache();
+    currentLoadedImage = img;
+    canvasState = {
+      scale: 1,
+      offsetX: 0,
+      offsetY: 0,
+      isDragging: false,
+      startX: 0,
+      startY: 0,
+    };
+    syncShelfCanvasBitmap();
+    ensureShelfCanvasResizeObserver();
+    redrawCanvasOverlays(null);
+    updateScanSteps();
+  };
+  img.src = URL.createObjectURL(file);
+  document.getElementById("pendingContainer").innerHTML =
+    "<p class='scan-loading-text'>Scanning shelf...</p>";
+  await runShelfOcr(file, { forceRescan: true, generation: gen });
 }
 
 function isAlreadyExistsError(error) {
@@ -4177,6 +4449,12 @@ function drawCropOverlay() {
 
 cropCanvasBtn?.addEventListener("click", () => {
   openCropModalForCurrentImage({ forceRescan: true });
+});
+document.getElementById("rotateLeftBtn")?.addEventListener("click", () => {
+  rotateLoadedShelfPhoto(-90);
+});
+document.getElementById("rotateRightBtn")?.addEventListener("click", () => {
+  rotateLoadedShelfPhoto(90);
 });
 
 function closeCropModal() {
@@ -6153,6 +6431,14 @@ function showBookActionPopover(shelfWrapper, book, books) {
     main.prepend(img);
   }
 
+  const stopMapGesture = (e) => {
+    e.stopPropagation();
+  };
+  actions.querySelectorAll("button").forEach((btn) => {
+    btn.addEventListener("mousedown", stopMapGesture);
+    btn.addEventListener("touchstart", stopMapGesture, { passive: true });
+  });
+
   actions.querySelector(".popover-settings-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     openBookSettingsModal(book);
@@ -6361,7 +6647,8 @@ const initMapDrag = (e) => {
   if (
     e.target.closest(".map-controls") ||
     e.target.closest(".map-hint") ||
-    e.target.closest(".map-empty-state")
+    e.target.closest(".map-empty-state") ||
+    e.target.closest(".book-popover")
   )
     return;
 

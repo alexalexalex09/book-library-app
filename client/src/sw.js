@@ -1,5 +1,5 @@
-const SHELL_CACHE = "shelfmapper-shell-v2";
-const RUNTIME_CACHE = "shelfmapper-runtime-v2";
+const SHELL_CACHE = "shelfmapper-shell-v3";
+const RUNTIME_CACHE = "shelfmapper-runtime-v3";
 
 const APP_SHELL_URLS = [
   "/",
@@ -8,6 +8,7 @@ const APP_SHELL_URLS = [
   "/css/style.css",
   "/js/api.js",
   "/js/app.js",
+  "/js/camera-capture.js",
   "/js/legal.js",
   "/js/offline-store.js",
   "/js/pwa.js",
