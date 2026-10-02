@@ -15,9 +15,15 @@ const {
 } = require("../src/book-search-rank");
 
 describe("book-search-rank", () => {
-  it("cleans OCR noise from search text", () => {
+  it("cleans OCR noise without reordering words", () => {
     assert.equal(cleanSearchText("The Hobbit $12.99"), "The Hobbit");
     assert.equal(cleanSearchText("Unlabeled spine"), "");
+    assert.equal(cleanSearchText("Hobbit | Tolkien •"), "Hobbit Tolkien");
+    assert.equal(cleanSearchText("Hobbit \uFFFD ★"), "Hobbit");
+    assert.equal(
+      cleanSearchText("All the Ways Our Dead Still Speak WILDE"),
+      "All the Ways Our Dead Still Speak WILDE",
+    );
   });
 
   it("detects ISBN-shaped queries", () => {
@@ -33,105 +39,31 @@ describe("book-search-rank", () => {
     assert.equal(extractIsbnFromText("The Hobbit"), null);
   });
 
-  it("builds intitle/inauthor Google queries", () => {
+  it("sends the refined title as a general query and ignores extra fields", () => {
+    assert.equal(buildGoogleBooksQuery("The Hobbit", "Tolkien"), "The Hobbit");
+    assert.equal(buildGoogleBooksQuery("9780261103573", ""), "9780261103573");
     assert.equal(
-      buildGoogleBooksQuery("The Hobbit", "Tolkien"),
-      'intitle:"The Hobbit" inauthor:"Tolkien"',
+      buildGoogleBooksQuery("All the Ways Our Dead Still Speak WILDE", "Wilde"),
+      "All the Ways Our Dead Still Speak WILDE",
     );
     assert.equal(
-      buildGoogleBooksQuery("9780261103573", ""),
-      "isbn:9780261103573",
+      buildGoogleBooksQuery("The Hobbit", "Tolkien", {
+        rawText: "scrambled raw text 9780261103573",
+        mode: "intitle",
+      }),
+      "The Hobbit",
     );
+    assert.equal(buildGoogleBooksQuery("Dune $12.99", "Herbert"), "Dune");
+    assert.equal(buildGoogleBooksQuery("Unlabeled Spine"), "");
   });
 
-  it("strips trailing author tokens from the Google intitle query", () => {
-    assert.equal(
-      buildGoogleBooksQuery(
-        "All the Ways Our Dead Still Speak WILDE",
-        "Wilde",
-      ),
-      'intitle:"All the Ways Our Dead Still Speak" inauthor:"Wilde"',
-    );
-  });
-
-  it("salvages a trailing author-like token when author is empty", () => {
+  it("still describes author salvage for callers that ask for it directly", () => {
     const shaped = shapeSearchFields(
       "All the Ways Our Dead Still Speak WILDE",
       "",
     );
     assert.equal(shaped.title, "All the Ways Our Dead Still Speak");
     assert.equal(shaped.author, "WILDE");
-    assert.equal(
-      buildGoogleBooksQuery(
-        "All the Ways Our Dead Still Speak WILDE",
-        "",
-      ),
-      'intitle:"All the Ways Our Dead Still Speak" inauthor:"WILDE"',
-    );
-  });
-
-  it("can build a general query without intitle/inauthor operators", () => {
-    assert.equal(
-      buildGoogleBooksQuery(
-        "All the Ways Our Dead Still Speak WILDE",
-        "Wilde",
-        { mode: "general" },
-      ),
-      "All the Ways Our Dead Still Speak Wilde",
-    );
-    assert.equal(
-      buildGoogleBooksQuery("The Hobbit", "Tolkien", { mode: "general" }),
-      "The Hobbit Tolkien",
-    );
-  });
-
-  it("general mode still shapes title and author before joining", () => {
-    assert.equal(
-      buildGoogleBooksQuery(
-        "All the Ways Our Dead Still Speak WILDE",
-        "",
-        { mode: "general" },
-      ),
-      "All the Ways Our Dead Still Speak WILDE",
-    );
-  });
-
-  it("can build a title-only intitle query while still stripping a known author", () => {
-    assert.equal(
-      buildGoogleBooksQuery(
-        "All the Ways Our Dead Still Speak WILDE",
-        "Wilde",
-        { includeAuthor: false },
-      ),
-      'intitle:"All the Ways Our Dead Still Speak"',
-    );
-  });
-
-  it("builds isbn query from rawText when title is not an ISBN", () => {
-    assert.equal(
-      buildGoogleBooksQuery("The Hobbit", "Tolkien", {
-        rawText: "The Hobbit 9780261103573",
-      }),
-      "isbn:9780261103573",
-    );
-  });
-
-  it("general mode does not prefer isbn from rawText", () => {
-    assert.equal(
-      buildGoogleBooksQuery("The Hobbit", "Tolkien", {
-        rawText: "The Hobbit 9780261103573",
-        mode: "general",
-      }),
-      "The Hobbit Tolkien",
-    );
-  });
-
-  it("does not put publisher into the Google query string", () => {
-    const query = buildGoogleBooksQuery("Dune", "Herbert", {
-      rawText: "Dune Frank Herbert Ace Books",
-    });
-    assert.equal(query.includes("inpublisher"), false);
-    assert.equal(query, 'intitle:"Dune" inauthor:"Herbert"');
   });
 
   it("ranks closer title matches higher", () => {
@@ -146,10 +78,7 @@ describe("book-search-rank", () => {
         volumeInfo: { title: "The Hobbit Companion", authors: ["Other"] },
       },
     ];
-    const ranked = rankBookItems(items, {
-      title: "The Hobbit",
-      author: "Tolkien",
-    });
+    const ranked = rankBookItems(items, "The Hobbit");
     assert.equal(ranked[0].id, "b");
     assert.ok(ranked[0].matchScore >= ranked[1].matchScore);
   });
@@ -171,10 +100,7 @@ describe("book-search-rank", () => {
         },
       },
     ];
-    const ranked = rankBookItems(items, {
-      title: "All the Ways Our Dead Still Speak WILDE",
-      author: "Wilde",
-    });
+    const ranked = rankBookItems(items, "All the Ways Our Dead Still Speak WILDE");
     assert.equal(ranked[0].id, "wilde");
     assert.ok(ranked[0].matchScore > ranked[1].matchScore);
 
@@ -184,7 +110,6 @@ describe("book-search-rank", () => {
         authors: ["Caleb Wilde"],
       },
       "All the Ways Our Dead Still Speak WILDE",
-      "Wilde",
     );
     const wrong = scoreVolume(
       {
@@ -192,29 +117,36 @@ describe("book-search-rank", () => {
         authors: ["Sciens"],
       },
       "All the Ways Our Dead Still Speak WILDE",
-      "Wilde",
     );
     assert.ok(correct > wrong);
     assert.ok(correct - wrong > 0.3);
   });
 
-  it("gives a small ranking bonus for matching publisher", () => {
-    const volume = {
-      title: "Dune Messiah",
-      authors: ["Frank Herbert"],
-      publisher: "Ace Books",
-    };
-    const without = scoreVolume(volume, "Dune", "Herbert", "");
-    const withPublisher = scoreVolume(volume, "Dune", "Herbert", "Ace");
+  it("ranks a volume higher when the query words also match its publisher", () => {
+    const query = "Dune Messiah Ace";
+    const withPublisher = scoreVolume(
+      {
+        title: "Dune Messiah",
+        authors: ["Frank Herbert"],
+        publisher: "Ace Books",
+      },
+      query,
+    );
+    const without = scoreVolume(
+      {
+        title: "Dune Messiah",
+        authors: ["Frank Herbert"],
+        publisher: "Penguin",
+      },
+      query,
+    );
     assert.ok(withPublisher > without);
-    assert.ok(withPublisher - without <= 0.08 + 1e-9);
   });
 
   it("scores exact title matches highly", () => {
     const score = scoreVolume(
       { title: "Dune", authors: ["Frank Herbert"] },
       "Dune",
-      "Herbert",
     );
     assert.ok(score > 0.7);
   });

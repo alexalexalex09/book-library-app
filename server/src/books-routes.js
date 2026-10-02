@@ -1,11 +1,7 @@
 const express = require("express");
 const {
   buildGoogleBooksQuery,
-  cleanSearchText,
   rankBookItems,
-  preferStrongerBookResults,
-  needsSearchFallback,
-  SUGGEST_SCORE,
 } = require("./book-search-rank");
 
 function createBooksRouter({
@@ -19,29 +15,12 @@ function createBooksRouter({
   router.get("/", requireAuth, rateLimit, async (req, res) => {
     const rawTitle =
       typeof req.query.q === "string" ? req.query.q.trim() : "";
-    const rawAuthor =
-      typeof req.query.author === "string" ? req.query.author.trim() : "";
-    const rawPublisher =
-      typeof req.query.publisher === "string" ? req.query.publisher.trim() : "";
-    const rawText =
-      typeof req.query.rawText === "string" ? req.query.rawText.trim() : "";
-    const title = cleanSearchText(rawTitle);
-    const author = cleanSearchText(rawAuthor);
-    const publisher = cleanSearchText(rawPublisher);
 
-    if (!title && !author && !rawText) {
-      return res.status(400).json({ error: "Missing search query" });
-    }
-    if (
-      rawTitle.length > 200 ||
-      rawAuthor.length > 200 ||
-      rawPublisher.length > 200 ||
-      rawText.length > 400
-    ) {
+    if (rawTitle.length > 200) {
       return res.status(400).json({ error: "Search query is too long" });
     }
 
-    const googleQuery = buildGoogleBooksQuery(title, author, { rawText });
+    const googleQuery = buildGoogleBooksQuery(rawTitle);
     if (!googleQuery) {
       return res.status(400).json({ error: "Missing search query" });
     }
@@ -50,34 +29,7 @@ function createBooksRouter({
       const { status, data } = await fetchBooks(googleQuery);
       if (status !== 200) return res.status(status).json(data);
 
-      let rankedItems = rankBookItems(
-        data?.items || [],
-        { title, author, publisher },
-        5,
-      );
-
-      if (needsSearchFallback(rankedItems, SUGGEST_SCORE)) {
-        // intitle: can miss catalog entries; retry as a general volumes search.
-        const generalQuery = buildGoogleBooksQuery(title, author, {
-          rawText,
-          mode: "general",
-        });
-        if (generalQuery && generalQuery !== googleQuery) {
-          const fallback = await fetchBooks(generalQuery);
-          if (fallback.status === 200) {
-            const fallbackRanked = rankBookItems(
-              fallback.data?.items || [],
-              { title, author, publisher },
-              5,
-            );
-            rankedItems = preferStrongerBookResults(
-              rankedItems,
-              fallbackRanked,
-              SUGGEST_SCORE,
-            );
-          }
-        }
-      }
+      const rankedItems = rankBookItems(data?.items || [], googleQuery, 5);
 
       if (usageAnalytics) {
         usageAnalytics.recordEvent(req.user?.id, "books_ok", {});

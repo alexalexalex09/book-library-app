@@ -213,8 +213,9 @@ describe("API integration", () => {
       assert.equal(response.status, 200);
       const body = await response.json();
       assert.equal(body.items[0].volumeInfo.title, "The Hobbit");
-      assert.ok(String(body.query).includes("intitle:"));
-      assert.ok(String(body.query).includes("inauthor:"));
+      assert.equal(body.query, "hobbit");
+      assert.equal(String(body.query).includes("intitle:"), false);
+      assert.equal(String(body.query).includes("inauthor:"), false);
       assert.ok(Number.isFinite(body.items[0].matchScore));
     });
   });

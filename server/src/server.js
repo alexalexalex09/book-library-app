@@ -18,6 +18,7 @@ const {
   assembleSpineTitle,
   angleFromVertices,
 } = require("./ocr-reading-order");
+const { cleanSearchText } = require("./book-search-rank");
 const {
   buildRefineSpinePayload,
   buildRefineSpinePrompt,
@@ -456,7 +457,9 @@ function mapOcrWordsToSpines(spines, ocrWords) {
   });
 
   return spineBuckets.map((spine) => {
-    const fullTitle = assembleSpineTitle(spine.matchedWords, spine.box);
+    const fullTitle = cleanSearchText(
+      assembleSpineTitle(spine.matchedWords, spine.box),
+    );
     const rawText = spine.matchedWords
       .map((w) => w.text)
       .join(" ")

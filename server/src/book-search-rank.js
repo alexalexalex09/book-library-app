@@ -30,13 +30,15 @@ function normalizeText(value) {
 }
 
 function cleanSearchText(value) {
-  return String(value || "")
+  const stripped = String(value || "")
     .replace(/[$€£]\s*\d+(?:[.,]\d+)?/g, " ")
     .replace(/\b(?:unlabeled\s+spine)\b/gi, " ")
     .replace(/[|•·]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 200);
+    .replace(/\uFFFD/g, " ");
+  const words = stripped
+    .split(/\s+/)
+    .filter((word) => word && /[\p{L}\p{N}]/u.test(word));
+  return words.join(" ").slice(0, 200);
 }
 
 function looksLikeIsbn(value) {
@@ -160,60 +162,13 @@ function shapeSearchFields(title, author, { salvageAuthor = true } = {}) {
   };
 }
 
-function buildGoogleBooksQuery(
-  title,
-  author,
-  { rawText, includeAuthor = true, mode = "intitle" } = {},
-) {
-  const shaped = shapeSearchFields(title, author, {
-    salvageAuthor: includeAuthor,
-  });
-  const cleanedTitle = shaped.title;
-  const cleanedAuthor = includeAuthor ? shaped.author : "";
-  const useGeneral = mode === "general";
-
-  if (cleanedTitle && looksLikeIsbn(cleanedTitle)) {
-    return `isbn:${cleanedTitle.replace(/[^0-9Xx]/g, "")}`;
-  }
-
-  // Prefer an ISBN found in the raw OCR blob when the title itself is not one.
-  // Skip for general retries — primary search already tried ISBN when present.
-  if (!useGeneral) {
-    const isbnFromRaw = extractIsbnFromText(rawText);
-    if (isbnFromRaw) {
-      return `isbn:${isbnFromRaw}`;
-    }
-  }
-
-  if (!cleanedTitle && !cleanedAuthor) {
-    const fallbackTitle = cleanSearchText(title);
-    const fallbackAuthor = includeAuthor ? cleanSearchText(author) : "";
-    if (!fallbackTitle && !fallbackAuthor) return "";
-    if (useGeneral) {
-      return [fallbackTitle, fallbackAuthor].filter(Boolean).join(" ");
-    }
-    const parts = [];
-    if (fallbackTitle) {
-      parts.push(`intitle:"${fallbackTitle.replace(/"/g, "")}"`);
-    }
-    if (fallbackAuthor) {
-      parts.push(`inauthor:"${fallbackAuthor.replace(/"/g, "")}"`);
-    }
-    return parts.join(" ") || fallbackTitle;
-  }
-
-  if (useGeneral) {
-    return [cleanedTitle, cleanedAuthor].filter(Boolean).join(" ");
-  }
-
-  const parts = [];
-  if (cleanedTitle) {
-    parts.push(`intitle:"${cleanedTitle.replace(/"/g, "")}"`);
-  }
-  if (cleanedAuthor) {
-    parts.push(`inauthor:"${cleanedAuthor.replace(/"/g, "")}"`);
-  }
-  return parts.join(" ") || cleanedTitle;
+/**
+ * General Google Books query. The string is the title /ocr already returned.
+ * Author, rawText, and mode are ignored so the query is not split or wrapped
+ * in intitle:/inauthor:/isbn:.
+ */
+function buildGoogleBooksQuery(title, _author, _options) {
+  return cleanSearchText(title);
 }
 
 function jaccard(a, b) {
@@ -243,71 +198,45 @@ function extractIsbn(volumeInfo) {
   return isbn13 || isbn10 || null;
 }
 
-function scoreVolume(volumeInfo, queryTitle, queryAuthor, queryPublisher) {
-  const shaped = shapeSearchFields(queryTitle, queryAuthor);
-  const effectiveTitle = shaped.title || cleanSearchText(queryTitle);
-  const effectiveAuthor = shaped.author || cleanSearchText(queryAuthor);
-
+function scoreVolume(volumeInfo, queryText) {
+  const query = cleanSearchText(queryText);
   const volTitle = volumeInfo?.title || "";
   const volAuthors = Array.isArray(volumeInfo?.authors)
     ? volumeInfo.authors.join(" ")
     : "";
   const volPublisher = volumeInfo?.publisher || "";
+  const blob = [volTitle, volAuthors, volPublisher].filter(Boolean).join(" ");
 
-  const qTitleTokens = significantTokens(effectiveTitle);
-  const qAuthorTokens = tokenSet(effectiveAuthor);
-  const qPublisherTokens = tokenSet(queryPublisher);
-  const vTitleTokens = significantTokens(volTitle);
-  const vAuthorTokens = tokenSet(volAuthors);
-  const vPublisherTokens = tokenSet(volPublisher);
-
-  const titleJaccard = jaccard(qTitleTokens, vTitleTokens);
-  const titleCoverage = coverage(qTitleTokens, vTitleTokens);
-  // Prefer near-complete query-title coverage over loose shared keywords.
-  const titleScore = titleCoverage * 0.65 + titleJaccard * 0.35;
-
-  let authorScore = 0;
-  let authorPenalty = 0;
-  if (qAuthorTokens.size) {
-    authorScore = jaccard(qAuthorTokens, vAuthorTokens);
-    // Surname-only queries should still hit full names ("Wilde" ⊂ "Caleb Wilde").
-    if (authorScore === 0) {
-      for (const t of qAuthorTokens) {
-        if (vAuthorTokens.has(t)) {
-          authorScore = 0.7;
-          break;
-        }
-      }
-    }
-    if (authorScore === 0) {
-      authorPenalty = 0.35;
-    }
-  }
-
-  const publisherScore = qPublisherTokens.size
-    ? jaccard(qPublisherTokens, vPublisherTokens)
-    : 0;
+  const qTokens = significantTokens(query);
+  const vTokens = significantTokens(blob);
+  const tokenCoverage = coverage(qTokens, vTokens);
+  const tokenJaccard = jaccard(qTokens, vTokens);
+  const textScore = tokenCoverage * 0.65 + tokenJaccard * 0.35;
 
   const normTitle = normalizeText(volTitle);
-  const normQuery = normalizeText(effectiveTitle);
+  const normQuery = normalizeText(query);
+  const normBlob = normalizeText(blob);
   let bonus = 0;
   if (normTitle && normQuery && normTitle === normQuery) bonus += 0.4;
-  else if (normTitle && normQuery && normTitle.includes(normQuery)) bonus += 0.22;
-  else if (normTitle && normQuery && normQuery.includes(normTitle)) bonus += 0.18;
-  else if (titleCoverage >= 0.85 && qTitleTokens.size >= 3) bonus += 0.12;
+  else if (normQuery && normBlob.includes(normQuery)) bonus += 0.22;
+  else if (
+    normTitle &&
+    normQuery &&
+    normQuery.includes(normTitle) &&
+    normTitle.split(" ").length >= 2
+  ) {
+    bonus += 0.18;
+  } else if (tokenCoverage >= 0.85 && qTokens.size >= 3) bonus += 0.12;
 
-  if (publisherScore > 0) bonus += Math.min(0.08, publisherScore * 0.08);
-
-  const raw =
-    titleScore * 0.7 + authorScore * 0.3 + bonus - authorPenalty;
-  return Math.max(0, Math.min(1, raw));
+  return Math.max(0, Math.min(1, textScore + bonus));
 }
 
-function rankBookItems(items, { title, author, publisher } = {}, limit = 5) {
+function rankBookItems(items, query, limit = 5) {
   if (!Array.isArray(items) || items.length === 0) return [];
+  const queryText = typeof query === "string" ? query : query?.title || "";
   const scored = items.map((item) => {
     const volumeInfo = item.volumeInfo || {};
-    const score = scoreVolume(volumeInfo, title, author, publisher);
+    const score = scoreVolume(volumeInfo, queryText);
     return { item, score };
   });
   scored.sort((a, b) => b.score - a.score);
