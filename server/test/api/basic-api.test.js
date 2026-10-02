@@ -80,6 +80,7 @@ describe("API integration", () => {
                 authors: ["J. R. R. Tolkien"],
                 publishedDate: "1937",
                 industryIdentifiers: [{ type: "ISBN_13", identifier: "9780261103573" }],
+                imageLinks: { thumbnail: "http://books.google.com/cover.jpg" },
               },
             },
           ],
@@ -213,6 +214,7 @@ describe("API integration", () => {
       assert.equal(response.status, 200);
       const body = await response.json();
       assert.equal(body.items[0].volumeInfo.title, "The Hobbit");
+      assert.equal(body.items[0].volumeInfo.imageLinks, undefined);
       assert.equal(body.query, "hobbit");
       assert.equal(String(body.query).includes("intitle:"), false);
       assert.equal(String(body.query).includes("inauthor:"), false);
@@ -247,7 +249,7 @@ describe("API integration", () => {
       assert.equal(response.status, 403);
     });
 
-    it("blocks free users from custom covers", async () => {
+    it("does not expose a custom cover endpoint", async () => {
       const response = await fetch(`${baseUrl}/api/books/1/cover`, {
         method: "POST",
         headers: {
@@ -256,7 +258,7 @@ describe("API integration", () => {
         },
         body: JSON.stringify({ cover: "https://example.com/c.jpg" }),
       });
-      assert.equal(response.status, 403);
+      assert.equal(response.status, 404);
     });
 
     it("allows free users to list default room", async () => {

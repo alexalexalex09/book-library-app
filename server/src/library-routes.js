@@ -86,24 +86,6 @@ function createLibraryRouter({
     }
   });
 
-  router.post("/books/:id/cover", requireAuth, requirePremium, async (req, res) => {
-    const cover = String(req.body?.cover || "").trim();
-    if (!cover) return res.status(400).json({ error: "cover is required" });
-    try {
-      const { data, error } = await supabase
-        .from("user_books")
-        .update({ cover })
-        .eq("id", req.params.id)
-        .eq("user_id", req.user.id)
-        .select("*")
-        .single();
-      if (error) throw error;
-      return res.json(data);
-    } catch (error) {
-      return res.status(500).json({ error: "Failed to update cover" });
-    }
-  });
-
   router.get("/shares", requireAuth, requirePremium, async (req, res) => {
     try {
       const { data, error } = await supabase

@@ -27,7 +27,6 @@ let usageState = {
 };
 let isPublicShareView = false;
 let bookLookupTarget = null;
-let customCoverTarget = null;
 let bookSettingsTarget = null;
 let currentDismissedTitles = [];
 let lastShelvesSnapshot = [];
@@ -38,17 +37,12 @@ const offlineStore = window.HiLibraryOffline || null;
 
 const SEARCH_RESULT_LIMIT = 5;
 const FREE_SEARCH_ALL_LIMIT = 5;
-const SEARCH_CONCURRENCY = 3;
+const SEARCH_CONCURRENCY = 1;
 const AUTO_CONFIRM_SCORE = 0.72;
 const SUGGEST_SCORE = 0.45;
 const LOW_DETECTION_SCORE = 0.6;
 const DEFAULT_SHELF_CARD_WIDTH = 300;
 const MIN_SHELF_CARD_WIDTH = 160;
-const BOOK_COVER_PLACEHOLDER =
-  "data:image/svg+xml," +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="70"><rect width="100%" height="100%" fill="#e5e7eb"/><text x="50%" y="52%" text-anchor="middle" font-size="9" fill="#71717a">No cover</text></svg>',
-  );
 const FOLIO_COLORS = {
   primary: "#8b3a2f",
   success: "#6f8753",
@@ -79,33 +73,6 @@ function mediaCacheKeyForShelfPath(storagePath) {
   return `/offline-media/shelves/${encodeURIComponent(storagePath)}`;
 }
 
-function mediaCacheKeyForCover(url) {
-  if (!url) return "";
-  return `/offline-media/covers/${encodeURIComponent(url)}`;
-}
-
-async function resolveCoverSourceUrl(rawValue) {
-  const value = String(rawValue || "").trim();
-  if (!value) return "";
-  if (/^https?:\/\//i.test(value)) return toHttpsUrl(value);
-  if (!currentUser?.id) return "";
-  const { data, error } = await supabaseClient.storage
-    .from("shelves")
-    .createSignedUrl(value, 3600);
-  if (error) return "";
-  return data?.signedUrl || "";
-}
-
-async function resolveCoverImageSource(url) {
-  if (!url || !offlineStore) return url;
-  const cacheKey = mediaCacheKeyForCover(url);
-  if (!cacheKey) return url;
-  if (isOfflineActive()) {
-    return (await offlineStore.getCachedMediaBlobUrl(cacheKey)) || url;
-  }
-  return (await offlineStore.getOrCacheMediaBlobUrl(cacheKey, url)) || url;
-}
-
 async function persistOfflineSnapshot() {
   if (!offlineStore || !currentUser?.id) return;
   try {
@@ -122,64 +89,6 @@ async function persistOfflineSnapshot() {
   } catch (error) {
     console.warn("Failed to persist offline snapshot:", error?.message || error);
   }
-}
-
-function listCoverPrefetchEntries() {
-  const covers = myLibrary
-    .map((book) => String(book?.cover || "").trim())
-    .filter(Boolean);
-  const unique = Array.from(new Set(covers));
-  const max = isPremiumPlan() ? unique.length : Math.min(unique.length, 20);
-  return unique.slice(0, max).map((value) => ({
-    cacheKey: mediaCacheKeyForCover(value),
-    sourceUrl: value,
-  }));
-}
-
-function toHttpsUrl(rawUrl) {
-  if (typeof rawUrl !== "string" || !rawUrl.trim()) return "";
-  return rawUrl.trim().replace(/^http:\/\//i, "https://");
-}
-
-function coverUrlFromVolume(volumeInfo) {
-  return toHttpsUrl(
-    volumeInfo?.imageLinks?.thumbnail ||
-      volumeInfo?.imageLinks?.smallThumbnail ||
-      "",
-  );
-}
-
-function createBookCoverImage(src, { hideOnError = false } = {}) {
-  const img = document.createElement("img");
-  img.className = "book-result-thumb";
-  img.alt = "";
-  img.referrerPolicy = "no-referrer";
-  const httpsSrc = toHttpsUrl(src);
-  img.src = BOOK_COVER_PLACEHOLDER;
-  if (httpsSrc) {
-    resolveCoverSourceUrl(httpsSrc)
-      .then((resolvedRaw) => resolveCoverImageSource(resolvedRaw || httpsSrc))
-      .then((resolved) => {
-        img.src = resolved || httpsSrc;
-      })
-      .catch(() => {
-        img.src = httpsSrc;
-      });
-  }
-  img.addEventListener("error", () => {
-    if (hideOnError) {
-      img.remove();
-      return;
-    }
-    if (img.dataset.fallbackApplied === "1") return;
-    img.dataset.fallbackApplied = "1";
-    img.src = BOOK_COVER_PLACEHOLDER;
-  });
-  return img;
-}
-
-function bookCoverSrc(book) {
-  return String(book?.cover || "").trim();
 }
 
 function shelfDisplayWidth(shelf) {
@@ -295,7 +204,6 @@ function spinesForStorage(spines) {
     author: spine.author || null,
     publisher: spine.publisher || null,
     rawText: spine.rawText || null,
-    thumbnail: toHttpsUrl(spine.thumbnail) || null,
     volumeId: spine.volumeId || null,
     isbn: spine.isbn || null,
     score: Number.isFinite(spine.score) ? spine.score : null,
@@ -332,7 +240,6 @@ function parseBookSearchItems(data) {
       title: vol.title || "Unknown Title",
       authors: vol.authors ? vol.authors.join(", ") : "Unknown Author",
       publisher: vol.publisher || null,
-      thumbnail: coverUrlFromVolume(vol),
       year: vol.publishedDate ? String(vol.publishedDate).slice(0, 4) : null,
       isbn,
       volumeId: item.id || null,
@@ -386,7 +293,6 @@ function renderBookSearchCards(container, books, { confirmLabel, onConfirm }) {
 
     infoCol.appendChild(confirmBtn);
 
-    card.appendChild(createBookCoverImage(book.thumbnail));
     card.appendChild(infoCol);
     container.appendChild(card);
   });
@@ -424,9 +330,6 @@ function applyCatalogMatchToSpine(spine, book, titleInput, cardEl, resultsEl) {
     resultsEl.innerHTML = "";
     const selectedRow = document.createElement("div");
     selectedRow.className = "spine-confirmed-row";
-    if (spine.thumbnail) {
-      selectedRow.appendChild(createBookCoverImage(spine.thumbnail));
-    }
     const info = document.createElement("div");
     info.className = "book-result-info";
     const selectedTitle = document.createElement("strong");
@@ -455,6 +358,41 @@ function applyCatalogMatchToSpine(spine, book, titleInput, cardEl, resultsEl) {
   showToast(`"${book.title}" confirmed.`, "success");
 }
 
+function searchErrorText(data, status) {
+  if (typeof data?.error === "string" && data.error.trim()) return data.error.trim();
+  if (typeof data?.error?.message === "string" && data.error.message.trim()) {
+    return data.error.message.trim();
+  }
+  return `Search failed (${status})`;
+}
+
+function showSearchError(container, message) {
+  if (!container) return;
+  container.replaceChildren();
+  const span = document.createElement("span");
+  span.className = "search-status-error";
+  span.textContent = message;
+  container.appendChild(span);
+}
+
+function matchRemainingLimitMessage() {
+  return `You've reached the free limit of matching ${FREE_SEARCH_ALL_LIMIT} books at once. Keep matching one by one with Search Book, or upgrade to match every remaining book in one step.`;
+}
+
+function booksRateLimitMessage() {
+  if (isPremiumPlan()) {
+    return "You've used 300 book searches this minute. Wait a minute and search again.";
+  }
+  return "You've used 60 book searches this minute. Wait a minute and search again, or upgrade to 300 searches per minute.";
+}
+
+function shelfScanLimitMessage() {
+  if (isPremiumPlan()) {
+    return "You've used 60 shelf scans in the last 15 minutes. Wait for that window to reset.";
+  }
+  return "You've used 10 shelf scans in the last 15 minutes. Wait for that window to reset, or upgrade to 60 scans per 15 minutes.";
+}
+
 async function searchBooksByQuery(query) {
   const title = String(query || "").trim();
   if (!isSearchableSpineTitle(title)) {
@@ -465,7 +403,7 @@ async function searchBooksByQuery(query) {
   const res = await authenticatedFetch(`/api/books?${params.toString()}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const error = new Error(data.error || `Search failed (${res.status})`);
+    const error = new Error(searchErrorText(data, res.status));
     error.code = data.code || null;
     error.plan = data.plan || null;
     throw error;
@@ -498,7 +436,7 @@ function confirmSpineWithBook(spine, book) {
   spine.confirmedTitle = book.title;
   spine.author = book.authors;
   if (book.publisher) spine.publisher = book.publisher;
-  spine.thumbnail = book.thumbnail;
+  delete spine.thumbnail;
   spine.volumeId = book.volumeId || null;
   spine.isbn = book.isbn || null;
   delete spine.bestMatch;
@@ -525,6 +463,7 @@ async function autoMatchDetectedSpines({
 
   let hitLimit = false;
   let matched = 0;
+  let searchErrorMessage = "";
 
   await mapPool(targets, SEARCH_CONCURRENCY, async (spine) => {
     if (hitLimit) return;
@@ -542,6 +481,9 @@ async function autoMatchDetectedSpines({
       }
     } catch (err) {
       if (err?.code === "PLAN_LIMIT") hitLimit = true;
+      else if (!searchErrorMessage) {
+        searchErrorMessage = err?.message || "Search failed.";
+      }
     }
   });
 
@@ -553,14 +495,16 @@ async function autoMatchDetectedSpines({
     totalSearchable > FREE_SEARCH_ALL_LIMIT
   ) {
     showUpgradeModal({
-      reason: `Free plan can match ${FREE_SEARCH_ALL_LIMIT} spines at once. Upgrade for full Match remaining.`,
+      reason: matchRemainingLimitMessage(),
       featureCode: "search_all_batch",
     });
   } else if (notifyLimit && hitLimit) {
     showUpgradeModal({
-      reason: "Book search limit reached. Upgrade for higher limits.",
+      reason: booksRateLimitMessage(),
       featureCode: "books_rate_limit",
     });
+  } else if (searchErrorMessage) {
+    showToast(searchErrorMessage, "error");
   }
 
   return { matched, limited: hitLimit };
@@ -812,20 +756,18 @@ function exportLibraryAsJson() {
     title: book.title || "",
     author: book.author || "",
     shelf_id: book.shelf_id ?? null,
-    cover: book.cover || "",
     created_at: book.created_at || null,
   }));
   downloadTextFile("shelfmapper-export.json", JSON.stringify(payload, null, 2), "application/json");
 }
 
 function exportLibraryAsCsv() {
-  const header = ["title", "author", "shelf_id", "cover", "created_at"];
+  const header = ["title", "author", "shelf_id", "created_at"];
   const rows = myLibrary.map((book) =>
     [
       book.title || "",
       book.author || "",
       book.shelf_id ?? "",
-      book.cover || "",
       book.created_at || "",
     ]
       .map((value) => `"${String(value).replace(/"/g, '""')}"`)
@@ -1021,8 +963,7 @@ function showUpgradeModal({ reason = "", featureCode = "" } = {}) {
   if (!modal) return;
   const msg = modal.querySelector(".modal-message");
   if (msg) {
-    msg.textContent =
-      reason || "Start your 7-day free trial to unlock Premium features.";
+    msg.textContent = reason || "Start a 7-day free trial. Cancel anytime.";
   }
   markCurrentPlanInUpgradeModal();
   pendingUpgradeFeature = featureCode || null;
@@ -1187,7 +1128,7 @@ function changePlanInStripe() {
     return;
   }
   showUpgradeModal({
-    reason: "Choose a Premium plan in Stripe. Cancel anytime to return to Free.",
+    reason: "Choose monthly or annual. The 7-day trial starts at checkout. Cancel anytime to return to Free.",
   });
 }
 
@@ -3341,7 +3282,7 @@ async function handleSelectedImageFiles(fileList) {
   if (files.length === 0) return;
   if (!isPremiumPlan() && files.length > 1) {
     showUpgradeModal({
-      reason: "Batch scan queue is Premium only. Free users can scan one photo at a time.",
+      reason: "Free scans one shelf photo at a time. This photo will still scan. Upgrade to queue several photos and scan the next after you save.",
       featureCode: "batch_scan",
     });
   }
@@ -3746,10 +3687,6 @@ function renderDetectedSpines(options = {}) {
     const selectedRow = document.createElement("div");
     selectedRow.className = "spine-confirmed-row";
 
-    if (spineData.thumbnail) {
-      selectedRow.appendChild(createBookCoverImage(spineData.thumbnail));
-    }
-
     const info = document.createElement("div");
     info.className = "book-result-info";
 
@@ -4087,13 +4024,15 @@ function renderDetectedSpines(options = {}) {
         });
       } catch (err) {
         if (err?.code === "PLAN_LIMIT") {
+          const reason = booksRateLimitMessage();
           showUpgradeModal({
-            reason: err.message || "Book search limit reached. Upgrade for higher limits.",
+            reason,
             featureCode: "books_rate_limit",
           });
+          showSearchError(searchResults, reason);
+          return;
         }
-        searchResults.innerHTML =
-          "<span class='search-status-error'>Search failed.</span>";
+        showSearchError(searchResults, err.message || "Search failed.");
       }
     };
 
@@ -4191,10 +4130,12 @@ async function runShelfOcr(file, { forceRescan = false, generation } = {}) {
     if (gen !== shelfOcrGeneration) return;
     if (!response.ok) {
       if (data.code === "PLAN_LIMIT") {
+        const reason = shelfScanLimitMessage();
         showUpgradeModal({
-          reason: data.error || "OCR limit reached. Upgrade for more scans.",
+          reason,
           featureCode: "ocr_limit",
         });
+        throw new Error(reason);
       }
       throw new Error(data.error || "Scan failed");
     }
@@ -4291,7 +4232,6 @@ function buildUserBookRows(spines, { userId, shelfId, imagePath }) {
     author: spine.author || null,
     bounding_box: spine.box || spine.boundingBox || null,
     polygon: spine.polygon || null,
-    cover: toHttpsUrl(spine.thumbnail) || null,
     shelf_image_url: imagePath,
   }));
 }
@@ -4817,7 +4757,6 @@ function refreshLibraryList() {
 async function applyCatalogMatchToLibraryBook(book, match) {
   if (!requireOnline("Book updates")) return false;
   const updates = { title: match.title };
-  if (match.thumbnail) updates.cover = match.thumbnail;
   if (match.authors) updates.author = match.authors;
 
   let { error } = await supabaseClient
@@ -4851,12 +4790,10 @@ async function applyCatalogMatchToLibraryBook(book, match) {
   }
 
   book.title = match.title;
-  if (match.thumbnail) book.cover = match.thumbnail;
   if (match.authors) book.author = match.authors;
   const stored = myLibrary.find((entry) => entry.id === book.id);
   if (stored) {
     stored.title = match.title;
-    if (match.thumbnail) stored.cover = match.thumbnail;
     if (match.authors) stored.author = match.authors;
   }
 
@@ -4904,13 +4841,15 @@ async function runBookLookupSearch() {
     });
   } catch (err) {
     if (err?.code === "PLAN_LIMIT") {
+      const reason = booksRateLimitMessage();
       showUpgradeModal({
-        reason: err.message || "Book search limit reached. Upgrade for more searches.",
+        reason,
         featureCode: "books_rate_limit",
       });
+      showSearchError(results, reason);
+      return;
     }
-    results.innerHTML =
-      "<span class='search-status-error'>Search failed. Try again.</span>";
+    showSearchError(results, err.message || "Search failed.");
   } finally {
     if (searchBtn) searchBtn.disabled = false;
   }
@@ -4988,7 +4927,7 @@ function openBookSettingsModal(book) {
   bookSettingsTarget = book;
   input.value = book.title || "";
   if (hint) {
-    hint.textContent = `Edit title, search the catalog, or set a cover for “${book.title || "this book"}”.`;
+    hint.textContent = `Edit the title or search the catalog for “${book.title || "this book"}”.`;
   }
   openModalWithFocus(modal, input);
 }
@@ -5032,7 +4971,7 @@ async function saveBookSettingsTitle() {
     if (input) input.value = nextTitle;
     const hint = document.getElementById("bookSettingsHint");
     if (hint) {
-      hint.textContent = `Edit title, search the catalog, or set a cover for “${nextTitle}”.`;
+      hint.textContent = `Edit the title or search the catalog for “${nextTitle}”.`;
     }
     showToast(`Title updated to "${nextTitle}".`, "success");
   } finally {
@@ -5045,7 +4984,6 @@ function setupBookSettingsModal() {
   const closeBtn = document.getElementById("bookSettingsCloseBtn");
   const saveTitleBtn = document.getElementById("bookSettingsSaveTitleBtn");
   const searchBtn = document.getElementById("bookSettingsSearchBtn");
-  const coverBtn = document.getElementById("bookSettingsCoverBtn");
   const input = document.getElementById("bookSettingsTitleInput");
   if (!modal) return;
 
@@ -5066,15 +5004,6 @@ function setupBookSettingsModal() {
     if (!book) return;
     closeBookSettingsModal();
     openBookLookupModal(book);
-  });
-  coverBtn?.addEventListener("click", () => {
-    const book = bookSettingsTarget;
-    if (!book) return;
-    if (!requirePremiumFeature("Custom cover is Premium-only.", "custom_cover")) {
-      return;
-    }
-    closeBookSettingsModal();
-    openCustomCoverModal(book);
   });
 
   modal.addEventListener("keydown", (e) => {
@@ -5101,96 +5030,6 @@ function setupBookSettingsModal() {
 }
 setupBookSettingsModal();
 
-function closeCustomCoverModal() {
-  const modal = document.getElementById("customCoverModal");
-  if (!modal) return;
-  customCoverTarget = null;
-  closeModalAndRestore(modal);
-}
-
-function openCustomCoverModal(book) {
-  const modal = document.getElementById("customCoverModal");
-  const urlInput = document.getElementById("customCoverUrlInput");
-  const fileInput = document.getElementById("customCoverFileInput");
-  if (!modal || !urlInput || !fileInput) return;
-  customCoverTarget = book;
-  urlInput.value = "";
-  fileInput.value = "";
-  openModalWithFocus(modal, urlInput);
-}
-
-async function saveCustomCoverForBook() {
-  if (!customCoverTarget) return;
-  const urlInput = document.getElementById("customCoverUrlInput");
-  const fileInput = document.getElementById("customCoverFileInput");
-  let coverValue = String(urlInput?.value || "").trim();
-
-  if (!coverValue && fileInput?.files?.[0]) {
-    const file = fileInput.files[0];
-    const ext = (file.name.split(".").pop() || "jpg").replace(/[^\w]/g, "");
-    const path = `${currentUser.id}/covers/${customCoverTarget.id}-${Date.now()}.${ext}`;
-    const { error: uploadError } = await supabaseClient.storage
-      .from("shelves")
-      .upload(path, file, { upsert: true });
-    if (uploadError) {
-      showToast("Failed to upload cover image.", "error");
-      return;
-    }
-    coverValue = path;
-  }
-
-  if (!coverValue) {
-    showToast("Provide a URL or upload an image.", "error");
-    return;
-  }
-
-  try {
-    const response = await authenticatedFetch(`/api/books/${customCoverTarget.id}/cover`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cover: coverValue }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      if (data.code === "FEATURE_LOCKED") {
-        showUpgradeModal({
-          reason: data.error || "Custom covers require Premium.",
-          featureCode: "custom_cover",
-        });
-      }
-      throw new Error(data.error || "Cover update failed");
-    }
-    customCoverTarget.cover = coverValue;
-    const inLibrary = myLibrary.find((item) => item.id === customCoverTarget.id);
-    if (inLibrary) inLibrary.cover = coverValue;
-    closeCustomCoverModal();
-    refreshLibraryList();
-    loadLibraryMap();
-    showToast("Custom cover saved.", "success");
-  } catch (error) {
-    showToast(error.message || "Could not save cover.", "error");
-  }
-}
-
-function setupCustomCoverModal() {
-  const modal = document.getElementById("customCoverModal");
-  document.getElementById("customCoverCancelBtn")?.addEventListener("click", closeCustomCoverModal);
-  document.getElementById("customCoverSaveBtn")?.addEventListener("click", () => {
-    saveCustomCoverForBook();
-  });
-  modal?.addEventListener("click", (e) => {
-    if (e.target === modal) closeCustomCoverModal();
-  });
-  modal?.addEventListener("keydown", (e) => {
-    trapFocusInModal(modal, e);
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      closeCustomCoverModal();
-    }
-  });
-}
-setupCustomCoverModal();
-
 function closeShareModal() {
   const modal = document.getElementById("shareModal");
   if (!modal) return;
@@ -5207,7 +5046,7 @@ async function loadShareLinks() {
     if (!response.ok) {
       if (data.code === "FEATURE_LOCKED") {
         showUpgradeModal({
-          reason: data.error || "Share links require Premium.",
+          reason: "Upgrade to create a read-only link someone else can open.",
           featureCode: "share_link",
         });
         closeShareModal();
@@ -5256,7 +5095,7 @@ function setupShareModal() {
   const createBtn = document.getElementById("createShareBtn");
   const closeBtn = document.getElementById("shareModalCloseBtn");
   openBtn?.addEventListener("click", async () => {
-    if (!requirePremiumFeature("Read-only share links are Premium.", "share_link")) return;
+    if (!requirePremiumFeature("Upgrade to create a read-only link someone else can open.", "share_link")) return;
     openModalWithFocus(modal, createBtn);
     await loadShareLinks();
   });
@@ -5303,12 +5142,6 @@ async function loadLibraryData() {
     if (error) throw error;
     myLibrary = data || [];
     setOfflineMode(false);
-    if (offlineStore) {
-      const coverEntries = listCoverPrefetchEntries().filter((entry) =>
-        /^https?:\/\//i.test(entry.sourceUrl),
-      );
-      offlineStore.prefetchMedia(coverEntries).catch(() => {});
-    }
     await persistOfflineSnapshot();
   } catch (error) {
     if (offlineStore) {
@@ -5564,7 +5397,7 @@ document.getElementById("roomFilterSelect")?.addEventListener("change", (e) => {
 });
 
 document.getElementById("newRoomBtn")?.addEventListener("click", async () => {
-  if (!requirePremiumFeature("Rooms are Premium only.", "rooms")) return;
+  if (!requirePremiumFeature("Free includes the default room. Upgrade to create more rooms and organize shelves into them.", "rooms")) return;
   const name = await promptDialog({
     title: "Create room",
     hint: "Name your room (for example: Living room).",
@@ -6422,14 +6255,6 @@ function showBookActionPopover(shelfWrapper, book, books) {
   meta.appendChild(actions);
   main.appendChild(meta);
   popover.appendChild(main);
-
-  const savedCover = bookCoverSrc(book);
-  if (savedCover) {
-    const img = createBookCoverImage(savedCover, { hideOnError: true });
-    img.classList.add("book-popover-cover");
-    img.alt = `Cover of ${book.title || "this book"}`;
-    main.prepend(img);
-  }
 
   const stopMapGesture = (e) => {
     e.stopPropagation();

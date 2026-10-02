@@ -466,7 +466,7 @@
   <div id="bookSettingsModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="bookSettingsTitle" aria-describedby="bookSettingsHint">
     <div class="modal-content modal-dialog book-settings-dialog" role="document">
       <h2 id="bookSettingsTitle" class="modal-title">Book settings</h2>
-      <p id="bookSettingsHint" class="modal-message">Edit this book’s title, search the catalog, or set a cover.</p>
+      <p id="bookSettingsHint" class="modal-message">Edit this book’s title or search the catalog.</p>
       <label class="modal-input-label" for="bookSettingsTitleInput">Title</label>
       <div class="book-settings-title-row">
         <input id="bookSettingsTitleInput" class="auth-input modal-input" type="text" autocomplete="off" />
@@ -474,7 +474,6 @@
       </div>
       <div class="book-settings-actions">
         <button id="bookSettingsSearchBtn" class="auth-btn secondary-btn modal-btn" type="button">Search Google Books</button>
-        <button id="bookSettingsCoverBtn" class="auth-btn secondary-btn modal-btn" type="button">Custom cover</button>
       </div>
       <div class="modal-actions">
         <button id="bookSettingsCloseBtn" class="auth-btn secondary-btn modal-btn" type="button">Close</button>
@@ -503,17 +502,20 @@
         <div class="upgrade-plan-col">
           <h3 class="upgrade-plan-title">Free <span id="freePlanCurrentLabel" class="upgrade-current-plan hidden-element">(Your plan)</span></h3>
           <ul class="upgrade-plan-list">
-            <li>10 OCR scans per 15 minutes</li>
+            <li>10 shelf scans per 15 minutes</li>
             <li>60 book searches per minute</li>
-            <li>Basic scan and map tools</li>
+            <li>Match 5 books at a time</li>
+            <li>One shelf photo at a time</li>
           </ul>
         </div>
         <div class="upgrade-plan-col upgrade-plan-col-premium">
           <h3 class="upgrade-plan-title">Premium <span id="premiumPlanCurrentLabel" class="upgrade-current-plan hidden-element">(Your plan)</span></h3>
           <ul class="upgrade-plan-list">
-            <li>60 OCR scans per 15 minutes</li>
+            <li>60 shelf scans per 15 minutes</li>
             <li>300 book searches per minute</li>
-            <li>Rooms, sharing, custom covers, and priority tools</li>
+            <li>Match every remaining book in one step</li>
+            <li>Queue several shelf photos</li>
+            <li>Rooms and read-only share links</li>
           </ul>
         </div>
       </div>
@@ -559,21 +561,6 @@
       <div class="modal-actions">
         <button id="legalAcceptDeclineBtn" class="auth-btn secondary-btn modal-btn" type="button">Sign out</button>
         <button id="legalAcceptConfirmBtn" class="auth-btn primary-btn modal-btn" type="button">Accept and continue</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="customCoverModal" class="modal-overlay hidden-view" role="dialog" aria-modal="true" aria-labelledby="customCoverTitle">
-    <div class="modal-content modal-dialog" role="document">
-      <h2 id="customCoverTitle" class="modal-title">Custom cover</h2>
-      <p class="modal-message">Premium only. Paste a cover URL or upload an image.</p>
-      <label class="modal-input-label" for="customCoverUrlInput">Cover URL</label>
-      <input id="customCoverUrlInput" class="auth-input modal-input" type="text" placeholder="https://..." />
-      <label class="modal-input-label" for="customCoverFileInput">Upload image</label>
-      <input id="customCoverFileInput" class="auth-input modal-input" type="file" accept="image/*" />
-      <div class="modal-actions">
-        <button id="customCoverCancelBtn" class="auth-btn secondary-btn modal-btn" type="button">Cancel</button>
-        <button id="customCoverSaveBtn" class="auth-btn primary-btn modal-btn" type="button">Save cover</button>
       </div>
     </div>
   </div>

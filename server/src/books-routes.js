@@ -1,16 +1,46 @@
 const express = require("express");
+const { buildGoogleBooksQuery, rankBookItems } = require("./book-search-rank");
 const {
-  buildGoogleBooksQuery,
-  rankBookItems,
-} = require("./book-search-rank");
+  createBooksCache,
+  defaultFetchBooks,
+  normalizeBooksError,
+  stripImageLinks,
+} = require("./google-books");
 
 function createBooksRouter({
   requireAuth,
   rateLimit,
   fetchBooks = defaultFetchBooks,
+  supabase,
   usageAnalytics,
+  booksCache,
 }) {
   const router = express.Router();
+  const cache = booksCache || createBooksCache({ supabase });
+
+  async function loadQuery(query) {
+    const cached = await cache.get(query);
+    if (cached) return { status: 200, data: cached };
+    return cache.coalesce(query, async () => {
+      const again = await cache.get(query);
+      if (again) return { status: 200, data: again };
+      try {
+        const result = await fetchBooks(query);
+        if (result?.status === 200) {
+          const data = stripImageLinks(result.data);
+          await cache.set(query, data);
+          return { status: 200, data };
+        }
+        const status = result?.status || 503;
+        return { status, data: normalizeBooksError(status, result?.data) };
+      } catch {
+        return {
+          status: 503,
+          data: { error: "Could not reach Google Books." },
+        };
+      }
+    });
+  }
 
   router.get("/", requireAuth, rateLimit, async (req, res) => {
     const rawTitle =
@@ -25,34 +55,24 @@ function createBooksRouter({
       return res.status(400).json({ error: "Missing search query" });
     }
 
-    try {
-      const { status, data } = await fetchBooks(googleQuery);
-      if (status !== 200) return res.status(status).json(data);
-
-      const rankedItems = rankBookItems(data?.items || [], googleQuery, 5);
-
-      if (usageAnalytics) {
-        usageAnalytics.recordEvent(req.user?.id, "books_ok", {});
-      }
-      return res.json({
-        ...data,
-        items: rankedItems,
-        query: googleQuery,
-      });
-    } catch (error) {
-      return res.status(500).json({ error: "Failed to fetch book data" });
+    const { status, data } = await loadQuery(googleQuery);
+    if (status !== 200) {
+      return res.status(status).json(normalizeBooksError(status, data));
     }
+
+    const rankedItems = rankBookItems(data?.items || [], googleQuery, 5);
+
+    if (usageAnalytics) {
+      usageAnalytics.recordEvent(req.user?.id, "books_ok", {});
+    }
+    return res.json({
+      ...data,
+      items: rankedItems,
+      query: googleQuery,
+    });
   });
 
   return router;
-}
-
-async function defaultFetchBooks(searchQuery) {
-  const apiKey = (process.env.GOOGLE_BOOKS_API_KEY || "").trim();
-  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchQuery)}&maxResults=10${apiKey ? `&key=${apiKey}` : ""}`;
-  const response = await fetch(url);
-  const data = await response.json();
-  return { status: response.status, data };
 }
 
 module.exports = {

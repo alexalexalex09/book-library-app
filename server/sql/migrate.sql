@@ -119,6 +119,13 @@ alter table public.user_books add column if not exists created_at timestamptz de
 
 alter table public.ocr_cache add column if not exists words jsonb;
 alter table public.ocr_cache add column if not exists created_at timestamptz default now();
+
+create table if not exists public.google_books_cache (
+  query_key text primary key,
+  payload jsonb not null,
+  fetched_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
 alter table public.library_shares add column if not exists user_id uuid;
 alter table public.library_shares add column if not exists library_id bigint;
 alter table public.library_shares add column if not exists token text;
@@ -201,10 +208,11 @@ grant select, insert, update, delete
   on public.libraries, public.shelves, public.user_books, public.library_shares
   to authenticated;
 
-grant all on public.libraries, public.shelves, public.user_books, public.ocr_cache, public.library_shares
+grant all on public.libraries, public.shelves, public.user_books, public.ocr_cache, public.library_shares, public.google_books_cache
   to service_role;
 
 revoke all on public.ocr_cache from anon, authenticated;
+revoke all on public.google_books_cache from anon, authenticated;
 
 grant usage, select
   on all sequences in schema public
@@ -214,6 +222,7 @@ alter table public.libraries enable row level security;
 alter table public.shelves enable row level security;
 alter table public.user_books enable row level security;
 alter table public.ocr_cache enable row level security;
+alter table public.google_books_cache enable row level security;
 alter table public.library_shares enable row level security;
 
 drop policy if exists libraries_own_rows on public.libraries;

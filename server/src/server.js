@@ -779,6 +779,7 @@ app.use(
   createBooksRouter({
     requireAuth,
     rateLimit: booksRateLimit,
+    supabase,
     usageAnalytics,
   }),
 );

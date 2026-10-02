@@ -8,6 +8,7 @@
 -- drop table if exists public.shelves cascade;
 -- drop table if exists public.libraries cascade;
 -- drop table if exists public.ocr_cache cascade;
+-- drop table if exists public.google_books_cache cascade;
 
 -- ---------------------------------------------------------------------------
 -- Tables
@@ -55,6 +56,14 @@ create table if not exists public.ocr_cache (
   created_at timestamptz default now()
 );
 
+-- Shared Google Books search cache. The API writes this with the service role key.
+create table if not exists public.google_books_cache (
+  query_key text primary key,
+  payload jsonb not null,
+  fetched_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+
 -- ---------------------------------------------------------------------------
 -- Indexes (RLS filters + common lookups)
 -- ---------------------------------------------------------------------------
@@ -75,10 +84,11 @@ grant select, insert, update, delete
   on public.libraries, public.shelves, public.user_books
   to authenticated;
 
-grant all on public.libraries, public.shelves, public.user_books, public.ocr_cache
+grant all on public.libraries, public.shelves, public.user_books, public.ocr_cache, public.google_books_cache
   to service_role;
 
 revoke all on public.ocr_cache from anon, authenticated;
+revoke all on public.google_books_cache from anon, authenticated;
 
 grant usage, select
   on all sequences in schema public
@@ -92,6 +102,7 @@ alter table public.libraries enable row level security;
 alter table public.shelves enable row level security;
 alter table public.user_books enable row level security;
 alter table public.ocr_cache enable row level security;
+alter table public.google_books_cache enable row level security;
 
 drop policy if exists libraries_own_rows on public.libraries;
 create policy libraries_own_rows
@@ -128,7 +139,8 @@ create policy user_books_own_rows
     )
   );
 
--- No authenticated/anon policies on ocr_cache: service_role bypasses RLS.
+-- No authenticated/anon policies on ocr_cache or google_books_cache:
+-- service_role bypasses RLS.
 
 -- ---------------------------------------------------------------------------
 -- Storage: private bucket for shelf photos

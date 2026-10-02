@@ -104,8 +104,8 @@
       <ul>
         <li><strong>Title and author.</strong> Type corrections directly. Changing a confirmed title clears the catalog match until you confirm again.</li>
         <li><strong>Search Book.</strong> Looks the title up in Google Books. Apply the result you want. Each lookup counts toward your book-search limit.</li>
-        <li><strong>Use best match.</strong> Appears when ShelfMapper already has a suggested catalog hit. One click applies that title, author, and cover.</li>
-        <li><strong>Match remaining.</strong> Searches Google Books for every spine you have not confirmed yet, and applies high-confidence matches. If nothing is confident, edit the titles and search those cards yourself.</li>
+        <li><strong>Use best match.</strong> Appears when ShelfMapper already has a suggested catalog hit. One click applies that title and author.</li>
+        <li><strong>Match remaining.</strong> On Free, this matches up to 5 unconfirmed books, then you can keep matching one by one with Search Book. Premium matches every remaining book in one step. High-confidence matches are applied. If nothing is confident, edit the titles and search those cards yourself.</li>
         <li><strong>Skip.</strong> Removes that spine from this shelf. If you later rescan the same shelf, skipped titles stay skipped.</li>
         <li><strong>Skip Unlabeled.</strong> Removes every card whose title is empty or “unlabeled spine.”</li>
         <li><strong>Add spine.</strong> Use this when a book was missed. The button switches to <strong>Cancel add</strong>, and the photo cursor becomes a crosshair. Drag a box around the spine. Press <kbd>Esc</kbd> or <strong>Cancel add</strong> to leave drawing mode. You need a photo loaded before you can add a spine.</li>
@@ -146,12 +146,11 @@
     <section class="help-section" id="find">
       <h2>Find and edit a book</h2>
       <p>The <strong>My Library</strong> list sits beside the map. Type in <strong>Filter books by title or author</strong> to narrow it. Click a row, or press <kbd>Enter</kbd> or <kbd>Space</kbd> while it is focused, to zoom the map to that book.</p>
-      <p>Select a book on the shelf photo to open its card. The card shows the title and cover when one is saved.</p>
+      <p>Select a book on the shelf photo to open its card. The card shows the title.</p>
       <ul>
         <li><strong>Settings</strong> opens book settings. You can also use the gear on the library row.</li>
         <li><strong>Save title</strong> writes a new title. The title cannot be blank.</li>
-        <li><strong>Search Google Books</strong> looks up a catalog record and applies the one you choose, including its cover.</li>
-        <li><strong>Custom cover</strong> <span class="help-badge">Premium</span> Paste a cover URL or upload an image, then <strong>Save cover</strong>.</li>
+        <li><strong>Search Google Books</strong> looks up a catalog record and applies the title and author you choose.</li>
         <li><strong>Delete</strong> removes that book after you confirm. Deleting a book does not delete the shelf photo.</li>
       </ul>
       <p>With a book selected on the map, drag the white handles to reshape its outline on the shelf photo.</p>
@@ -192,15 +191,15 @@
 
     <section class="help-section" id="export">
       <h2>Export your library</h2>
-      <p>The download button on the library sidebar opens <strong>Export CSV</strong> and <strong>Export JSON</strong>. Either file includes each book’s title, author, shelf, cover, and the date it was added. The download is named <code>shelfmapper-export.csv</code> or <code>shelfmapper-export.json</code>. Export is available on Free and Premium.</p>
+      <p>The download button on the library sidebar opens <strong>Export CSV</strong> and <strong>Export JSON</strong>. Either file includes each book’s title, author, shelf, and the date it was added. The download is named <code>shelfmapper-export.csv</code> or <code>shelfmapper-export.json</code>. Export is available on Free and Premium.</p>
     </section>
 
     <section class="help-section" id="plans">
       <h2>Plans, scans, and billing</h2>
       <p>Limits reset on a timer. Scans use a 15-minute window. Book searches use a one-minute window. <a href="/pricing.html">Pricing</a> lists the current plans.</p>
       <ul>
-        <li><strong>Free.</strong> 10 scans per 15 minutes, 60 book searches per minute, one photo at a time, and the basic scan and map tools.</li>
-        <li><strong>Premium.</strong> $5 per month or $50 per year, with a 7-day free trial. 60 scans per 15 minutes, 300 book searches per minute, batch photos, rooms, read-only share links, and custom covers.</li>
+        <li><strong>Free.</strong> 10 shelf scans per 15 minutes, 60 book searches per minute, matching 5 books at a time, and one photo at a time.</li>
+        <li><strong>Premium.</strong> $5 per month or $50 per year, with a 7-day free trial. 60 shelf scans per 15 minutes, 300 book searches per minute, matching every remaining book in one step, a queue of several photos, rooms, and read-only share links.</li>
       </ul>
       <p>Open the account menu and choose <strong>Start 7-day trial</strong> or <strong>Upgrade to Premium</strong>. Pick monthly or annual. Checkout runs in Stripe. After you subscribe, <strong>Manage billing</strong> opens the Stripe portal, where you can change the plan, update a card, or cancel. Canceling returns you to Free. You can also open Stripe from <strong>Account details</strong>.</p>
       <p>The account menu badge shows <strong>Free</strong>, <strong>Premium</strong>, or <strong>Trial</strong> with the days left. Shortly before a Premium renewal, a banner names the date and amount. <strong>Manage billing</strong> on that banner opens Stripe. <strong>×</strong> hides that notice.</p>
@@ -220,7 +219,7 @@
 
     <section class="help-section" id="offline">
       <h2>Offline use and installing</h2>
-      <p>If the connection drops, a banner says library browsing is available and scanning and edits are disabled. ShelfMapper keeps the last library you loaded on this device, including covers. Shelf photos are cached too: the first two on Free, and every shelf photo on Premium. Rename, delete, scan, search, share, and billing all wait until you are back online.</p>
+      <p>If the connection drops, a banner says library browsing is available and scanning and edits are disabled. ShelfMapper keeps the last library you loaded on this device. Shelf photos are cached too: the first two on Free, and every shelf photo on Premium. Rename, delete, scan, search, share, and billing all wait until you are back online.</p>
       <p>When the browser can install ShelfMapper, an <strong>Install</strong> button appears in the top bar. On iPhone or iPad, use Share, then <strong>Add to Home Screen</strong>. The installed site opens like an app and still needs a connection for scans and edits.</p>
     </section>
 
@@ -231,9 +230,9 @@
         <li><strong>A spine was missed.</strong> Choose <strong>Add spine</strong> and draw a box around it.</li>
         <li><strong>A title is garbled.</strong> Edit it, then <strong>Search Book</strong>. <strong>Match remaining</strong> only applies matches it is confident about.</li>
         <li><strong>Too many junk cards.</strong> <strong>Skip</strong> the bad ones, or <strong>Skip Unlabeled</strong> to clear empty reads in one step.</li>
-        <li><strong>Scan limit reached.</strong> The nav counter is full for this 15-minute window. Wait for it to reset, or upgrade for a higher cap.</li>
-        <li><strong>Book search limit reached.</strong> Searches reset about once a minute. Premium raises the cap.</li>
-        <li><strong>A Premium button is locked.</strong> Rooms, sharing, custom covers, and multi-photo scans open the upgrade dialog on Free.</li>
+        <li><strong>Scan limit reached.</strong> Free allows 10 shelf scans per 15 minutes. Wait for that window to reset, or upgrade to 60 scans per 15 minutes.</li>
+        <li><strong>Book search limit reached.</strong> Free allows 60 searches per minute. Wait a minute, or upgrade to 300 searches per minute.</li>
+        <li><strong>A Premium button is locked.</strong> Extra rooms, share links, and multi-photo scans open the upgrade dialog on Free.</li>
       </ul>
       <p>If something still fails, send a note from <a href="/support.html">Support</a>. Include whether it is billing, scanning, your account, or a bug, and what you expected to happen.</p>
     </section>

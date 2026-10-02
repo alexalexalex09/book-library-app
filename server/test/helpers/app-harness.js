@@ -189,6 +189,7 @@ function createTestApp({
       requireAuth,
       rateLimit: booksRateLimit,
       fetchBooks,
+      supabase,
       usageAnalytics,
     }),
   );
@@ -370,11 +371,13 @@ function createMockSupabase({ usersByToken = {}, tables = {} } = {}) {
 
       if (ctx.mode === "upsert") {
         const key =
-          ctx.payload.key != null
-            ? "key"
-            : ctx.payload.user_id != null
-              ? "user_id"
-              : "id";
+          ctx.payload.query_key != null
+            ? "query_key"
+            : ctx.payload.key != null
+              ? "key"
+              : ctx.payload.user_id != null
+                ? "user_id"
+                : "id";
         const existing = table.find((row) => row[key] === ctx.payload[key]);
         if (existing) {
           Object.assign(existing, ctx.payload);
