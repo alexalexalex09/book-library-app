@@ -1,11 +1,28 @@
 const express = require("express");
-const { buildGoogleBooksQuery, rankBookItems } = require("./book-search-rank");
+const {
+  cleanSearchText,
+  needsSearchFallback,
+  planBookSearchQueries,
+  rankBookItems,
+} = require("./book-search-rank");
 const {
   createBooksCache,
   defaultFetchBooks,
   normalizeBooksError,
   stripImageLinks,
 } = require("./google-books");
+
+function mergeBookItems(primary, fallback) {
+  const seen = new Set();
+  const merged = [];
+  for (const item of [...primary, ...fallback]) {
+    const id = item?.id || "";
+    if (id && seen.has(id)) continue;
+    if (id) seen.add(id);
+    merged.push(item);
+  }
+  return merged;
+}
 
 function createBooksRouter({
   requireAuth,
@@ -50,25 +67,35 @@ function createBooksRouter({
       return res.status(400).json({ error: "Search query is too long" });
     }
 
-    const googleQuery = buildGoogleBooksQuery(rawTitle);
-    if (!googleQuery) {
+    const queries = planBookSearchQueries(rawTitle);
+    if (!queries.length) {
       return res.status(400).json({ error: "Missing search query" });
     }
 
-    const { status, data } = await loadQuery(googleQuery);
-    if (status !== 200) {
-      return res.status(status).json(normalizeBooksError(status, data));
+    const rankText = cleanSearchText(rawTitle) || queries[0];
+    const first = await loadQuery(queries[0]);
+    if (first.status !== 200) {
+      return res.status(first.status).json(normalizeBooksError(first.status, first.data));
     }
 
-    const rankedItems = rankBookItems(data?.items || [], googleQuery, 5);
+    let items = first.data?.items || [];
+    let rankedItems = rankBookItems(items, rankText, 5);
+
+    if (queries[1] && needsSearchFallback(rankedItems)) {
+      const second = await loadQuery(queries[1]);
+      if (second.status === 200) {
+        items = mergeBookItems(items, second.data?.items || []);
+        rankedItems = rankBookItems(items, rankText, 5);
+      }
+    }
 
     if (usageAnalytics) {
       usageAnalytics.recordEvent(req.user?.id, "books_ok", {});
     }
     return res.json({
-      ...data,
+      ...first.data,
       items: rankedItems,
-      query: googleQuery,
+      query: queries[0],
     });
   });
 

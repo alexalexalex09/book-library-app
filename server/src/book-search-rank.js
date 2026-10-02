@@ -21,6 +21,9 @@ const TITLE_STOPWORDS = new Set([
   "with",
 ]);
 
+/** Sticker and shelf-mark words that are not part of the title or author. */
+const SPINE_NOISE = new Set(["used", "sale", "bargain"]);
+
 function normalizeText(value) {
   return String(value || "")
     .toLowerCase()
@@ -163,32 +166,128 @@ function shapeSearchFields(title, author, { salvageAuthor = true } = {}) {
 }
 
 /**
- * General Google Books query. The string is the title /ocr already returned.
- * Author, rawText, and mode are ignored so the query is not split or wrapped
- * in intitle:/inauthor:/isbn:.
+ * Words worth sending to Google Books. Short fragments, stopwords, and
+ * sticker noise are dropped. Original spelling and order are kept.
+ */
+function spineSearchTokens(text) {
+  const cleaned = cleanSearchText(text);
+  if (!cleaned) return [];
+  return cleaned.split(/\s+/).filter((word) => {
+    const norm = normalizeText(word);
+    if (!norm || norm.length < 3) return false;
+    if (TITLE_STOPWORDS.has(norm)) return false;
+    if (SPINE_NOISE.has(norm)) return false;
+    return true;
+  });
+}
+
+/**
+ * Higher means the token is less likely to be a real title or author word.
+ * Ordinary words, including short ones such as "Our", score 0.
+ */
+function damageScore(word) {
+  const norm = normalizeText(word);
+  if (!norm) return 0;
+  let score = 0;
+  if (!/[aeiouy]/.test(norm)) score += 4;
+  if (/\d/.test(norm)) score += 4;
+  if (/(.)\1\1/.test(norm)) score += 3;
+  return score;
+}
+
+/**
+ * One or two Google Books queries for an OCR spine.
+ * The primary query is the whole cleaned spine, in order. An ISBN is sent
+ * whole. A second query, used only when the first match is weak, drops the
+ * single token that looks least like a word.
+ */
+function planBookSearchQueries(title) {
+  const cleaned = cleanSearchText(title);
+  if (!cleaned) return [];
+
+  const isbn = extractIsbnFromText(cleaned);
+  if (isbn) return [isbn];
+
+  const tokens = spineSearchTokens(cleaned);
+  if (!tokens.length) return [];
+
+  const primary = tokens.join(" ");
+  if (tokens.length < 3) return [primary];
+
+  let suspectIndex = -1;
+  let suspectScore = 0;
+  for (let i = 0; i < tokens.length; i += 1) {
+    const score = damageScore(tokens[i]);
+    if (score > suspectScore) {
+      suspectScore = score;
+      suspectIndex = i;
+    }
+  }
+  if (suspectIndex < 0) return [primary];
+
+  const secondary = tokens.filter((_, index) => index !== suspectIndex).join(" ");
+  if (!secondary || secondary === primary) return [primary];
+  return [primary, secondary];
+}
+
+/**
+ * Primary Google Books query. Author, rawText, and mode are ignored so the
+ * query is not wrapped in intitle:/inauthor:/isbn:.
  */
 function buildGoogleBooksQuery(title, _author, _options) {
-  return cleanSearchText(title);
+  return planBookSearchQueries(title)[0] || "";
 }
 
-function jaccard(a, b) {
-  if (a.size === 0 || b.size === 0) return 0;
-  let inter = 0;
-  for (const t of a) {
-    if (b.has(t)) inter += 1;
+function editAllowance(token) {
+  if (token.length >= 8) return 2;
+  if (token.length >= 5) return 1;
+  return 0;
+}
+
+function withinEditDistance(a, b, limit) {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > limit) return false;
+  const row = new Array(b.length + 1);
+  for (let j = 0; j <= b.length; j += 1) row[j] = j;
+  for (let i = 1; i <= a.length; i += 1) {
+    let previous = row[0];
+    row[0] = i;
+    let best = row[0];
+    for (let j = 1; j <= b.length; j += 1) {
+      const current = row[j];
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, previous + cost);
+      previous = current;
+      if (row[j] < best) best = row[j];
+    }
+    if (best > limit) return false;
   }
-  const union = a.size + b.size - inter;
-  return union === 0 ? 0 : inter / union;
+  return row[b.length] <= limit;
 }
 
-/** Fraction of query significant tokens covered by the candidate title. */
-function coverage(queryTokens, volumeTokens) {
-  if (queryTokens.size === 0) return 0;
+function tokensMatch(left, right) {
+  if (left === right) return true;
+  const allowance = Math.min(editAllowance(left), editAllowance(right));
+  if (!allowance) return false;
+  return withinEditDistance(left, right, allowance);
+}
+
+function tokenInSet(token, tokens) {
+  if (tokens.has(token)) return true;
+  for (const other of tokens) {
+    if (tokensMatch(token, other)) return true;
+  }
+  return false;
+}
+
+/** Fraction of needle tokens found in the haystack, allowing damaged words. */
+function fuzzyCoverage(needles, haystack) {
+  if (needles.size === 0 || haystack.size === 0) return 0;
   let hit = 0;
-  for (const t of queryTokens) {
-    if (volumeTokens.has(t)) hit += 1;
+  for (const token of needles) {
+    if (tokenInSet(token, haystack)) hit += 1;
   }
-  return hit / queryTokens.size;
+  return hit / needles.size;
 }
 
 function extractIsbn(volumeInfo) {
@@ -209,9 +308,14 @@ function scoreVolume(volumeInfo, queryText) {
 
   const qTokens = significantTokens(query);
   const vTokens = significantTokens(blob);
-  const tokenCoverage = coverage(qTokens, vTokens);
-  const tokenJaccard = jaccard(qTokens, vTokens);
-  const textScore = tokenCoverage * 0.65 + tokenJaccard * 0.35;
+  const titleTokens = significantTokens(volTitle);
+  const queryCoverage = fuzzyCoverage(qTokens, vTokens);
+  const titleRecall = titleTokens.size
+    ? fuzzyCoverage(titleTokens, qTokens)
+    : queryCoverage;
+  const textScore = titleTokens.size
+    ? titleRecall * 0.55 + queryCoverage * 0.45
+    : queryCoverage;
 
   const normTitle = normalizeText(volTitle);
   const normQuery = normalizeText(query);
@@ -226,9 +330,11 @@ function scoreVolume(volumeInfo, queryText) {
     normTitle.split(" ").length >= 2
   ) {
     bonus += 0.18;
-  } else if (tokenCoverage >= 0.85 && qTokens.size >= 3) bonus += 0.12;
+  } else if (titleRecall >= 0.8 && titleTokens.size >= 2) bonus += 0.18;
+  else if (queryCoverage >= 0.85 && qTokens.size >= 3) bonus += 0.12;
 
-  return Math.max(0, Math.min(1, textScore + bonus));
+  const headroom = Math.max(0.5, 1 - textScore);
+  return Math.max(0, Math.min(1, textScore + bonus * headroom));
 }
 
 function rankBookItems(items, query, limit = 5) {
@@ -290,6 +396,7 @@ module.exports = {
   looksLikeIsbn,
   extractIsbnFromText,
   shapeSearchFields,
+  planBookSearchQueries,
   buildGoogleBooksQuery,
   scoreVolume,
   rankBookItems,

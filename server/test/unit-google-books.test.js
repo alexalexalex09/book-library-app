@@ -277,4 +277,117 @@ describe("books search cache and errors", () => {
       harness.restoreEnv();
     }
   });
+
+  it("retries the full spine without one damaged word", async () => {
+    const queries = [];
+    const harness = await start(async (query) => {
+      queries.push(query);
+      if (query.includes("Xzq")) {
+        return { status: 200, data: { items: [] } };
+      }
+      return {
+        status: 200,
+        data: {
+          items: [
+            {
+              id: "youth",
+              volumeInfo: {
+                title: "Awakening Youth Discipleship",
+                authors: ["Mahan", "Warren", "White"],
+              },
+            },
+          ],
+        },
+      };
+    });
+    try {
+      const spine = "Mahan Warren and White Awakening Youth Xzq Discipleship";
+      const response = await fetch(
+        `${harness.baseUrl}/api/books?q=${encodeURIComponent(spine)}`,
+        { headers: { Authorization: "Bearer token-free" } },
+      );
+      const body = await response.json();
+      assert.equal(response.status, 200);
+      assert.deepEqual(queries, [
+        "Mahan Warren White Awakening Youth Xzq Discipleship",
+        "Mahan Warren White Awakening Youth Discipleship",
+      ]);
+      assert.equal(body.items[0].volumeInfo.title, "Awakening Youth Discipleship");
+      assert.ok(body.items[0].matchScore >= 0.72);
+    } finally {
+      await harness.close();
+      harness.restoreEnv();
+    }
+  });
+
+  it("searches the whole spine once when the match is strong", async () => {
+    const queries = [];
+    const harness = await start(async (query) => {
+      queries.push(query);
+      return {
+        status: 200,
+        data: {
+          items: [
+            {
+              id: "wilde",
+              volumeInfo: {
+                title: "All the Ways Our Dead Still Speak",
+                authors: ["Caleb Wilde"],
+              },
+            },
+          ],
+        },
+      };
+    });
+    try {
+      const spine = "All the Ways Our Dead Still Speak Wilde Av";
+      const response = await fetch(
+        `${harness.baseUrl}/api/books?q=${encodeURIComponent(spine)}`,
+        { headers: { Authorization: "Bearer token-free" } },
+      );
+      const body = await response.json();
+      assert.equal(response.status, 200);
+      assert.deepEqual(queries, ["All Ways Our Dead Still Speak Wilde"]);
+      assert.equal(body.items[0].id, "wilde");
+      assert.ok(body.items[0].matchScore >= 0.72);
+    } finally {
+      await harness.close();
+      harness.restoreEnv();
+    }
+  });
+
+  it("keeps the first results when the retry fails", async () => {
+    const queries = [];
+    const harness = await start(async (query) => {
+      queries.push(query);
+      if (queries.length === 1) {
+        return {
+          status: 200,
+          data: {
+            items: [
+              {
+                id: "weak",
+                volumeInfo: { title: "Completely Unrelated", authors: ["Nobody"] },
+              },
+            ],
+          },
+        };
+      }
+      return { status: 503, data: { error: { message: "Backend Error" } } };
+    });
+    try {
+      const spine = "Mahan Warren and White Awakening Youth Xzq Discipleship";
+      const response = await fetch(
+        `${harness.baseUrl}/api/books?q=${encodeURIComponent(spine)}`,
+        { headers: { Authorization: "Bearer token-free" } },
+      );
+      const body = await response.json();
+      assert.equal(response.status, 200);
+      assert.equal(queries.length, 2);
+      assert.equal(body.items[0].id, "weak");
+    } finally {
+      await harness.close();
+      harness.restoreEnv();
+    }
+  });
 });

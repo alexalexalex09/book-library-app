@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { describe, it } = require("node:test");
 const {
   buildGoogleBooksQuery,
+  planBookSearchQueries,
   cleanSearchText,
   looksLikeIsbn,
   extractIsbnFromText,
@@ -39,22 +40,50 @@ describe("book-search-rank", () => {
     assert.equal(extractIsbnFromText("The Hobbit"), null);
   });
 
-  it("sends the refined title as a general query and ignores extra fields", () => {
-    assert.equal(buildGoogleBooksQuery("The Hobbit", "Tolkien"), "The Hobbit");
+  it("sends a short general query and ignores extra fields", () => {
+    assert.equal(buildGoogleBooksQuery("The Hobbit", "Tolkien"), "Hobbit");
     assert.equal(buildGoogleBooksQuery("9780261103573", ""), "9780261103573");
     assert.equal(
       buildGoogleBooksQuery("All the Ways Our Dead Still Speak WILDE", "Wilde"),
-      "All the Ways Our Dead Still Speak WILDE",
+      "All Ways Our Dead Still Speak WILDE",
     );
     assert.equal(
       buildGoogleBooksQuery("The Hobbit", "Tolkien", {
         rawText: "scrambled raw text 9780261103573",
         mode: "intitle",
       }),
-      "The Hobbit",
+      "Hobbit",
     );
     assert.equal(buildGoogleBooksQuery("Dune $12.99", "Herbert"), "Dune");
     assert.equal(buildGoogleBooksQuery("Unlabeled Spine"), "");
+  });
+
+  it("searches the whole spine and drops only junk or one damaged word", () => {
+    assert.deepEqual(
+      planBookSearchQueries(
+        "Mahan Warren and White Awakening Youth Discipleship Ki",
+      ),
+      ["Mahan Warren White Awakening Youth Discipleship"],
+    );
+    assert.deepEqual(
+      planBookSearchQueries("All the Ways Our Dead Still Speak Wilde Av"),
+      ["All Ways Our Dead Still Speak Wilde"],
+    );
+    assert.deepEqual(planBookSearchQueries("Dune"), ["Dune"]);
+    assert.deepEqual(planBookSearchQueries("Dune Messiah"), ["Dune Messiah"]);
+    assert.deepEqual(
+      planBookSearchQueries("Awakening USED Youth Discipleship Mahan"),
+      ["Awakening Youth Discipleship Mahan"],
+    );
+    assert.deepEqual(
+      planBookSearchQueries(
+        "Mahan Warren and White Awakening Youth Xzq Discipleship",
+      ),
+      [
+        "Mahan Warren White Awakening Youth Xzq Discipleship",
+        "Mahan Warren White Awakening Youth Discipleship",
+      ],
+    );
   });
 
   it("still describes author salvage for callers that ask for it directly", () => {
@@ -149,6 +178,25 @@ describe("book-search-rank", () => {
       "Dune",
     );
     assert.ok(score > 0.7);
+  });
+
+  it("still ranks a title when one word is misspelled", () => {
+    const correct = scoreVolume(
+      {
+        title: "All the Ways Our Dead Still Speak",
+        authors: ["Caleb Wilde"],
+      },
+      "All the Ways Our Dead Still Speek Wilde Av",
+    );
+    const wrong = scoreVolume(
+      {
+        title: "How to Speak with the Dead, a Practical Handbook",
+        authors: ["Sciens"],
+      },
+      "All the Ways Our Dead Still Speek Wilde Av",
+    );
+    assert.ok(correct >= 0.72);
+    assert.ok(correct > wrong);
   });
 
   it("needs search fallback when results are empty or weak", () => {
