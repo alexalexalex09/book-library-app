@@ -2295,7 +2295,6 @@ input:focus-visible,
   cursor: grab;
   user-select: none;
   transition: box-shadow 0.2s;
-  font-size: 3rem;
 }
 
 .shelf-card-header {
@@ -2307,6 +2306,7 @@ input:focus-visible,
 }
 
 .shelf-card-name {
+  font-size: 3rem;
   font-weight: 600;
   color: #3f3f46;
   overflow: hidden;

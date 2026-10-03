@@ -109,6 +109,45 @@ function shelfMapSizePayload(widthPx) {
   };
 }
 
+/** Header chrome around .shelf-card-name: card padding plus the three icon buttons. */
+const SHELF_CARD_NAME_CHROME_PX = 10 * 2 + 36 * 3 + 6 * 2;
+
+/**
+ * Width for a newly saved shelf so the photo stays in proportion to the
+ * title type on .shelf-card-name, and a normal name is not immediately cut off.
+ */
+function shelfCardWidthForName(name) {
+  const label = String(name || "").trim() || "Untitled Shelf";
+  const probe = document.createElement("span");
+  probe.className = "shelf-card-name";
+  probe.textContent = label;
+  probe.style.cssText = [
+    "position:absolute",
+    "left:-9999px",
+    "top:0",
+    "visibility:hidden",
+    "display:inline-block",
+    "width:auto",
+    "max-width:none",
+    "overflow:visible",
+    "text-overflow:clip",
+    "white-space:nowrap",
+    "flex:none",
+  ].join(";");
+  document.body.appendChild(probe);
+  const fontSize = parseFloat(getComputedStyle(probe).fontSize) || 16;
+  const textWidth = probe.getBoundingClientRect().width;
+  probe.remove();
+
+  const fitTitle = Math.ceil(textWidth + SHELF_CARD_NAME_CHROME_PX);
+  const proportional = Math.ceil(fontSize * 14);
+  const cap = Math.ceil(fontSize * 28);
+  return Math.max(
+    DEFAULT_SHELF_CARD_WIDTH,
+    Math.min(cap, Math.max(fitTitle, proportional)),
+  );
+}
+
 function storagePathFromShelfImage(value) {
   if (typeof value !== "string" || !value.trim()) return "";
   const trimmed = value.trim();
@@ -4659,8 +4698,7 @@ async function saveShelfToDatabase() {
         .insert({
           user_id: currentUser.id,
           image_url: imagePath,
-          map_width: DEFAULT_SHELF_CARD_WIDTH,
-          map_scale: 1,
+          ...shelfMapSizePayload(shelfCardWidthForName(resolvedName)),
           ...spinePayload,
         })
         .select()
