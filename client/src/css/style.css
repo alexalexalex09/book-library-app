@@ -2034,6 +2034,7 @@ input:focus-visible,
 
 .spine-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -2046,8 +2047,14 @@ input:focus-visible,
   flex: 1;
 }
 
-.spine-btn-skip {
+.spine-btn-skip,
+.spine-btn-as-is {
   width: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.spine-btn-skip {
   background-color: #e5e7eb;
   border-color: #d1d5db;
 }

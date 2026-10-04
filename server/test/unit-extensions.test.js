@@ -168,5 +168,9 @@ describe("photo source chooser markup", () => {
       /768/,
     );
     assert.match(appJs, /activateUpload = \(\) => openPhotoSourceChooser\(\)/);
+    assert.match(appJs, /function confirmSpineAsIs\(spine\)/);
+    assert.match(appJs, /function spinesReadyForSave\(spines\)/);
+    assert.match(appJs, /applyStrongMatches:\s*false/);
+    assert.match(appJs, /Save as-is/);
   });
 });

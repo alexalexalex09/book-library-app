@@ -352,6 +352,7 @@ function spineNeedsReview(spine) {
 function clearCatalogConfirmation(spine) {
   if (!spine?.confirmed) return;
   spine.confirmed = false;
+  delete spine.catalogConfirmed;
   delete spine.confirmedTitle;
   delete spine.thumbnail;
   delete spine.volumeId;
@@ -472,6 +473,7 @@ async function mapPool(items, concurrency, workerFn) {
 function confirmSpineWithBook(spine, book) {
   spine.title = book.title;
   spine.confirmed = true;
+  spine.catalogConfirmed = true;
   spine.confirmedTitle = book.title;
   spine.author = book.authors;
   if (book.publisher) spine.publisher = book.publisher;
@@ -482,9 +484,34 @@ function confirmSpineWithBook(spine, book) {
   delete spine.suggestedMatches;
 }
 
+function confirmSpineAsIs(spine) {
+  const title = String(spine.title || "").trim();
+  spine.title = title;
+  spine.author = String(spine.author || "").trim();
+  spine.confirmed = true;
+  spine.confirmedTitle = title;
+  delete spine.catalogConfirmed;
+  delete spine.publisher;
+  delete spine.thumbnail;
+  delete spine.volumeId;
+  delete spine.isbn;
+  delete spine.bestMatch;
+  delete spine.suggestedMatches;
+}
+
+function spinesReadyForSave(spines) {
+  return (spines || []).map((spine) => {
+    const copy = { ...spine };
+    if (copy.catalogConfirmed) return copy;
+    confirmSpineAsIs(copy);
+    return copy;
+  });
+}
+
 async function autoMatchDetectedSpines({
   onlyUnconfirmed = true,
   notifyLimit = true,
+  applyStrongMatches = true,
 } = {}) {
   if (!requireOnline("Book search", false)) return { matched: 0, limited: false };
 
@@ -511,7 +538,7 @@ async function autoMatchDetectedSpines({
       const best = books[0];
       if (!best) return;
       const score = Number.isFinite(best.matchScore) ? best.matchScore : 0;
-      if (score >= AUTO_CONFIRM_SCORE) {
+      if (applyStrongMatches && score >= AUTO_CONFIRM_SCORE) {
         confirmSpineWithBook(spine, best);
         matched += 1;
       } else if (score >= SUGGEST_SCORE) {
@@ -3769,13 +3796,16 @@ function renderDetectedSpines(options = {}) {
   const header = document.createElement("div");
   header.className = "spines-toolbar";
 
-  const confirmedCount = currentDetectedSpines.filter((s) => s.confirmed).length;
   const titleEl = document.createElement("strong");
   titleEl.className = "spines-title";
-  titleEl.textContent =
-    currentDetectedSpines.length === 0
-      ? "No spines yet"
-      : `Matched ${confirmedCount} / ${currentDetectedSpines.length}`;
+  const syncMatchedHeading = () => {
+    const matched = currentDetectedSpines.filter((spine) => spine.confirmed).length;
+    titleEl.textContent =
+      currentDetectedSpines.length === 0
+        ? "No spines yet"
+        : `Matched ${matched} / ${currentDetectedSpines.length}`;
+  };
+  syncMatchedHeading();
 
   const batchActions = document.createElement("div");
   batchActions.className = "spines-batch-actions";
@@ -3927,6 +3957,9 @@ function renderDetectedSpines(options = {}) {
         div.classList.remove("is-confirmed");
       }
       div.classList.toggle("needs-review", spineNeedsReview(spine));
+      saveAsIsBtn.hidden = Boolean(spine.confirmed);
+      if (!spine.confirmed) div.querySelector(".spine-confirmed-row")?.remove();
+      syncMatchedHeading();
       redrawCanvasOverlays(activeEditingSpineIndex);
     });
 
@@ -3963,6 +3996,9 @@ function renderDetectedSpines(options = {}) {
       clearCatalogConfirmation(spine);
       div.classList.remove("is-confirmed");
       div.classList.toggle("needs-review", spineNeedsReview(spine));
+      if (saveAsIsBtn) saveAsIsBtn.hidden = Boolean(spine.confirmed);
+      if (!spine.confirmed) div.querySelector(".spine-confirmed-row")?.remove();
+      syncMatchedHeading();
       redrawCanvasOverlays(activeEditingSpineIndex);
     });
     authorInput.addEventListener("focus", highlight);
@@ -4018,6 +4054,21 @@ function renderDetectedSpines(options = {}) {
       };
       actionRow.appendChild(useBestBtn);
     }
+
+    const saveAsIsBtn = document.createElement("button");
+    saveAsIsBtn.textContent = "Save as-is";
+    saveAsIsBtn.className = "auth-btn secondary-btn spine-btn spine-btn-as-is";
+    saveAsIsBtn.type = "button";
+    saveAsIsBtn.hidden = Boolean(spine.confirmed);
+    saveAsIsBtn.setAttribute("aria-label", `Save spine ${index + 1} title as-is`);
+    saveAsIsBtn.onclick = () => {
+      spine.title = titleInput.value;
+      spine.author = authorInput.value;
+      confirmSpineAsIs(spine);
+      renderDetectedSpines({ preserveScroll: true });
+      showToast(`Saved "${spine.title || "Untitled"}" as-is.`, "success");
+    };
+    actionRow.appendChild(saveAsIsBtn);
 
     const searchBtn = document.createElement("button");
     searchBtn.textContent = "Search Book";
@@ -4133,7 +4184,10 @@ async function handleOcrResponse(data) {
   renderDetectedSpines();
   if (currentDetectedSpines.some((s) => isSearchableSpineTitle(s.title))) {
     showToast("Matching titles in Google Books...", "info");
-    const { matched } = await autoMatchDetectedSpines({ notifyLimit: false });
+    const { matched } = await autoMatchDetectedSpines({
+      notifyLimit: false,
+      applyStrongMatches: false,
+    });
     if (matched > 0) {
       showToast(`Auto-matched ${matched} book(s).`, "success");
     }
@@ -4291,7 +4345,7 @@ async function insertUserBooks(payload) {
   return error || null;
 }
 
-async function saveBooksForShelf(shelfId, imagePath) {
+async function saveBooksForShelf(shelfId, imagePath, spines = currentDetectedSpines) {
   const { data: existingBooks, error: existingError } = await supabaseClient
     .from("user_books")
     .select("id")
@@ -4309,7 +4363,7 @@ async function saveBooksForShelf(shelfId, imagePath) {
   }
 
   return insertUserBooks(
-    buildUserBookRows(currentDetectedSpines, {
+    buildUserBookRows(spines, {
       userId: currentUser.id,
       shelfId,
       imagePath,
@@ -4667,9 +4721,10 @@ async function saveShelfToDatabase() {
       existingShelf = data || null;
     }
 
+    const spinesToSave = spinesReadyForSave(currentDetectedSpines);
     const spinePayload = {
       name: resolvedName,
-      detected_spines: spinesForStorage(currentDetectedSpines),
+      detected_spines: spinesForStorage(spinesToSave),
       dismissed_titles: currentDismissedTitles,
     };
 
@@ -4734,7 +4789,7 @@ async function saveShelfToDatabase() {
     }
 
     pendingSavedShelfId = shelfId;
-    const booksError = await saveBooksForShelf(shelfId, imagePath);
+    const booksError = await saveBooksForShelf(shelfId, imagePath, spinesToSave);
     if (booksError) {
       console.error("Failed to insert user_books:", booksError);
       showToast(

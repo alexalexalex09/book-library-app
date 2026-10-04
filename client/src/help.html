@@ -100,9 +100,10 @@
     <section class="help-section" id="review">
       <h2>Review detected books</h2>
       <p>After a photo loads, the step changes to <strong>Review detected spines</strong>. Each book is a card with a crop of that spine, a title, and an author. The number on the card matches the outline on the photo.</p>
-      <p>A <strong>Check this</strong> badge means the read is blank, labeled “unlabeled spine,” or low confidence. Edit the title, search the catalog, or skip the card. An <strong>OCR</strong> line appears when the raw text differs from the title you see, so you can compare them.</p>
+      <p>A <strong>Check this</strong> badge means the read is blank, labeled “unlabeled spine,” or low confidence. Edit the title, search the catalog, or skip the card. An <strong>OCR</strong> line appears when the raw text differs from the title you see, so you can compare them. A suggested catalog match does not replace the title until you confirm it.</p>
       <ul>
         <li><strong>Title and author.</strong> Type corrections directly. Changing a confirmed title clears the catalog match until you confirm again.</li>
+        <li><strong>Save as-is.</strong> Keeps the title and author already on the card and marks that book confirmed. Google Books does not replace them, and <strong>Match remaining</strong> leaves the card alone.</li>
         <li><strong>Search Book.</strong> Looks the title up in Google Books. Apply the result you want. Each lookup counts toward your book-search limit.</li>
         <li><strong>Use best match.</strong> Appears when ShelfMapper already has a suggested catalog hit. One click applies that title and author.</li>
         <li><strong>Match remaining.</strong> On Free, this matches up to 5 unconfirmed books, then you can keep matching one by one with Search Book. Premium matches every remaining book in one step. High-confidence matches are applied. If nothing is confident, edit the titles and search those cards yourself.</li>
@@ -118,7 +119,7 @@
     <section class="help-section" id="save">
       <h2>Save a shelf</h2>
       <p><strong>Save shelf</strong> stays off until at least one book remains. The button shows the count, for example <strong>Save shelf (24)</strong>.</p>
-      <p>Choose it, then name the shelf. Leave the name blank to keep <strong>Untitled Shelf</strong>. Cancel returns you to the review without saving. A successful save stores the photo and the books, then opens that shelf on the library map. If more photos are waiting in a Premium batch, the next photo loads instead.</p>
+      <p>Choose it, then name the shelf. Leave the name blank to keep <strong>Untitled Shelf</strong>. Cancel returns you to the review without saving. Each book is stored with the title and author on its card. A confirmed catalog match is stored instead of that text. A successful save stores the photo and the books, then opens that shelf on the library map. If more photos are waiting in a Premium batch, the next photo loads instead.</p>
       <p>Saving the same photo again updates that shelf rather than creating a second copy. A rescan does the same: it replaces the books on that shelf with the list you just reviewed. Titles you skipped stay on the skipped list for that shelf.</p>
       <p>The <strong>Your shelves</strong> list on the left of Scan Shelf shows shelves you have already saved. While a save is in progress the button reads <strong>Saving Shelf &amp; Books...</strong>. If the shelf is stored but the books fail, save again to retry the books.</p>
     </section>
