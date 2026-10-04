@@ -115,6 +115,7 @@ test.describe("guest and static pages", () => {
     await expect(page.locator("#rotateRightBtn")).toBeAttached();
     await expect(page.locator("#photoSourceCameraBtn")).toHaveAttribute("type", "button");
     await expect(page.locator("#photoSourceLibraryBtn")).toHaveText(/Choose from library/i);
+    await expect(page.locator("#photoSourceLibraryBtn")).toHaveAttribute("type", "button");
     await expect(page.locator("#photoSourceCancelBtn")).toBeAttached();
   });
 

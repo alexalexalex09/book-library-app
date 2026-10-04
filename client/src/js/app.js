@@ -3630,9 +3630,7 @@ function openPhotoSourceChooser() {
     e.preventDefault();
     openInPageCamera();
   };
-  const onLibraryKey = (e) => {
-    if (e.key !== "Enter" && e.key !== " ") return;
-    e.preventDefault();
+  const onLibrary = () => {
     imageUpload?.click();
   };
   const onCancel = () => cleanup();
@@ -3643,7 +3641,7 @@ function openPhotoSourceChooser() {
   function cleanup() {
     cameraBtn.removeEventListener("click", onCamera);
     cameraBtn.removeEventListener("keydown", onCameraKey);
-    libraryBtn.removeEventListener("keydown", onLibraryKey);
+    libraryBtn.removeEventListener("click", onLibrary);
     cancelBtn.removeEventListener("click", onCancel);
     modal.removeEventListener("keydown", onKey);
     modal.removeEventListener("click", onOverlay);
@@ -3655,7 +3653,7 @@ function openPhotoSourceChooser() {
   closePhotoSourceChooser = cleanup;
   cameraBtn.addEventListener("click", onCamera);
   cameraBtn.addEventListener("keydown", onCameraKey);
-  libraryBtn.addEventListener("keydown", onLibraryKey);
+  libraryBtn.addEventListener("click", onLibrary);
   cancelBtn.addEventListener("click", onCancel);
   modal.addEventListener("keydown", onKey);
   modal.addEventListener("click", onOverlay);

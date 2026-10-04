@@ -151,7 +151,11 @@ describe("photo source chooser markup", () => {
     assert.match(indexHtml, /id="rotateLeftBtn"/);
     assert.match(indexHtml, /id="rotateRightBtn"/);
     assert.doesNotMatch(indexHtml, /for="imageCapture"/);
-    assert.match(indexHtml, /for="imageUpload"/);
+    assert.doesNotMatch(indexHtml, /for="imageUpload"/);
+    assert.match(
+      indexHtml,
+      /<button id="photoSourceLibraryBtn"[^>]*type="button"/,
+    );
     assert.doesNotMatch(styleCss, /\.visually-hidden-input\s*\{[^}]*display:\s*none/);
     assert.match(styleCss, /\.book-popover \{[^}]*pointer-events:\s*none/);
     assert.match(styleCss, /\.book-popover button \{[^}]*pointer-events:\s*auto/);
