@@ -208,6 +208,69 @@ test.describe("logged-in mobile library sheet", () => {
     await expect(page.locator("#photoSourceModal")).toHaveClass(/hidden-view/);
   });
 
+  test("cancel while the camera is opening stops the in-flight stream", async ({ page }) => {
+    await page.addInitScript(() => {
+      const real = window.matchMedia.bind(window);
+      const stub = (matches, query) => ({
+        matches,
+        media: query,
+        addListener() {},
+        removeListener() {},
+        addEventListener() {},
+        removeEventListener() {},
+        dispatchEvent() {
+          return false;
+        },
+      });
+      window.matchMedia = (query) => {
+        if (query === "(hover: none)") return stub(true, query);
+        if (query === "(pointer: coarse)") return stub(true, query);
+        return real(query);
+      };
+      window.__cameraStops = 0;
+      window.__resolveCamera = null;
+      const track = {
+        kind: "video",
+        label: "Back Camera",
+        stop() {
+          window.__cameraStops += 1;
+        },
+        getSettings: () => ({
+          deviceId: "back-wide",
+          facingMode: "environment",
+          width: 1280,
+          height: 720,
+        }),
+        getCapabilities: () => ({ zoom: { min: 0.5, max: 4, step: 0.1 } }),
+        applyConstraints: async () => {},
+      };
+      const stream = { getVideoTracks: () => [track], getTracks: () => [track] };
+      navigator.mediaDevices.getUserMedia = () =>
+        new Promise((resolve) => {
+          window.__resolveCamera = () => resolve(stream);
+        });
+      navigator.mediaDevices.enumerateDevices = async () => [
+        { kind: "videoinput", deviceId: "back-wide", label: "Back Camera" },
+      ];
+    });
+    await page.setViewportSize({ width: 900, height: 800 });
+    await page.reload();
+    await expect(page.locator("#loggedInView")).toBeVisible({ timeout: 30_000 });
+
+    await page.locator("#navUploadBtn").click();
+    await page.locator(".dropzone-cta-btn").click();
+    await expect(page.locator("#photoSourceModal")).toBeVisible();
+    await page.locator("#photoSourceCameraBtn").click();
+    await expect(page.locator("#shelfCamera")).toBeVisible();
+    await page.locator("#shelfCameraCancel").click();
+    await expect(page.locator("#shelfCamera")).toHaveClass(/hidden-view/);
+
+    await page.evaluate(() => window.__resolveCamera && window.__resolveCamera());
+    await expect.poll(async () => page.evaluate(() => window.__cameraStops)).toBeGreaterThan(0);
+    await expect(page.locator("#shelfCamera")).toHaveClass(/hidden-view/);
+    await expect(page.locator("#photoSourceModal")).toHaveClass(/hidden-view/);
+  });
+
   test("narrow desktop still opens the library file picker", async ({ page }) => {
     await page.addInitScript(() => {
       const real = window.matchMedia.bind(window);
