@@ -128,6 +128,30 @@ function captureFrameTransform(videoWidth, videoHeight, orientationAngle) {
   return { rotateDeg: 0, outWidth: w, outHeight: h };
 }
 
+function stopMediaStream(stream) {
+  if (!stream || typeof stream.getTracks !== "function") return;
+  stream.getTracks().forEach((track) => {
+    if (typeof track?.stop === "function") track.stop();
+  });
+}
+
+/**
+ * Generation token so in-flight getUserMedia work can tell that the user
+ * cancelled (or opened a newer camera session) and must drop the stream.
+ */
+function createGenerationGate() {
+  let generation = 0;
+  return {
+    next() {
+      generation += 1;
+      return generation;
+    },
+    isCurrent(token) {
+      return token === generation;
+    },
+  };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     isPhonePhotoSource,
@@ -139,5 +163,7 @@ if (typeof module !== "undefined" && module.exports) {
     describeCamera,
     formatCameraReadout,
     captureFrameTransform,
+    stopMediaStream,
+    createGenerationGate,
   };
 }

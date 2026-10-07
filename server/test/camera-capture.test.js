@@ -8,6 +8,8 @@ const {
   describeCamera,
   formatCameraReadout,
   captureFrameTransform,
+  stopMediaStream,
+  createGenerationGate,
 } = require(path.join(__dirname, "../../client/src/js/camera-capture.js"));
 
 function matchMedia(map) {
@@ -125,5 +127,28 @@ describe("portrait capture", () => {
     assert.equal(transform.rotateDeg, 0);
     assert.equal(transform.outWidth, 1920);
     assert.equal(transform.outHeight, 1080);
+  });
+});
+
+describe("in-page camera session", () => {
+  it("treats a cancelled generation as stale so the in-flight stream is dropped", () => {
+    const gate = createGenerationGate();
+    const opened = gate.next();
+    assert.equal(gate.isCurrent(opened), true);
+    gate.next();
+    assert.equal(gate.isCurrent(opened), false);
+  });
+
+  it("stops every track on a stream", () => {
+    const stops = [];
+    const stream = {
+      getTracks: () => [
+        { stop: () => stops.push("a") },
+        { stop: () => stops.push("b") },
+      ],
+    };
+    stopMediaStream(stream);
+    assert.deepEqual(stops, ["a", "b"]);
+    stopMediaStream(null);
   });
 });

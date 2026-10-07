@@ -1,5 +1,5 @@
-const SHELL_CACHE = "shelfmapper-shell-v3";
-const RUNTIME_CACHE = "shelfmapper-runtime-v3";
+const SHELL_CACHE = "shelfmapper-shell-v4";
+const RUNTIME_CACHE = "shelfmapper-runtime-v4";
 
 const APP_SHELL_URLS = [
   "/",

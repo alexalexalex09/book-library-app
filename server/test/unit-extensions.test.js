@@ -159,6 +159,12 @@ describe("photo source chooser markup", () => {
     assert.match(appJs, /function isMobilePhotoSourceLayout\(/);
     assert.match(appJs, /isPhonePhotoSource\(window\.matchMedia\.bind\(window\)\)/);
     assert.match(appJs, /function openInPageCamera\(/);
+    assert.match(appJs, /const shelfCameraGate = createGenerationGate\(\)/);
+    assert.match(appJs, /function dropStreamIfCameraStale\(/);
+    assert.match(
+      appJs.match(/async function openInPageCamera\(\) \{[\s\S]*?\n\}/)[0],
+      /dropStreamIfCameraStale\(stream, session\)/,
+    );
     assert.doesNotMatch(
       appJs.match(/function isMobilePhotoSourceLayout\(\) \{[\s\S]*?\n\}/)[0],
       /768/,

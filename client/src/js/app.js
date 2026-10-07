@@ -3412,23 +3412,41 @@ function isMobilePhotoSourceLayout() {
 }
 
 let shelfCameraStream = null;
+const shelfCameraGate = createGenerationGate();
 
 function fallbackFileCapture() {
   markCapturePending();
   imageCapture?.click();
 }
 
-function closeShelfCamera() {
-  shelfCameraStream?.getTracks?.().forEach((track) => track.stop());
-  shelfCameraStream = null;
+function clearShelfCameraPreview() {
   const video = document.getElementById("shelfCameraVideo");
   if (video) video.srcObject = null;
   document.getElementById("shelfCamera")?.classList.add("hidden-view");
 }
 
-async function probeVideoInputs(devices) {
+function closeShelfCamera() {
+  shelfCameraGate.next();
+  stopMediaStream(shelfCameraStream);
+  shelfCameraStream = null;
+  clearShelfCameraPreview();
+}
+
+function dropStreamIfCameraStale(stream, session) {
+  if (shelfCameraGate.isCurrent(session)) return false;
+  stopMediaStream(stream);
+  if (shelfCameraStream === stream) {
+    shelfCameraStream = null;
+    const video = document.getElementById("shelfCameraVideo");
+    if (video) video.srcObject = null;
+  }
+  return true;
+}
+
+async function probeVideoInputs(devices, { isStale } = {}) {
   const probed = [];
   for (const device of devices) {
+    if (typeof isStale === "function" && isStale()) break;
     if (!device?.deviceId) continue;
     let stream = null;
     try {
@@ -3454,13 +3472,14 @@ async function probeVideoInputs(devices) {
         kind: "videoinput",
       });
     } finally {
-      stream?.getTracks?.().forEach((track) => track.stop());
+      stopMediaStream(stream);
     }
   }
   return probed;
 }
 
-async function bindShelfCameraStream(stream) {
+async function bindShelfCameraStream(stream, session) {
+  if (dropStreamIfCameraStale(stream, session)) return;
   shelfCameraStream = stream;
   const video = document.getElementById("shelfCameraVideo");
   const readout = document.getElementById("shelfCameraReadout");
@@ -3476,6 +3495,7 @@ async function bindShelfCameraStream(stream) {
   } catch {
     // Labels can be unavailable; the settings record still stands.
   }
+  if (dropStreamIfCameraStale(stream, session)) return;
   const record = describeCamera(settings, caps, label);
   const zoomStart = startingZoom(caps.zoom);
   if (zoomStart != null && track?.applyConstraints) {
@@ -3486,6 +3506,7 @@ async function bindShelfCameraStream(stream) {
       record.zoomApplyError = error?.message || String(error);
     }
   }
+  if (dropStreamIfCameraStale(stream, session)) return;
   console.info("Shelf camera", record);
   if (readout) readout.textContent = formatCameraReadout(record);
   if (zoomInput) {
@@ -3503,6 +3524,7 @@ async function bindShelfCameraStream(stream) {
     video.srcObject = stream;
     await video.play().catch(() => {});
   }
+  if (dropStreamIfCameraStale(stream, session)) return;
 }
 
 async function openInPageCamera() {
@@ -3517,6 +3539,9 @@ async function openInPageCamera() {
     fallbackFileCapture();
     return;
   }
+  const session = shelfCameraGate.next();
+  stopMediaStream(shelfCameraStream);
+  shelfCameraStream = null;
   overlay.classList.remove("hidden-view");
   if (readout) readout.textContent = "Opening camera…";
   let stream = null;
@@ -3525,12 +3550,18 @@ async function openInPageCamera() {
       audio: false,
       video: { facingMode: { ideal: "environment" } },
     });
+    if (dropStreamIfCameraStale(stream, session)) return;
     const devices = await navigator.mediaDevices.enumerateDevices();
+    if (dropStreamIfCameraStale(stream, session)) return;
     const inputs = devices.filter((device) => device.kind === "videoinput");
     const labeled = inputs.some((device) => String(device.label || "").trim());
     if (labeled && inputs.length > 1) {
-      stream.getTracks().forEach((track) => track.stop());
-      const probed = await probeVideoInputs(inputs);
+      stopMediaStream(stream);
+      stream = null;
+      const probed = await probeVideoInputs(inputs, {
+        isStale: () => !shelfCameraGate.isCurrent(session),
+      });
+      if (!shelfCameraGate.isCurrent(session)) return;
       const choice = chooseBackCamera(probed);
       const constraints = choice.keepEnvironment || !choice.deviceId
         ? { facingMode: { ideal: "environment" } }
@@ -3539,11 +3570,13 @@ async function openInPageCamera() {
         audio: false,
         video: constraints,
       });
+      if (dropStreamIfCameraStale(stream, session)) return;
     }
-    await bindShelfCameraStream(stream);
+    await bindShelfCameraStream(stream, session);
   } catch (error) {
+    stopMediaStream(stream);
+    if (!shelfCameraGate.isCurrent(session)) return;
     console.error("In-page camera failed:", error);
-    stream?.getTracks?.().forEach((track) => track.stop());
     closeShelfCamera();
     fallbackFileCapture();
   }
